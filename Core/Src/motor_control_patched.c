@@ -39,6 +39,13 @@
 #undef Traction_SetAxisRotation
 #undef Traction_Update
 
+_Static_assert((uint8_t)MOTOR_MODE_COAST == TRACTION_OUTPUT_MODE_COAST,
+               "traction policy COAST mode must match motor_mode_t");
+_Static_assert((uint8_t)MOTOR_MODE_DRIVE == TRACTION_OUTPUT_MODE_DRIVE,
+               "traction policy DRIVE mode must match motor_mode_t");
+_Static_assert((uint8_t)MOTOR_MODE_BRAKE == TRACTION_OUTPUT_MODE_BRAKE,
+               "traction policy BRAKE mode must match motor_mode_t");
+
 /* The base health monitor intentionally latches real faults, but its previous
  * count lives outside the centering module.  Centering_Complete() deliberately
  * writes TIM2=0 at PB5.  Without this one-shot state-aware rebaseline, the next
@@ -166,6 +173,21 @@ static void apply_motor(Motor_t *motor, uint8_t wheel, motor_mode_t mode,
     traction_state.wheels[wheel].reverse = direction < 0;
 }
 
+static void apply_plan(const TractionOutputPlan *plan)
+{
+    if (plan == NULL) {
+        coast_all();
+        zero_output_telemetry();
+        return;
+    }
+
+    Motor_t *const motors[4] = { &motor_fl, &motor_fr, &motor_rl, &motor_rr };
+    for (uint8_t i = 0U; i < 4U; ++i) {
+        apply_motor(motors[i], i, (motor_mode_t)plan->mode[i],
+                    plan->pwm[i], plan->direction[i]);
+    }
+}
+
 void Traction_SetAxisRotation(bool enable)
 {
     if (!enable) {
@@ -209,14 +231,6 @@ static bool auto_release_tank(void)
     return true;
 }
 
-static bool straight_line_unlimited(void)
-{
-    return TractionOutput_StraightUnlimited(
-        Steering_GetCurrentAngle(),
-        (float)ACKERMANN_DEADBAND_DEG,
-        safety_status.wheel_scale);
-}
-
 void Traction_Update(void)
 {
     if (auto_release_tank()) return;
@@ -235,13 +249,17 @@ void Traction_Update(void)
         motor_fl.current_mode, motor_fr.current_mode,
         motor_rl.current_mode, motor_rr.current_mode
     };
+    const uint8_t policy_mode[4] = {
+        (uint8_t)mode[MOTOR_FL], (uint8_t)mode[MOTOR_FR],
+        (uint8_t)mode[MOTOR_RL], (uint8_t)mode[MOTOR_RR]
+    };
     const int8_t direction[4] = {
         motor_fl.direction, motor_fr.direction,
         motor_rl.direction, motor_rr.direction
     };
     /* Capture the effective shadow hardware, not the legacy telemetry.
      * This preserves Neutral's bounded ramp and any per-cycle jerk limit. */
-    uint16_t pwm[4] = {
+    const uint16_t pwm[4] = {
         shadow_resolved_pwm(&motor_fl),
         shadow_resolved_pwm(&motor_fr),
         shadow_resolved_pwm(&motor_rl),
@@ -271,76 +289,22 @@ void Traction_Update(void)
         apply_motor(&motor_rl, MOTOR_RL, mode[MOTOR_RL], pwm[MOTOR_RL], hw_dir[MOTOR_RL]);
         apply_motor(&motor_rr, MOTOR_RR, mode[MOTOR_RR], pwm[MOTOR_RR], hw_dir[MOTOR_RR]);
     } else if (traction_state.mode4x4) {
-        /* Ackermann already returns unity below 2 degrees.  Reinforce that
-         * contract at the physical output layer: when no wheel limiter is active
-         * and every resolved motor is in DRIVE, all four channels get exactly
-         * the same duty and direction. */
-        const bool all_drive = mode[0] == MOTOR_MODE_DRIVE &&
-                               mode[1] == MOTOR_MODE_DRIVE &&
-                               mode[2] == MOTOR_MODE_DRIVE &&
-                               mode[3] == MOTOR_MODE_DRIVE;
-        const bool same_direction =
-            TractionOutput_SameNonzeroDirection(direction);
-        if (all_drive && same_direction && straight_line_unlimited()) {
-            /* Use the MINIMUM resolved duty: symmetry may reduce stronger
-             * channels, but can never raise a wheel over its jerk/safety cap. */
-            const uint16_t equal_pwm = TractionOutput_MinPwm(pwm);
-            const int8_t equal_dir = direction[MOTOR_FL] < 0 ? -1 : 1;
-            apply_motor(&motor_fl, MOTOR_FL, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
-            apply_motor(&motor_fr, MOTOR_FR, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
-            apply_motor(&motor_rl, MOTOR_RL, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
-            apply_motor(&motor_rr, MOTOR_RR, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
-        } else {
-            apply_motor(&motor_fl, MOTOR_FL, mode[MOTOR_FL], pwm[MOTOR_FL], direction[MOTOR_FL]);
-            apply_motor(&motor_fr, MOTOR_FR, mode[MOTOR_FR], pwm[MOTOR_FR], direction[MOTOR_FR]);
-            apply_motor(&motor_rl, MOTOR_RL, mode[MOTOR_RL], pwm[MOTOR_RL], direction[MOTOR_RL]);
-            apply_motor(&motor_rr, MOTOR_RR, mode[MOTOR_RR], pwm[MOTOR_RR], direction[MOTOR_RR]);
-        }
+        TractionOutputPlan plan;
+        TractionOutput_Resolve4x4(policy_mode, direction, pwm,
+                                  Steering_GetCurrentAngle(),
+                                  (float)ACKERMANN_DEADBAND_DEG,
+                                  safety_status.wheel_scale, &plan);
+        apply_plan(&plan);
     } else {
-        /* Base 4x2 computes a complete left/right command on FL/FR.  Route that
-         * already-ramped and safety-limited result to the installed rear axle.
-         * A future asymmetric mode decision is not safe to reinterpret through
-         * this left/right adapter, so fail closed to coast. */
-        if (mode[MOTOR_FL] != mode[MOTOR_FR]) {
+        TractionOutputPlan plan;
+        if (!TractionOutput_Resolve4x2Rear(policy_mode, direction, pwm,
+                                           safety_status.wheel_scale,
+                                           PWM_PERIOD, &plan)) {
             coast_all();
             zero_output_telemetry();
             return;
         }
-        if (mode[MOTOR_FL] == MOTOR_MODE_BRAKE) {
-            /* Logical FL/FR are the installed rear axle in 4x2.  Brake
-             * RL/RR only and keep the non-driven front axle in coast. */
-            Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
-            Motor_SetMode(&motor_fr, MOTOR_MODE_COAST, 0);
-            Motor_SetMode(&motor_rl, MOTOR_MODE_BRAKE, 0);
-            Motor_SetMode(&motor_rr, MOTOR_MODE_BRAKE, 0);
-            zero_output_telemetry();
-            return;
-        }
-        if (mode[MOTOR_FL] == MOTOR_MODE_COAST) {
-            coast_all();
-            zero_output_telemetry();
-            return;
-        }
-
-        Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
-        Motor_SetMode(&motor_fr, MOTOR_MODE_COAST, 0);
-        traction_state.wheels[MOTOR_FL].pwm = 0U;
-        traction_state.wheels[MOTOR_FR].pwm = 0U;
-        traction_state.wheels[MOTOR_FL].reverse = false;
-        traction_state.wheels[MOTOR_FR].reverse = false;
-
-        /* The base 4x2 decision is logical-left/logical-right.  Apply
-         * the PHYSICAL rear-wheel safety caps again at the final routing
-         * boundary so RL/RR temperature/TCS/ABS cutoffs can never be
-         * bypassed by the FL/FR shadow calculation. */
-        const uint16_t rear_left_pwm = TractionOutput_CapPwmByScale(
-            pwm[MOTOR_FL], safety_status.wheel_scale[MOTOR_RL], PWM_PERIOD);
-        const uint16_t rear_right_pwm = TractionOutput_CapPwmByScale(
-            pwm[MOTOR_FR], safety_status.wheel_scale[MOTOR_RR], PWM_PERIOD);
-        apply_motor(&motor_rl, MOTOR_RL, mode[MOTOR_FL], rear_left_pwm,
-                    direction[MOTOR_FL]);
-        apply_motor(&motor_rr, MOTOR_RR, mode[MOTOR_FR], rear_right_pwm,
-                    direction[MOTOR_FR]);
+        apply_plan(&plan);
     }
 
     uint16_t final_max = 0U;
