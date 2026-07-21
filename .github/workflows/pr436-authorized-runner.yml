@@ -17,7 +17,8 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: fix/steering-homing-battery-traction
-          fetch-depth: 0
+          fetch-depth: 1
+          show-progress: false
 
       - name: Extract and apply exact audited patch
         shell: bash
@@ -36,7 +37,17 @@ jobs:
           body = textwrap.dedent('\n'.join(lines[start + 1:end])) + '\n'
           Path('/tmp/pr436_authorized_fix.py').write_text(body, encoding='utf-8')
           EXTRACT
-          python3 /tmp/pr436_authorized_fix.py
+
+          set +e
+          python3 /tmp/pr436_authorized_fix.py > /tmp/pr436_patch.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo '=== EXACT PATCH FAILURE ==='
+            cat /tmp/pr436_patch.log
+            exit "$status"
+          fi
+
           rm -f .github/workflows/pr436-authorized-runner.yml
           git diff --check
 
