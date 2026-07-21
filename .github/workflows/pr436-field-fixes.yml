@@ -28,7 +28,6 @@ on:
       - 'esp32/include/can_ids.h'
       - 'esp32/src/screens/safe_screen.cpp'
       - 'esp32/src/screens/safe_screen.h'
-      - 'esp32/src/screens/engineering_screen.cpp'
       - 'esp32/src/ui/battery_indicator.cpp'
       - 'esp32/src/ui/ui_config.h'
       - 'analysis_artifacts/stubs/**'
@@ -36,102 +35,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-authorized-fixes:
-    if: github.event.pull_request.head.ref == 'fix/steering-homing-battery-traction'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: fix/steering-homing-battery-traction
-          fetch-depth: 0
-
-      - name: Apply exact reviewed HMI replacements
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          safe = Path('esp32/src/screens/safe_screen.cpp')
-          if 'batVoltRaw_ < batWarnRaw_' in safe.read_text():
-              print('Authorized HMI replacements already present')
-              raise SystemExit(0)
-
-          def sub_once(path, pattern, replacement):
-              p = Path(path)
-              text = p.read_text()
-              updated, count = re.subn(pattern, replacement, text, count=1)
-              if count != 1:
-                  raise RuntimeError(f"{path}: expected one match, got {count}: {pattern[:100]!r}")
-              p.write_text(updated)
-
-          sub_once(
-              'esp32/src/screens/safe_screen.cpp',
-              r'(\s+const vehicle::BatteryData& bd = data\.battery\(\);\n\s+batVoltRaw_ = bd\.voltageRaw;\n)(\n\s+const bool haveFrame = \(bd\.timestampMs > 0\);)',
-              r'''\1
-        // Use active runtime limits received through 0x311. Before the first
-        // valid limits frame, or on incoherent telemetry, retain the installed
-        // fallback thresholds from ui_config.h.
-        const vehicle::BatteryLimitsData& limits = data.batteryLimits();
-        batLimitsLive_ = limits.valid &&
-            limits.cutoffCv > 0U &&
-            limits.warningCv > limits.cutoffCv &&
-            limits.warningCv <= BATT_OV_WARN_RAW;
-        batWarnRaw_ = batLimitsLive_ ? limits.warningCv : BATT_UV_WARN_RAW;
-        batCritRaw_ = batLimitsLive_ ? limits.cutoffCv  : BATT_UV_CRIT_RAW;
-\2''')
-          sub_once('esp32/src/screens/safe_screen.cpp',
-                   r'batVoltRaw_ < BATT_UV_CRIT_RAW',
-                   'batVoltRaw_ < batCritRaw_')
-          sub_once('esp32/src/screens/safe_screen.cpp',
-                   r'batVoltRaw_ < BATT_UV_WARN_RAW',
-                   'batVoltRaw_ < batWarnRaw_')
-          sub_once(
-              'esp32/src/screens/safe_screen.cpp',
-              r'(\s+bh = ui::tileHashFeed\(bh, batSafe_\);\n)(\s+bh = ui::tileHashFeed\(bh, \(uint8_t\)\(batAgeMs_ / 1000U\)\);)',
-              r'''\1        bh = ui::tileHashFeed(bh, batWarnRaw_);
-        bh = ui::tileHashFeed(bh, batCritRaw_);
-        bh = ui::tileHashFeed(bh, batLimitsLive_);
-\2''')
-          sub_once(
-              'esp32/src/screens/engineering_screen.cpp',
-              r'(\s+if \(recovery <= cutoff\) return false;\n)(\s+if \(warning  >  can::BATT_OV_WARNING_CV\) return false;)',
-              r'''\1    if (warning  <  limit) return false;
-\2''')
-          sub_once(
-              'esp32/src/screens/engineering_screen.cpp',
-              r'// rules: Warning/Limit/Recovery must each be strictly above Cutoff, and\n// Warning/Limit must not exceed the over-voltage warning point\.',
-              '''// rules: Warning/Limit/Recovery must each be strictly above Cutoff,
-// Warning must be at least Limit, and Warning/Limit must not exceed the
-// over-voltage warning point.''')
-          sub_once(
-              'esp32/src/ui/battery_indicator.cpp',
-              r'// 24V lead-acid/LiFePO4 pack: 18\.0V = 0%, 25\.2V = 100%',
-              '// Installed traction pack display: 16.0 V = 0%, 28.5 V = 100%')
-          sub_once(
-              'esp32/src/ui/ui_config.h',
-              r'// Battery voltage thresholds \(0\.01 V units\) mirroring the STM32 firmware limits\n// reported via SafetyError codes \(BATTERY_UV_WARN/CRIT, BATTERY_OV_WARN/CRIT\)\.',
-              '''// Battery voltage fallback thresholds (0.01 V units). SafeScreen uses
-// active 0x311 Warning/Cutoff values when available and these installed-pack
-// defaults before valid limits telemetry arrives.''')
-          PY
-
-      - name: Commit authorized HMI changes
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add esp32/src/screens/safe_screen.cpp \
-                  esp32/src/screens/engineering_screen.cpp \
-                  esp32/src/ui/battery_indicator.cpp \
-                  esp32/src/ui/ui_config.h
-          git commit -m 'fix: conectar Warning al HMI y limpiar comentarios antiguos'
-          git push origin HEAD:fix/steering-homing-battery-traction
-
   effective-homing-wrapper:
     runs-on: ubuntu-24.04
     steps:
@@ -166,7 +72,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Execute steering, traction and battery contracts
+      - name: Execute steering, traction, HMI and battery contracts
         run: |
           set -euo pipefail
 
@@ -207,7 +113,9 @@ jobs:
           grep -Eq '^#define BATT_CUTOFF_DEFAULT_CV[[:space:]]+1600U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_RECOVERY_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_FILTER_DEFAULT_MS[[:space:]]+500U$' Core/Inc/battery_limits_store.h
-          grep -q 'batVoltRaw_ < batWarnRaw_' esp32/src/screens/safe_screen.cpp || true
-          grep -q 'batVoltRaw_ < batCritRaw_' esp32/src/screens/safe_screen.cpp || true
+          grep -q 'warningRaw(const vehicle::VehicleData& data)' esp32/src/screens/safe_screen.h
+          grep -q 'cutoffRaw(const vehicle::VehicleData& data)' esp32/src/screens/safe_screen.h
+          grep -q 'limits.warningCv' esp32/src/screens/safe_screen.h
+          grep -q 'limits.cutoffCv' esp32/src/screens/safe_screen.h
           grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
           grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
