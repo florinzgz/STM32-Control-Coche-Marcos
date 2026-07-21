@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/tmp/pr436_authorized_fix.py", line 139, in <module>
+    replace("Core/Src/motor_control_patched.c", r'''    uint16_t pwm[4] = {
+  File "/tmp/pr436_authorized_fix.py", line 15, in replace
+    raise RuntimeError(f"{path}: expected {expected} matches, found {count}\n--- needle ---\n{old}")
+RuntimeError: Core/Src/motor_control_patched.c: expected 1 matches, found 0
+--- needle ---
+    uint16_t pwm[4] = {
+    traction_state.wheels[MOTOR_FL].pwm,
+    traction_state.wheels[MOTOR_FR].pwm,
+    traction_state.wheels[MOTOR_RL].pwm,
+    traction_state.wheels[MOTOR_RR].pwm
+};
+
