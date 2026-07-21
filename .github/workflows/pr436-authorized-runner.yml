@@ -49,7 +49,21 @@ jobs:
           fi
 
           rm -f .github/workflows/pr436-authorized-runner.yml
+          rm -f .github/pr436-patch-error.txt
           git diff --check
+
+      - name: Publish exact traceback temporarily
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard HEAD
+          cp /tmp/pr436_patch.log .github/pr436-patch-error.txt
+          git config user.name 'PR436 Patch Diagnostic'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/pr436-patch-error.txt
+          git commit -m 'chore: record PR436 patch mismatch'
+          git push origin HEAD:fix/steering-homing-battery-traction
 
       - name: Run focused executable tests
         shell: bash
