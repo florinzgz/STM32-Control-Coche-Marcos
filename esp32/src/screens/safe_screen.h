@@ -29,9 +29,35 @@
 #include "screen.h"
 #include "ui/tile_engine.h"
 #include "ui/gear_display.h"
+#include "ui/ui_config.h"
 #include "led_controller.h"
 #include <cstdint>
 #include <array>
+
+/* SafeScreen historically consumed the fixed ui_config thresholds directly.
+ * Keep those names at the existing call sites, but resolve them from the latest
+ * valid active 0x311 values.  This makes the editable Warning/Cutoff fields
+ * govern the HMI while retaining the installed defaults before telemetry is
+ * available.  The macros are intentionally scoped to this header/screen. */
+namespace safe_battery_limits {
+inline uint16_t warningRaw(const vehicle::VehicleData& data) {
+    const vehicle::BatteryLimitsData& limits = data.batteryLimits();
+    return (limits.valid && limits.cutoffCv > 0U &&
+            limits.warningCv > limits.cutoffCv &&
+            limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW)
+        ? limits.warningCv : ui::cfg::BATT_UV_WARN_RAW;
+}
+inline uint16_t cutoffRaw(const vehicle::VehicleData& data) {
+    const vehicle::BatteryLimitsData& limits = data.batteryLimits();
+    return (limits.valid && limits.cutoffCv > 0U &&
+            limits.warningCv > limits.cutoffCv &&
+            limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW)
+        ? limits.cutoffCv : ui::cfg::BATT_UV_CRIT_RAW;
+}
+}  // namespace safe_battery_limits
+
+#define BATT_UV_WARN_RAW (::safe_battery_limits::warningRaw(data))
+#define BATT_UV_CRIT_RAW (::safe_battery_limits::cutoffRaw(data))
 
 /// Tile indices for SafeScreen
 enum SafeTile : uint8_t {
@@ -128,15 +154,11 @@ private:
     bool     previ2cEverOk_     = true;
 
     // Main battery indicator (passive, read-only) — voltage from CAN 0x207,
-    // INA-BAT health from CAN 0x309. The LOW/CRITICAL thresholds use the latest
-    // active Warning/Cutoff received in 0x311; the constants below are used only
-    // before valid limits telemetry arrives or when that telemetry is incoherent.
+    // INA-BAT health from CAN 0x309. LOW/CRITICAL uses active 0x311 limits via
+    // the scoped compatibility expressions above, with safe fallback defaults.
     uint16_t batVoltRaw_      = 0;            // 0.01 V units (display only)
-    uint16_t batWarnRaw_      = 1800;         // active Warning or safe fallback
-    uint16_t batCritRaw_      = 1600;         // active Cutoff or safe fallback
     BatState batState_        = BatState::NoData;
     bool     batSafe_         = false;        // SAFE forced by a battery error code
-    bool     batLimitsLive_   = false;        // true after valid active 0x311 values
     unsigned long batAgeMs_   = 0;            // age of last 0x207 frame
 };
 
