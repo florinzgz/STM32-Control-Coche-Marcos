@@ -128,12 +128,16 @@ private:
     bool     previ2cEverOk_     = true;
 
     // Main battery indicator (passive, read-only) — voltage from CAN 0x207,
-    // INA-BAT health from CAN 0x309.  State computed in update() so draw() and
-    // the tile hash stay deterministic for a given (VehicleData, frameTimeMs).
-    uint16_t batVoltRaw_     = 0;            // 0.01 V units (display only)
-    BatState batState_       = BatState::NoData;
-    bool     batSafe_        = false;        // SAFE forced by a battery error code
-    unsigned long batAgeMs_  = 0;            // age of last 0x207 frame
+    // INA-BAT health from CAN 0x309.  The low/critical thresholds use the
+    // latest active 0x311 battery limits when available and safe defaults
+    // otherwise, so the editable Warning value has a real HMI effect.
+    uint16_t batVoltRaw_      = 0;            // 0.01 V units (display only)
+    uint16_t batWarnRaw_      = 1800;         // active Warning or safe fallback
+    uint16_t batCritRaw_      = 1600;         // active Cutoff or safe fallback
+    BatState batState_        = BatState::NoData;
+    bool     batSafe_         = false;        // SAFE forced by a battery error code
+    bool     batLimitsLive_   = false;        // true after valid active 0x311 values
+    unsigned long batAgeMs_   = 0;            // age of last 0x207 frame
 };
 
 #endif // SAFE_SCREEN_H
