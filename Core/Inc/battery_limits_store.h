@@ -25,6 +25,9 @@
   * Safety invariants:
   *   - The safety STATE MACHINE is NOT modified; only the threshold VALUES
   *     it compares against become runtime variables.
+  *   - Coherent ordering is mandatory: Cutoff < Limit <= Warning and
+  *     Recovery >= Limit.  A malformed editor/CAN command cannot invert the
+  *     warning, derate, cutoff or recovery bands.
   *   - Flash data alone NEVER authorises ACTIVE or clears startup_inhibit.
   *   - On flash blank / CRC-invalid / out-of-range the module silently falls
   *     back to the defaults below.  Boot is NEVER blocked.
@@ -80,6 +83,10 @@ _Static_assert(BATT_LIMIT_DEFAULT_CV    >  BATT_CUTOFF_DEFAULT_CV,
                "default Limit must be > Cutoff");
 _Static_assert(BATT_RECOVERY_DEFAULT_CV >  BATT_CUTOFF_DEFAULT_CV,
                "default Recovery must be > Cutoff");
+_Static_assert(BATT_WARNING_DEFAULT_CV >= BATT_LIMIT_DEFAULT_CV,
+               "default Warning must be >= Limit");
+_Static_assert(BATT_RECOVERY_DEFAULT_CV >= BATT_LIMIT_DEFAULT_CV,
+               "default Recovery must be >= Limit");
 _Static_assert(BATT_WARNING_DEFAULT_CV  <= BATT_OV_WARNING_CV,
                "default Warning must be <= OV warning");
 _Static_assert(BATT_LIMIT_DEFAULT_CV    <= BATT_OV_WARNING_CV,
@@ -108,6 +115,8 @@ static inline bool BatteryLimits_ValidateValues(const BatteryLimits_t *b)
     if (b->warning_cv  <= b->cutoff_cv) return false;
     if (b->limit_cv    <= b->cutoff_cv) return false;
     if (b->recovery_cv <= b->cutoff_cv) return false;
+    if (b->warning_cv  <  b->limit_cv) return false;
+    if (b->recovery_cv <  b->limit_cv) return false;
     if (b->warning_cv  > BATT_OV_WARNING_CV) return false;
     if (b->limit_cv    > BATT_OV_WARNING_CV) return false;
     return true;
@@ -121,8 +130,8 @@ void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out);
 /**
  * @brief Pure validator.  Returns true iff every field is inside its hard
  *        range and the coherence rules hold:
- *        Warning > Cutoff, Limit > Cutoff, Recovery > Cutoff,
- *        Warning <= OV, Limit <= OV.
+ *        Cutoff < Limit <= Warning, Recovery >= Limit,
+ *        Warning <= OV and Limit <= OV.
  */
 bool BatteryLimitsStore_Validate(const BatteryLimits_t *b);
 
