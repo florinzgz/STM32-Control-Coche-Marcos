@@ -128,9 +128,9 @@ private:
     bool     previ2cEverOk_     = true;
 
     // Main battery indicator (passive, read-only) — voltage from CAN 0x207,
-    // INA-BAT health from CAN 0x309.  The low/critical thresholds use the
-    // latest active 0x311 battery limits when available and safe defaults
-    // otherwise, so the editable Warning value has a real HMI effect.
+    // INA-BAT health from CAN 0x309. The LOW/CRITICAL thresholds use the latest
+    // active Warning/Cutoff received in 0x311; the constants below are used only
+    // before valid limits telemetry arrives or when that telemetry is incoherent.
     uint16_t batVoltRaw_      = 0;            // 0.01 V units (display only)
     uint16_t batWarnRaw_      = 1800;         // active Warning or safe fallback
     uint16_t batCritRaw_      = 1600;         // active Cutoff or safe fallback
