@@ -211,13 +211,10 @@ static bool auto_release_tank(void)
 
 static bool straight_line_unlimited(void)
 {
-    if (fabsf(Steering_GetCurrentAngle()) >= ACKERMANN_DEADBAND_DEG) {
-        return false;
-    }
-    for (uint8_t i = 0U; i < 4U; ++i) {
-        if (safety_status.wheel_scale[i] < (1.0f - 1.0e-6f)) return false;
-    }
-    return true;
+    return TractionOutput_StraightUnlimited(
+        Steering_GetCurrentAngle(),
+        (float)ACKERMANN_DEADBAND_DEG,
+        safety_status.wheel_scale);
 }
 
 void Traction_Update(void)
@@ -242,7 +239,7 @@ void Traction_Update(void)
         motor_fl.direction, motor_fr.direction,
         motor_rl.direction, motor_rr.direction
     };
-        /* Capture the effective shadow hardware, not the legacy telemetry.
+    /* Capture the effective shadow hardware, not the legacy telemetry.
      * This preserves Neutral's bounded ramp and any per-cycle jerk limit. */
     uint16_t pwm[4] = {
         shadow_resolved_pwm(&motor_fl),
@@ -301,9 +298,15 @@ void Traction_Update(void)
         }
     } else {
         /* Base 4x2 computes a complete left/right command on FL/FR.  Route that
-         * already-ramped and safety-limited result to the installed rear axle. */
-        if (mode[MOTOR_FL] == MOTOR_MODE_BRAKE &&
-            mode[MOTOR_FR] == MOTOR_MODE_BRAKE) {
+         * already-ramped and safety-limited result to the installed rear axle.
+         * A future asymmetric mode decision is not safe to reinterpret through
+         * this left/right adapter, so fail closed to coast. */
+        if (mode[MOTOR_FL] != mode[MOTOR_FR]) {
+            coast_all();
+            zero_output_telemetry();
+            return;
+        }
+        if (mode[MOTOR_FL] == MOTOR_MODE_BRAKE) {
             /* Logical FL/FR are the installed rear axle in 4x2.  Brake
              * RL/RR only and keep the non-driven front axle in coast. */
             Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
@@ -313,8 +316,7 @@ void Traction_Update(void)
             zero_output_telemetry();
             return;
         }
-        if (mode[MOTOR_FL] == MOTOR_MODE_COAST &&
-            mode[MOTOR_FR] == MOTOR_MODE_COAST) {
+        if (mode[MOTOR_FL] == MOTOR_MODE_COAST) {
             coast_all();
             zero_output_telemetry();
             return;
