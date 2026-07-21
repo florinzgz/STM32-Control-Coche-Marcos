@@ -15,7 +15,7 @@ typedef struct {
     bool degraded_is_battery_uv_warning;
     bool gear_is_park_or_neutral;
     float pedal_pct;
-    uint8_t final_pwm_pct;
+    uint16_t final_pwm_ticks;
     uint16_t active_brake_pwm_ticks;
     float wheel_speed_kmh[BATT_SERVICE_POLICY_WHEEL_COUNT];
 } BatteryServiceWriteInputs;
@@ -40,7 +40,8 @@ static inline bool BatteryServiceWrite_Evaluate(
         return false;
     }
 
-    if (in->final_pwm_pct != 0U || in->active_brake_pwm_ticks != 0U) {
+    /* Exact raw ticks: even a sub-1% residual duty blocks flash writes. */
+    if (in->final_pwm_ticks != 0U || in->active_brake_pwm_ticks != 0U) {
         return false;
     }
 
