@@ -97,6 +97,9 @@ static void test_physical_rear_4x2_plan(void)
     const float scales[4] = {1.0f, 1.0f, 0.5f, 1.0f};
     TractionOutputPlan p;
 
+    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
+                                         4249U, NULL));
+
     CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
                                         4249U, &p));
     CHECK(p.mode[TRACTION_OUTPUT_FL] == TRACTION_OUTPUT_MODE_COAST);
