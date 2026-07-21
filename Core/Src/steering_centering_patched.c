@@ -98,6 +98,12 @@ static uint8_t s_center_raw_cycles;
  * exact real GPIO read below remains the fallback. */
 #ifdef HOST_TEST
 extern bool SteeringCentering_TestPb5Active(void) __attribute__((weak));
+
+/* Marker used only by the shared test source.  The repository's legacy host
+ * suite also links that test against steering_centering.c directly; this symbol
+ * lets it skip wrapper-specific cases while the PR workflow still executes
+ * them against this effective production translation unit. */
+bool SteeringCentering_EffectiveWrapperPresent(void) { return true; }
 #endif
 
 static bool read_pb5_active(void)
