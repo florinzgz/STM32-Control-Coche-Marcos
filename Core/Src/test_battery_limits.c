@@ -1,7 +1,7 @@
 /**
   ****************************************************************************
   * @file    test_battery_limits.c
-  * @brief   Host tests for battery-limit range and coherence validation.
+  * @brief   Host tests for battery-limit validation and service-write policy.
   ****************************************************************************
   */
 
@@ -10,7 +10,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <math.h>
 #include "battery_limits_store.h"
+#include "battery_service_policy.h"
 
 static int tests_run;
 static int tests_failed;
@@ -35,6 +37,25 @@ static BatteryLimits_t defaults(void)
         BATT_FILTER_DEFAULT_MS
     };
     return b;
+}
+
+static BatteryServiceWriteInputs safe_active_service(void)
+{
+    BatteryServiceWriteInputs in = {0};
+    in.in_active = true;
+    in.gear_is_park_or_neutral = true;
+    in.pedal_pct = 0.0f;
+    in.final_pwm_pct = 0U;
+    in.active_brake_pwm_ticks = 0U;
+    for (uint8_t i = 0U; i < BATT_SERVICE_POLICY_WHEEL_COUNT; ++i) {
+        in.wheel_speed_kmh[i] = 0.0f;
+    }
+    return in;
+}
+
+static bool service_allowed(const BatteryServiceWriteInputs *in)
+{
+    return BatteryServiceWrite_Evaluate(in, 3.0f, 0.5f);
 }
 
 int main(void)
@@ -76,6 +97,65 @@ int main(void)
     b.recovery_cv = 1700U;
     b.filter_ms = 500U;
     ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+
+    /* Executable stationary-service gate. */
+    ASSERT_FALSE(service_allowed(NULL));
+
+    BatteryServiceWriteInputs in = {0};
+    in.in_standby = true;
+    ASSERT_TRUE(service_allowed(&in));
+
+    in = safe_active_service();
+    ASSERT_TRUE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.in_active = false;
+    in.in_degraded = true;
+    in.degraded_is_battery_uv_warning = true;
+    ASSERT_TRUE(service_allowed(&in));
+
+    in.degraded_is_battery_uv_warning = false;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.in_active = false;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.gear_is_park_or_neutral = false;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.pedal_pct = 3.0f;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.pedal_pct = NAN;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.final_pwm_pct = 1U;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.active_brake_pwm_ticks = 1U;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.wheel_speed_kmh[0] = 0.5f;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.wheel_speed_kmh[1] = -0.5f;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.wheel_speed_kmh[2] = NAN;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.wheel_speed_kmh[3] = 0.49f;
+    ASSERT_TRUE(service_allowed(&in));
 
     printf("test_battery_limits: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed == 0 ? 0 : 1;
