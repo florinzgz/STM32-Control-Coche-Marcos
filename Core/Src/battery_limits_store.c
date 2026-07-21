@@ -101,7 +101,22 @@ bool BatteryLimitsStore_ServiceWriteAllowed(void)
     in.gear_is_park_or_neutral =
         (gear == GEAR_PARK) || (gear == GEAR_NEUTRAL);
     in.pedal_pct = Pedal_GetPercent();
-    in.final_pwm_pct = Traction_GetFinalPwmPct();
+
+    /* Use exact raw ticks from the resolved physical-output telemetry.  The
+     * percentage getter truncates values below 1%, which could otherwise hide
+     * the final few ticks of Neutral's ramp.  A missing state pointer fails
+     * closed by keeping UINT16_MAX. */
+    const TractionState_t *traction = Traction_GetState();
+    in.final_pwm_ticks = UINT16_MAX;
+    if (traction != NULL) {
+        in.final_pwm_ticks = 0U;
+        for (uint8_t i = 0U; i < 4U; ++i) {
+            if (traction->wheels[i].pwm > in.final_pwm_ticks) {
+                in.final_pwm_ticks = traction->wheels[i].pwm;
+            }
+        }
+    }
+
     in.active_brake_pwm_ticks = Motor_GetBrakeActiveOverride();
     in.wheel_speed_kmh[0] = Wheel_GetSpeed_FL();
     in.wheel_speed_kmh[1] = Wheel_GetSpeed_FR();
