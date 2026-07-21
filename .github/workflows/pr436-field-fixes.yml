@@ -15,14 +15,15 @@ on:
       - 'Core/Src/test_centering_pc12_gate.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/safety_system_patched.c'
       - 'Core/Inc/traction_output_policy.h'
       - 'Core/Src/test_traction_output_policy.c'
       - 'Core/Src/battery_limits_store.c'
       - 'Core/Inc/battery_limits_store.h'
       - 'Core/Inc/battery_service_policy.h'
       - 'Core/Src/test_battery_limits.c'
-      - 'Core/Src/safety_system.c'
-      - 'Core/Src/safety_system_patched.c'
       - 'Core/Src/can_handler.c'
       - 'esp32/include/can_ids.h'
       - 'esp32/src/ui/ui_config.h'
@@ -75,10 +76,16 @@ jobs:
           grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U$' Core/Src/steering_centering_patched.c
           grep -Eq '^#define REVERSE_DEADTIME_MS[[:space:]]+100U$' Core/Src/steering_centering_patched.c
           grep -Eq '^#define ENDSTOP_CONFIRM_SAMPLES[[:space:]]+2U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define ENDSTOP_HARD_CURRENT_MA[[:space:]]+20000U$' Core/Src/steering_centering_patched.c
+          grep -q 'current >= ENDSTOP_HARD_CURRENT_MA' Core/Src/steering_centering_patched.c
+          grep -q 's_guard.hard_current_samples' Core/Src/steering_centering_patched.c
+          ! grep -q 'ServiceMode_IsEnabled(MODULE_STEER_CENTER)' Core/Src/steering_centering_patched.c
           grep -q '!Encoder_HasFault()' Core/Src/steering_centering_patched.c
           grep -q 's_diag.pwm_requested = 0U' Core/Src/steering_centering_patched.c
           grep -q 'SteeringSupervisor_NeedsPostIsolationSample' Core/Src/steering_supervisor_io.c
 
+          grep -q 'return wheel == MOTOR_RL || wheel == MOTOR_RR;' Core/Src/motor_control_patched.c
+          grep -q 'return Traction_IsWheelDriven(idx);' Core/Src/safety_system_patched.c
           grep -q 'shadow_resolved_pwm' Core/Src/motor_control_patched.c
           grep -q 'TractionOutput_MinPwm(pwm)' Core/Src/motor_control_patched.c
           grep -q 'safety_status.wheel_scale\[MOTOR_RL\]' Core/Src/motor_control_patched.c
