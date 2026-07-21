@@ -12,9 +12,10 @@
   *   - a fresh physical PB5 search on every power cycle;
   *   - immediate CENTERING->NONE->EPS owner transfer at completion.
   *
-  * Full PWM does not mean sustained force.  A fresh high-current sample or a
-  * no-motion/current combination removes torque first.  The normal encoder
-  * stall/range/timeout protections remain active as independent fallbacks.
+  * Full PWM does not mean sustained force.  Two fresh hard-current samples, or
+  * two fresh lower-current samples after confirmed encoder standstill, remove
+  * torque first.  The normal encoder stall/range/timeout protections remain
+  * active as independent fallbacks.
   ****************************************************************************
   */
 
@@ -23,7 +24,6 @@
 #include "steering_supervisor.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
-#include "service_mode.h"
 #include "motor_control.h"
 #include "main.h"
 #include <stdbool.h>
@@ -39,8 +39,9 @@
 #define ENDSTOP_SAMPLE_MAX_AGE_MS        250U
 #define ENDSTOP_ENCODER_DELTA_COUNTS     2
 #define ENDSTOP_CONFIRM_SAMPLES           2U
-/* A hard-current sample cuts immediately.  The lower threshold additionally
- * requires no encoder movement, rejecting normal running current. */
+/* The hard threshold does not require encoder standstill, but still requires
+ * two genuinely fresh CH5 acquisitions to reject a single PWM/noise spike.
+ * The lower threshold additionally requires confirmed no-motion. */
 #define ENDSTOP_HARD_CURRENT_MA          20000U
 #define ENDSTOP_STALL_CURRENT_MA          8000U
 
@@ -48,6 +49,8 @@ _Static_assert(HOMING_PWM_COUNTS == 4249U,
                "homing full authority must match TIM3 period");
 _Static_assert(CENTER_RAW_CONFIRM_CYCLES >= 2U,
                "PB5 level fallback must debounce EMI");
+_Static_assert(ENDSTOP_CONFIRM_SAMPLES >= 2U,
+               "end-stop pressure must reject an isolated current spike");
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
@@ -91,7 +94,11 @@ static uint8_t s_center_raw_cycles;
 
 static bool center_raw_stable(void)
 {
-    const bool active = ServiceMode_IsEnabled(MODULE_STEER_CENTER) &&
+    /* PB5 is the mandatory physical centre reference for every homing run.
+     * Service mode may suppress optional diagnostics, but it must never make
+     * the homing FSM blind to an active centre sensor (including boot-over-PB5,
+     * where no new EXTI edge is guaranteed). */
+    const bool active =
         HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET;
 
     if (!active) {
@@ -131,12 +138,19 @@ typedef struct {
     int32_t reference_count;
     uint32_t last_motion_ms;
     uint32_t last_sample_sequence;
-    uint8_t pressure_confirm_samples;
+    uint8_t hard_current_samples;
+    uint8_t stall_current_samples;
     bool reverse_pending;
     uint32_t reverse_started_ms;
 } HomingGuard;
 
 static HomingGuard s_guard;
+
+static void reset_pressure_samples(void)
+{
+    s_guard.hard_current_samples = 0U;
+    s_guard.stall_current_samples = 0U;
+}
 
 static void reset_observation(CenteringState_t state)
 {
@@ -145,7 +159,7 @@ static void reset_observation(CenteringState_t state)
     s_guard.reference_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     s_guard.last_motion_ms = HAL_GetTick();
     s_guard.last_sample_sequence = 0U;
-    s_guard.pressure_confirm_samples = 0U;
+    reset_pressure_samples();
 }
 
 static void reset_guard(void)
@@ -155,7 +169,7 @@ static void reset_guard(void)
     s_guard.reference_count = 0;
     s_guard.last_motion_ms = 0U;
     s_guard.last_sample_sequence = 0U;
-    s_guard.pressure_confirm_samples = 0U;
+    reset_pressure_samples();
     s_guard.reverse_pending = false;
     s_guard.reverse_started_ms = 0U;
 }
@@ -165,6 +179,7 @@ static bool endstop_pressure_detected(void)
     const CenteringState_t state = centering_state;
     if (!is_sweep(state)) {
         s_guard.initialized = false;
+        reset_pressure_samples();
         return false;
     }
 
@@ -180,13 +195,16 @@ static bool endstop_pressure_detected(void)
         ENDSTOP_ENCODER_DELTA_COUNTS) {
         s_guard.reference_count = count;
         s_guard.last_motion_ms = now;
-        s_guard.pressure_confirm_samples = 0U;
+        /* Movement invalidates only the low-current stall hypothesis.  Do not
+         * erase hard-current evidence: two fresh >=20 A samples must cut even
+         * when vibration/noise keeps changing the encoder count. */
+        s_guard.stall_current_samples = 0U;
     }
 
     const Ina226ChannelDiag *diag = Sensor_GetChannel5Diag();
     if (diag == NULL || !diag->i2c_ack || !diag->shunt_read_ok ||
         diag->sample_age_ms > ENDSTOP_SAMPLE_MAX_AGE_MS) {
-        s_guard.pressure_confirm_samples = 0U;
+        reset_pressure_samples();
         return false;
     }
     if (diag->sample_sequence == s_guard.last_sample_sequence) {
@@ -198,30 +216,42 @@ static bool endstop_pressure_detected(void)
     const bool no_motion =
         (uint32_t)(now - s_guard.last_motion_ms) >= ENDSTOP_NO_MOTION_MS;
 
-    /* Never classify a moving high-friction point as an end stop.
-     * Require stationary encoder evidence plus two genuinely fresh CH5
-     * samples, including at the hard-current threshold. */
-    const bool pressure = no_motion &&
-        (current >= ENDSTOP_STALL_CURRENT_MA);
-    if (!pressure) {
-        s_guard.pressure_confirm_samples = 0U;
+    if (current >= ENDSTOP_HARD_CURRENT_MA) {
+        s_guard.stall_current_samples = 0U;
+        if (s_guard.hard_current_samples < ENDSTOP_CONFIRM_SAMPLES) {
+            s_guard.hard_current_samples++;
+        }
+        if (s_guard.hard_current_samples >= ENDSTOP_CONFIRM_SAMPLES) {
+            reset_pressure_samples();
+            return true;
+        }
         return false;
     }
-    if (s_guard.pressure_confirm_samples < ENDSTOP_CONFIRM_SAMPLES) {
-        s_guard.pressure_confirm_samples++;
-    }
-    if (s_guard.pressure_confirm_samples < ENDSTOP_CONFIRM_SAMPLES) {
+
+    /* Any fresh sample below the hard threshold breaks hard-current
+     * consecutiveness. */
+    s_guard.hard_current_samples = 0U;
+
+    if (no_motion && current >= ENDSTOP_STALL_CURRENT_MA) {
+        if (s_guard.stall_current_samples < ENDSTOP_CONFIRM_SAMPLES) {
+            s_guard.stall_current_samples++;
+        }
+        if (s_guard.stall_current_samples >= ENDSTOP_CONFIRM_SAMPLES) {
+            reset_pressure_samples();
+            return true;
+        }
         return false;
     }
-    s_guard.pressure_confirm_samples = 0U;
-    return true;
+
+    s_guard.stall_current_samples = 0U;
+    return false;
 }
 
 static void begin_right_reverse(void)
 {
     /* Torque must disappear before the direction changes. */
     Homing_SetPwm(0U, false);
-    s_guard.pressure_confirm_samples = 0U;
+    reset_pressure_samples();
     s_guard.reverse_pending = true;
     s_guard.reverse_started_ms = HAL_GetTick();
 }
