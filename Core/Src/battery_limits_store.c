@@ -6,13 +6,13 @@
   */
 
 #include "battery_limits_store.h"
+#include "battery_service_policy.h"
 #include "stm32g4xx_hal.h"
 #include "safety_system.h"
 #include "motor_control.h"
 #include "sensor_manager.h"
 #include <string.h>
 #include <stddef.h>
-#include <math.h>
 
 /* ---- Flash layout ---- */
 #define BATT_FLASH_PAGE   120U
@@ -80,54 +80,37 @@ bool BatteryLimitsStore_ServiceWriteAllowed(void)
 {
     const SystemState_t state = Safety_GetState();
 
-    if (state == SYS_STATE_STANDBY) {
-        return true;
+    BatteryServiceWriteInputs in;
+    memset(&in, 0, sizeof(in));
+    in.in_standby = (state == SYS_STATE_STANDBY);
+
+    /* Preserve the established STANDBY configuration path without touching
+     * live sensor getters.  The pure policy still owns this decision. */
+    if (in.in_standby) {
+        return BatteryServiceWrite_Evaluate(&in,
+                                            BATT_SERVICE_PEDAL_MAX_PCT,
+                                            BATT_SERVICE_SPEED_MAX_KMH);
     }
 
-    /* Never write while the safety authority is in a no-motion terminal state
-     * or while LIMP_HOME is controlling a degraded pedal path. */
-    if (state != SYS_STATE_ACTIVE && state != SYS_STATE_DEGRADED) {
-        return false;
-    }
-
-    /* In DEGRADED, only the battery-UV warning is allowed to use this escape
-     * path.  A sensor/current/thermal/CAN degradation must not be bypassed. */
-    if (state == SYS_STATE_DEGRADED &&
-        Safety_GetError() != SAFETY_ERROR_BATTERY_UV_WARNING) {
-        return false;
-    }
+    in.in_active   = (state == SYS_STATE_ACTIVE);
+    in.in_degraded = (state == SYS_STATE_DEGRADED);
+    in.degraded_is_battery_uv_warning =
+        (Safety_GetError() == SAFETY_ERROR_BATTERY_UV_WARNING);
 
     const GearPosition_t gear = Traction_GetGear();
-    if (gear != GEAR_PARK && gear != GEAR_NEUTRAL) {
-        return false;
-    }
+    in.gear_is_park_or_neutral =
+        (gear == GEAR_PARK) || (gear == GEAR_NEUTRAL);
+    in.pedal_pct = Pedal_GetPercent();
+    in.final_pwm_pct = Traction_GetFinalPwmPct();
+    in.active_brake_pwm_ticks = Motor_GetBrakeActiveOverride();
+    in.wheel_speed_kmh[0] = Wheel_GetSpeed_FL();
+    in.wheel_speed_kmh[1] = Wheel_GetSpeed_FR();
+    in.wheel_speed_kmh[2] = Wheel_GetSpeed_RL();
+    in.wheel_speed_kmh[3] = Wheel_GetSpeed_RR();
 
-    const float pedal = Pedal_GetPercent();
-    if (!isfinite(pedal) || pedal >= BATT_SERVICE_PEDAL_MAX_PCT) {
-        return false;
-    }
-
-    /* motor_control_patched publishes the resolved real shadow duty, including
-     * Neutral's ramp.  The separate active-brake override can intentionally put
-     * LPWM on all bridges while normal drive telemetry remains zero, so it must
-     * also be disabled before flash erase/program operations are allowed. */
-    if (Motor_GetBrakeActiveOverride() != 0U ||
-        Traction_GetFinalPwmPct() != 0U) {
-        return false;
-    }
-
-    const float speeds[4] = {
-        Wheel_GetSpeed_FL(), Wheel_GetSpeed_FR(),
-        Wheel_GetSpeed_RL(), Wheel_GetSpeed_RR()
-    };
-    for (uint8_t i = 0U; i < 4U; ++i) {
-        if (!isfinite(speeds[i]) ||
-            fabsf(speeds[i]) >= BATT_SERVICE_SPEED_MAX_KMH) {
-            return false;
-        }
-    }
-
-    return true;
+    return BatteryServiceWrite_Evaluate(&in,
+                                        BATT_SERVICE_PEDAL_MAX_PCT,
+                                        BATT_SERVICE_SPEED_MAX_KMH);
 }
 
 void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out)
