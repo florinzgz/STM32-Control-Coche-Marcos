@@ -1,0 +1,110 @@
+name: PR436 Authorized Fixes V3
+
+on:
+  push:
+    branches:
+      - fix/steering-homing-battery-traction
+    paths:
+      - '.github/workflows/pr436-authorized-fixes-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-authorized-fixes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/steering-homing-battery-traction
+          fetch-depth: 0
+
+      - name: Apply exact reviewed HMI replacements
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def sub_once(path, pattern, replacement):
+              p = Path(path)
+              text = p.read_text()
+              updated, count = re.subn(pattern, replacement, text, count=1)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, got {count}: {pattern[:100]!r}")
+              p.write_text(updated)
+              print(f"patched {path}: {pattern[:55]}")
+
+          sub_once(
+              'esp32/src/screens/safe_screen.cpp',
+              r'(\s+const vehicle::BatteryData& bd = data\.battery\(\);\n\s+batVoltRaw_ = bd\.voltageRaw;\n)(\n\s+const bool haveFrame = \(bd\.timestampMs > 0\);)',
+              r'''\1
+        // Use active runtime limits received through 0x311. Before the first
+        // valid limits frame, or on incoherent telemetry, retain the installed
+        // fallback thresholds from ui_config.h.
+        const vehicle::BatteryLimitsData& limits = data.batteryLimits();
+        batLimitsLive_ = limits.valid &&
+            limits.cutoffCv > 0U &&
+            limits.warningCv > limits.cutoffCv &&
+            limits.warningCv <= BATT_OV_WARN_RAW;
+        batWarnRaw_ = batLimitsLive_ ? limits.warningCv : BATT_UV_WARN_RAW;
+        batCritRaw_ = batLimitsLive_ ? limits.cutoffCv  : BATT_UV_CRIT_RAW;
+\2''')
+          sub_once('esp32/src/screens/safe_screen.cpp',
+                   r'batVoltRaw_ < BATT_UV_CRIT_RAW',
+                   'batVoltRaw_ < batCritRaw_')
+          sub_once('esp32/src/screens/safe_screen.cpp',
+                   r'batVoltRaw_ < BATT_UV_WARN_RAW',
+                   'batVoltRaw_ < batWarnRaw_')
+          sub_once(
+              'esp32/src/screens/safe_screen.cpp',
+              r'(\s+bh = ui::tileHashFeed\(bh, batSafe_\);\n)(\s+bh = ui::tileHashFeed\(bh, \(uint8_t\)\(batAgeMs_ / 1000U\)\);)',
+              r'''\1        bh = ui::tileHashFeed(bh, batWarnRaw_);
+        bh = ui::tileHashFeed(bh, batCritRaw_);
+        bh = ui::tileHashFeed(bh, batLimitsLive_);
+\2''')
+          sub_once(
+              'esp32/src/screens/engineering_screen.cpp',
+              r'(\s+if \(recovery <= cutoff\) return false;\n)(\s+if \(warning  >  can::BATT_OV_WARNING_CV\) return false;)',
+              r'''\1    if (warning  <  limit) return false;
+\2''')
+          sub_once(
+              'esp32/src/screens/engineering_screen.cpp',
+              r'// rules: Warning/Limit/Recovery must each be strictly above Cutoff, and\n// Warning/Limit must not exceed the over-voltage warning point\.',
+              '''// rules: Warning/Limit/Recovery must each be strictly above Cutoff,
+// Warning must be at least Limit, and Warning/Limit must not exceed the
+// over-voltage warning point.''')
+          sub_once(
+              'esp32/src/ui/battery_indicator.cpp',
+              r'// 24V lead-acid/LiFePO4 pack: 18\.0V = 0%, 25\.2V = 100%',
+              '// Installed traction pack display: 16.0 V = 0%, 28.5 V = 100%')
+          sub_once(
+              'esp32/src/ui/ui_config.h',
+              r'// Battery voltage thresholds \(0\.01 V units\) mirroring the STM32 firmware limits\n// reported via SafetyError codes \(BATTERY_UV_WARN/CRIT, BATTERY_OV_WARN/CRIT\)\.',
+              '''// Battery voltage fallback thresholds (0.01 V units). SafeScreen uses
+// active 0x311 Warning/Cutoff values when available and these installed-pack
+// defaults before valid limits telemetry arrives.''')
+          PY
+
+      - name: Validate focused contracts
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_traction_output_policy.c -lm \
+            -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+          grep -q 'batVoltRaw_ < batWarnRaw_' esp32/src/screens/safe_screen.cpp
+          grep -q 'batVoltRaw_ < batCritRaw_' esp32/src/screens/safe_screen.cpp
+          grep -q 'warning  <  limit' esp32/src/screens/engineering_screen.cpp
+
+      - name: Commit firmware changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add esp32/src/screens/safe_screen.cpp \
+                  esp32/src/screens/engineering_screen.cpp \
+                  esp32/src/ui/battery_indicator.cpp \
+                  esp32/src/ui/ui_config.h
+          git commit -m 'fix: conectar Warning al HMI y limpiar comentarios antiguos'
+          git push origin HEAD:fix/steering-homing-battery-traction
