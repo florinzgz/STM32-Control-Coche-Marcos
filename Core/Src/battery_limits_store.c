@@ -107,9 +107,12 @@ bool BatteryLimitsStore_ServiceWriteAllowed(void)
         return false;
     }
 
-    /* motor_control_patched publishes the resolved REAL shadow duty,
-     * including Neutral's ramp.  Any non-zero output blocks flash. */
-    if (Traction_GetFinalPwmPct() != 0U) {
+    /* motor_control_patched publishes the resolved real shadow duty, including
+     * Neutral's ramp.  The separate active-brake override can intentionally put
+     * LPWM on all bridges while normal drive telemetry remains zero, so it must
+     * also be disabled before flash erase/program operations are allowed. */
+    if (Motor_GetBrakeActiveOverride() != 0U ||
+        Traction_GetFinalPwmPct() != 0U) {
         return false;
     }
 
