@@ -2,6 +2,7 @@
 #define BATTERY_SERVICE_POLICY_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <math.h>
 
