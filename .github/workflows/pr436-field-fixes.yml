@@ -4,12 +4,28 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'Core/Src/steering_centering.c'
       - 'Core/Src/steering_centering_patched.c'
+      - 'Core/Src/steering_centering_diag.c'
+      - 'Core/Src/steering_supervisor.c'
       - 'Core/Src/steering_supervisor_io.c'
+      - 'Core/Inc/steering_supervisor.h'
+      - 'Core/Src/steering_eps.c'
+      - 'Core/Src/steering_output.c'
+      - 'Core/Src/test_centering_pc12_gate.c'
+      - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
+      - 'Core/Inc/traction_output_policy.h'
+      - 'Core/Src/test_traction_output_policy.c'
       - 'Core/Src/battery_limits_store.c'
       - 'Core/Inc/battery_limits_store.h'
+      - 'Core/Src/test_battery_limits.c'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/safety_system_patched.c'
+      - 'Core/Src/can_handler.c'
+      - 'esp32/include/can_ids.h'
       - 'esp32/src/ui/ui_config.h'
+      - 'analysis_artifacts/stubs/**'
       - '.github/workflows/pr436-field-fixes.yml'
   workflow_dispatch:
 
@@ -21,6 +37,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Compile and run PC12 gate against effective wrapper
         run: |
@@ -46,25 +64,48 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - name: Verify steering, traction and battery contracts
+      - name: Execute steering, traction and battery contracts
         run: |
           set -euo pipefail
 
           grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U$' Core/Src/steering_centering_patched.c
           grep -Eq '^#define REVERSE_DEADTIME_MS[[:space:]]+100U$' Core/Src/steering_centering_patched.c
-          grep -q 'begin_right_reverse' Core/Src/steering_centering_patched.c
-          grep -q 'Steering_EpsSetOwner(STEER_OWNER_EPS)' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define ENDSTOP_CONFIRM_SAMPLES[[:space:]]+2U$' Core/Src/steering_centering_patched.c
+          grep -q '!Encoder_HasFault()' Core/Src/steering_centering_patched.c
+          grep -q 's_diag.pwm_requested = 0U' Core/Src/steering_centering_patched.c
+          grep -q 'SteeringSupervisor_NeedsPostIsolationSample' Core/Src/steering_supervisor_io.c
 
-          grep -q 'straight_line_unlimited' Core/Src/motor_control_patched.c
+          grep -q 'shadow_resolved_pwm' Core/Src/motor_control_patched.c
+          grep -q 'TractionOutput_MinPwm(pwm)' Core/Src/motor_control_patched.c
+          grep -q 'safety_status.wheel_scale\[MOTOR_RL\]' Core/Src/motor_control_patched.c
+          grep -q 'safety_status.wheel_scale\[MOTOR_RR\]' Core/Src/motor_control_patched.c
           test "$(grep -c 'apply_motor(&motor_.*MOTOR_MODE_DRIVE, equal_pwm, equal_dir)' Core/Src/motor_control_patched.c)" -eq 4
 
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_traction_output_policy.c \
+            -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_battery_limits.c \
+            -o /tmp/test_battery_limits_pr436
+          /tmp/test_battery_limits_pr436
+
+          grep -q 'return BatteryLimitsStore_ServiceWriteAllowed();' Core/Src/can_handler.c
+          grep -q 'raw_voltage < uv_cutoff_v' Core/Src/safety_system.c
           grep -Eq '^#define BATT_WARNING_DEFAULT_CV[[:space:]]+1800U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_LIMIT_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_CUTOFF_DEFAULT_CV[[:space:]]+1600U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_RECOVERY_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_FILTER_DEFAULT_MS[[:space:]]+500U$' Core/Inc/battery_limits_store.h
-
+          grep -Eq 'BATT_WARNING_DEFAULT_CV[[:space:]]*=[[:space:]]*1800;' esp32/include/can_ids.h
+          grep -Eq 'BATT_LIMIT_DEFAULT_CV[[:space:]]*=[[:space:]]*1700;' esp32/include/can_ids.h
+          grep -Eq 'BATT_CUTOFF_DEFAULT_CV[[:space:]]*=[[:space:]]*1600;' esp32/include/can_ids.h
+          grep -Eq 'BATT_RECOVERY_DEFAULT_CV[[:space:]]*=[[:space:]]*1700;' esp32/include/can_ids.h
+          grep -Eq 'BATT_FILTER_DEFAULT_MS[[:space:]]*=[[:space:]]*500;' esp32/include/can_ids.h
           grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
           grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
           grep -Eq 'BATT_UV_WARN_RAW = 1800;' esp32/src/ui/ui_config.h
