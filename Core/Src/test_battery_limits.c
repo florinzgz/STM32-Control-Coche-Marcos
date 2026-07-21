@@ -45,7 +45,7 @@ static BatteryServiceWriteInputs safe_active_service(void)
     in.in_active = true;
     in.gear_is_park_or_neutral = true;
     in.pedal_pct = 0.0f;
-    in.final_pwm_pct = 0U;
+    in.final_pwm_ticks = 0U;
     in.active_brake_pwm_ticks = 0U;
     for (uint8_t i = 0U; i < BATT_SERVICE_POLICY_WHEEL_COUNT; ++i) {
         in.wheel_speed_kmh[i] = 0.0f;
@@ -134,7 +134,11 @@ int main(void)
     ASSERT_FALSE(service_allowed(&in));
 
     in = safe_active_service();
-    in.final_pwm_pct = 1U;
+    in.final_pwm_ticks = 1U;
+    ASSERT_FALSE(service_allowed(&in));
+
+    in = safe_active_service();
+    in.final_pwm_ticks = 42U;  /* still below 1% when converted to uint8 percent */
     ASSERT_FALSE(service_allowed(&in));
 
     in = safe_active_service();
