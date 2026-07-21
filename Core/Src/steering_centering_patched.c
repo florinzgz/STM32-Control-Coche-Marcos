@@ -92,14 +92,31 @@ static void Homing_SetPwm(uint16_t requested_pwm, bool reverse)
 
 static uint8_t s_center_raw_cycles;
 
+/* The host HAL GPIO objects are translation-unit local by design.  This weak,
+ * test-only hook lets the integration test inject one shared PB5 level without
+ * changing the production read path.  When no host override is linked, the
+ * exact real GPIO read below remains the fallback. */
+#ifdef HOST_TEST
+extern bool SteeringCentering_TestPb5Active(void) __attribute__((weak));
+#endif
+
+static bool read_pb5_active(void)
+{
+#ifdef HOST_TEST
+    if (SteeringCentering_TestPb5Active != NULL) {
+        return SteeringCentering_TestPb5Active();
+    }
+#endif
+    return HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET;
+}
+
 static bool center_raw_stable(void)
 {
     /* PB5 is the mandatory physical centre reference for every homing run.
      * Service mode may suppress optional diagnostics, but it must never make
      * the homing FSM blind to an active centre sensor (including boot-over-PB5,
      * where no new EXTI edge is guaranteed). */
-    const bool active =
-        HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET;
+    const bool active = read_pb5_active();
 
     if (!active) {
         s_center_raw_cycles = 0U;
