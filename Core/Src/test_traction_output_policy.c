@@ -84,6 +84,15 @@ static void test_physical_4x4_plan(void)
     TractionOutput_Resolve4x4(drive, forward, unequal, NAN, 2.0f,
                               unity, &p);
     for (uint8_t i = 0U; i < 4U; ++i) CHECK(p.pwm[i] == unequal[i]);
+
+    /* DRIVE without a valid non-zero direction must never be equalised. */
+    const int8_t no_direction[4] = {0, 0, 0, 0};
+    TractionOutput_Resolve4x4(drive, no_direction, unequal, 0.0f, 2.0f,
+                              unity, &p);
+    for (uint8_t i = 0U; i < 4U; ++i) {
+        CHECK(p.direction[i] == 0);
+        CHECK(p.pwm[i] == unequal[i]);
+    }
 }
 
 static void test_physical_rear_4x2_plan(void)
