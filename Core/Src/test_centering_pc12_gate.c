@@ -24,8 +24,9 @@
   *              - ANY latched fault forces PC12 OFF and prevents every
   *                reconnection for the rest of the power cycle.
   *
-  *          The same effective-wrapper test also proves two field invariants:
-  *              - PB5 active-low completion still works when its optional
+  *          The same source also contains wrapper-specific field cases.  They
+  *          execute only when steering_centering_patched.c is linked:
+  *              - PB5 active-low completion works even when its optional
   *                service module is disabled and no EXTI edge is injected;
   *              - two fresh >=20 A CH5 samples cut PWM even while encoder counts
   *                continue changing, followed by the full 100 ms dead-time.
@@ -37,7 +38,7 @@
   *          so the supervisor decides on the SAME PC12 the homing FSM raised —
   *          faithfully modelling the single shared GPIOC register on hardware.
   *
-  *          Compile (from repository root):
+  *          Compile the effective wrapper from repository root:
   *            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
   *                -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
   *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
@@ -62,6 +63,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "safety_system.h"
@@ -109,6 +111,19 @@ static bool     s_calibrated    = false;   /* Steering_IsCalibrated()     */
 /* Strong host override for the weak hook in steering_centering_patched.c.
  * It avoids the HAL stub's intentional per-translation-unit GPIO copies. */
 bool SteeringCentering_TestPb5Active(void) { return s_pb5_active; }
+
+/* The legacy host suite also links this test against steering_centering.c.
+ * The weak marker is present only in the effective patched wrapper, so the two
+ * wrapper-specific tests can be skipped in the legacy/base linkage while the
+ * dedicated PR workflow must execute them. */
+extern bool SteeringCentering_EffectiveWrapperPresent(void)
+    __attribute__((weak));
+
+static bool effective_wrapper_present(void)
+{
+    return SteeringCentering_EffectiveWrapperPresent != NULL &&
+           SteeringCentering_EffectiveWrapperPresent();
+}
 
 /* PWM instrumentation: capture start conditions and the latest command. */
 static bool     s_pwm_started        = false;
@@ -497,8 +512,13 @@ int main(void)
 {
     test_homing_keeps_pc12_on_and_completes();
     test_latched_fault_kills_pc12_forever();
-    test_pb5_level_ignores_optional_service_disable();
-    test_hard_current_cuts_while_encoder_moves();
+
+    if (effective_wrapper_present()) {
+        test_pb5_level_ignores_optional_service_disable();
+        test_hard_current_cuts_while_encoder_moves();
+    } else {
+        printf("SKIP wrapper-specific PB5/CH5 cases (base FSM linkage)\n");
+    }
 
     printf("==== test_centering_pc12_gate: %d run, %d failed ====\n",
            tests_run, tests_failed);
