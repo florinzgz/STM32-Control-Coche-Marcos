@@ -61,8 +61,6 @@ jobs:
                       f"{path}: expected {expected} exact matches, found {count}\\n"
                       f"--- needle ---\\n{old}")
 
-              # Fallback accepts indentation-only differences, but every stripped
-              # line must match in sequence and the block must remain unique.
               target = text.splitlines(keepends=True)
               old_lines = _trim_blank(old.splitlines())
               new_lines = _trim_blank(new.splitlines())
@@ -106,7 +104,13 @@ jobs:
             exit "$status"
           fi
 
-          rm -f .github/workflows/pr436-authorized-runner.yml
+          # GITHUB_TOKEN may push source changes but must not alter workflow files.
+          # Workflow hardening/cleanup is performed afterwards through the GitHub
+          # connector, which has the required workflow-file permission.
+          git restore --source=HEAD -- \
+            .github/workflows/pr436-authorized-autofix.yml \
+            .github/workflows/pr436-authorized-runner.yml \
+            .github/workflows/pr436-field-fixes.yml
           rm -f .github/pr436-patch-error.txt
           git diff --check
 
@@ -144,7 +148,7 @@ jobs:
           grep -q 'SteeringSupervisor_NeedsPostIsolationSample' Core/Src/steering_supervisor_io.c
           grep -q 's_guard.reverse_pending' Core/Src/steering_centering_patched.c
 
-      - name: Commit to the same PR branch
+      - name: Commit code to the same PR branch
         shell: bash
         run: |
           set -euo pipefail
