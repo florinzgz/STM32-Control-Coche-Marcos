@@ -103,12 +103,17 @@ bool i2c_init_ok   = true;
 /* ---- Centering / encoder hardware model. ---- */
 static bool     s_encoder_fault = false;   /* Encoder_HasFault() latch    */
 static bool     s_center_found  = false;   /* PB5 inductive centre pulse  */
+static bool     s_pb5_active    = false;   /* shared raw active-low level */
 static bool     s_calibrated    = false;   /* Steering_IsCalibrated()     */
 
+/* Strong host override for the weak hook in steering_centering_patched.c.
+ * It avoids the HAL stub's intentional per-translation-unit GPIO copies. */
+bool SteeringCentering_TestPb5Active(void) { return s_pb5_active; }
+
 /* PWM instrumentation: capture start conditions and the latest command. */
-static bool     s_pwm_started       = false;
-static bool     s_pc12_on_at_pwm    = false;
-static uint16_t s_last_steer_pwm    = 0U;
+static bool     s_pwm_started        = false;
+static bool     s_pc12_on_at_pwm     = false;
+static uint16_t s_last_steer_pwm     = 0U;
 static bool     s_last_steer_reverse = false;
 
 static TIM_TypeDef  fake_tim2_regs;
@@ -271,26 +276,23 @@ static void set_encoder(int32_t v) { fake_tim2_regs.CNT = (uint32_t)v; }
  * homing FSM back at IDLE. */
 static void bring_up_standby_healthy(void)
 {
-    g_stub_hal_tick    = 0;
-    s_encoder_fault    = false;
-    s_center_found     = false;
-    s_calibrated       = false;
-    s_pwm_started      = false;
-    s_pc12_on_at_pwm   = false;
-    s_last_steer_pwm   = 0U;
+    g_stub_hal_tick      = 0;
+    s_encoder_fault      = false;
+    s_center_found       = false;
+    s_pb5_active         = false;
+    s_calibrated         = false;
+    s_pwm_started        = false;
+    s_pc12_on_at_pwm     = false;
+    s_last_steer_pwm     = 0U;
     s_last_steer_reverse = false;
-    s_pc12_set_writes  = 0;
-    s_mirror_guard     = false;
+    s_pc12_set_writes    = 0;
+    s_mirror_guard       = false;
 
     htim2.Instance = &fake_tim2_regs;
     htim3.Instance = &fake_tim3_regs;
     set_encoder(0);
     fake_tim3_regs.CCR1 = 0;
     fake_tim3_regs.CCR2 = 0;
-
-    /* PB5 is active-low.  Default every test to the physically inactive HIGH
-     * state; individual tests explicitly pull it LOW when required. */
-    GPIOB->ODR |= (uint32_t)PIN_STEER_CENTER;
 
     ch5_set_healthy();
 
@@ -431,7 +433,7 @@ static void test_pb5_level_ignores_optional_service_disable(void)
 
     /* No EXTI/event flag: only the raw active-low level is presented. */
     s_center_found = false;
-    GPIOB->ODR &= ~(uint32_t)PIN_STEER_CENTER;
+    s_pb5_active = true;
 
     main_cycle();
     CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
