@@ -88,13 +88,15 @@ jobs:
           grep -q 'return Traction_IsWheelDriven(idx);' Core/Src/safety_system_patched.c
           grep -q 'shadow_resolved_pwm' Core/Src/motor_control_patched.c
           grep -q 'TractionOutput_MinPwm(pwm)' Core/Src/motor_control_patched.c
+          grep -q 'TractionOutput_StraightUnlimited' Core/Src/motor_control_patched.c
+          grep -q 'mode\[MOTOR_FL\] != mode\[MOTOR_FR\]' Core/Src/motor_control_patched.c
           grep -q 'safety_status.wheel_scale\[MOTOR_RL\]' Core/Src/motor_control_patched.c
           grep -q 'safety_status.wheel_scale\[MOTOR_RR\]' Core/Src/motor_control_patched.c
           test "$(grep -c 'apply_motor(&motor_.*MOTOR_MODE_DRIVE, equal_pwm, equal_dir)' Core/Src/motor_control_patched.c)" -eq 4
 
           gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
             Core/Src/test_traction_output_policy.c \
-            -o /tmp/test_traction_output_policy
+            -lm -o /tmp/test_traction_output_policy
           /tmp/test_traction_output_policy
 
           gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
