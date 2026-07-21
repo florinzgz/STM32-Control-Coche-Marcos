@@ -134,14 +134,6 @@ static void coast_all(void)
     Motor_SetMode(&motor_rr, MOTOR_MODE_COAST, 0);
 }
 
-static void brake_all(void)
-{
-    Motor_SetMode(&motor_fl, MOTOR_MODE_BRAKE, 0);
-    Motor_SetMode(&motor_fr, MOTOR_MODE_BRAKE, 0);
-    Motor_SetMode(&motor_rl, MOTOR_MODE_BRAKE, 0);
-    Motor_SetMode(&motor_rr, MOTOR_MODE_BRAKE, 0);
-}
-
 static void zero_output_telemetry(void)
 {
     for (uint8_t i = 0U; i < 4U; ++i) {
