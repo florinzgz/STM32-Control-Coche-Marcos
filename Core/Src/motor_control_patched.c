@@ -29,6 +29,7 @@
 #include <math.h>
 #include "tank_turn_policy.h"
 #include "steering_centering.h"
+#include "traction_output_policy.h"
 
 #define Traction_Update          Traction_Update_Base
 #define Traction_SetAxisRotation Traction_SetAxisRotation_Base
@@ -102,6 +103,20 @@ static Motor_t make_shadow(const Motor_t *real, uint8_t index)
     m.direction = 0;
     m.current_mode = MOTOR_MODE_COAST;
     return m;
+}
+
+/* Read the duty actually resolved into the shadow timer registers.
+ * Unlike the legacy wheel telemetry, this remains truthful during the
+ * bounded Neutral ramp and therefore becomes the source routed to the
+ * real BTS7960 outputs. */
+static uint16_t shadow_resolved_pwm(const Motor_t *motor)
+{
+    const uint32_t rpwm = __HAL_TIM_GET_COMPARE(motor->rpwm_timer,
+                                                motor->rpwm_channel);
+    const uint32_t lpwm = __HAL_TIM_GET_COMPARE(motor->lpwm_timer,
+                                                motor->lpwm_channel);
+    const uint32_t resolved = (rpwm > lpwm) ? rpwm : lpwm;
+    return TractionOutput_ClampPwm(resolved, PWM_PERIOD);
 }
 
 static bool drive_state(SystemState_t state)
@@ -208,7 +223,7 @@ static bool straight_line_unlimited(void)
         return false;
     }
     for (uint8_t i = 0U; i < 4U; ++i) {
-        if (safety_status.wheel_scale[i] < 0.999f) return false;
+        if (safety_status.wheel_scale[i] < (1.0f - 1.0e-6f)) return false;
     }
     return true;
 }
@@ -235,11 +250,13 @@ void Traction_Update(void)
         motor_fl.direction, motor_fr.direction,
         motor_rl.direction, motor_rr.direction
     };
+        /* Capture the effective shadow hardware, not the legacy telemetry.
+     * This preserves Neutral's bounded ramp and any per-cycle jerk limit. */
     uint16_t pwm[4] = {
-        traction_state.wheels[MOTOR_FL].pwm,
-        traction_state.wheels[MOTOR_FR].pwm,
-        traction_state.wheels[MOTOR_RL].pwm,
-        traction_state.wheels[MOTOR_RR].pwm
+        shadow_resolved_pwm(&motor_fl),
+        shadow_resolved_pwm(&motor_fr),
+        shadow_resolved_pwm(&motor_rl),
+        shadow_resolved_pwm(&motor_rr)
     };
 
     motor_fl = real[MOTOR_FL];
@@ -273,12 +290,13 @@ void Traction_Update(void)
                                mode[1] == MOTOR_MODE_DRIVE &&
                                mode[2] == MOTOR_MODE_DRIVE &&
                                mode[3] == MOTOR_MODE_DRIVE;
-        if (all_drive && straight_line_unlimited()) {
-            uint16_t equal_pwm = pwm[0];
-            for (uint8_t i = 1U; i < 4U; ++i) {
-                if (pwm[i] > equal_pwm) equal_pwm = pwm[i];
-            }
-            int8_t equal_dir = direction[MOTOR_FL] < 0 ? -1 : 1;
+        const bool same_direction =
+            TractionOutput_SameNonzeroDirection(direction);
+        if (all_drive && same_direction && straight_line_unlimited()) {
+            /* Use the MINIMUM resolved duty: symmetry may reduce stronger
+             * channels, but can never raise a wheel over its jerk/safety cap. */
+            const uint16_t equal_pwm = TractionOutput_MinPwm(pwm);
+            const int8_t equal_dir = direction[MOTOR_FL] < 0 ? -1 : 1;
             apply_motor(&motor_fl, MOTOR_FL, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
             apply_motor(&motor_fr, MOTOR_FR, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
             apply_motor(&motor_rl, MOTOR_RL, MOTOR_MODE_DRIVE, equal_pwm, equal_dir);
@@ -294,7 +312,12 @@ void Traction_Update(void)
          * already-ramped and safety-limited result to the installed rear axle. */
         if (mode[MOTOR_FL] == MOTOR_MODE_BRAKE &&
             mode[MOTOR_FR] == MOTOR_MODE_BRAKE) {
-            brake_all();
+            /* Logical FL/FR are the installed rear axle in 4x2.  Brake
+             * RL/RR only and keep the non-driven front axle in coast. */
+            Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
+            Motor_SetMode(&motor_fr, MOTOR_MODE_COAST, 0);
+            Motor_SetMode(&motor_rl, MOTOR_MODE_BRAKE, 0);
+            Motor_SetMode(&motor_rr, MOTOR_MODE_BRAKE, 0);
             zero_output_telemetry();
             return;
         }
@@ -312,8 +335,18 @@ void Traction_Update(void)
         traction_state.wheels[MOTOR_FL].reverse = false;
         traction_state.wheels[MOTOR_FR].reverse = false;
 
-        apply_motor(&motor_rl, MOTOR_RL, mode[MOTOR_FL], pwm[MOTOR_FL], direction[MOTOR_FL]);
-        apply_motor(&motor_rr, MOTOR_RR, mode[MOTOR_FR], pwm[MOTOR_FR], direction[MOTOR_FR]);
+        /* The base 4x2 decision is logical-left/logical-right.  Apply
+         * the PHYSICAL rear-wheel safety caps again at the final routing
+         * boundary so RL/RR temperature/TCS/ABS cutoffs can never be
+         * bypassed by the FL/FR shadow calculation. */
+        const uint16_t rear_left_pwm = TractionOutput_CapPwmByScale(
+            pwm[MOTOR_FL], safety_status.wheel_scale[MOTOR_RL], PWM_PERIOD);
+        const uint16_t rear_right_pwm = TractionOutput_CapPwmByScale(
+            pwm[MOTOR_FR], safety_status.wheel_scale[MOTOR_RR], PWM_PERIOD);
+        apply_motor(&motor_rl, MOTOR_RL, mode[MOTOR_FL], rear_left_pwm,
+                    direction[MOTOR_FL]);
+        apply_motor(&motor_rr, MOTOR_RR, mode[MOTOR_FR], rear_right_pwm,
+                    direction[MOTOR_FR]);
     }
 
     uint16_t final_max = 0U;

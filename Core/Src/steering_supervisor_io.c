@@ -64,6 +64,8 @@ void SteeringSupervisor_Service(void)
                                       ch5->bus_read_ok;
         const bool eps_drive_active = steering_output_is_actively_driven(ch5);
         const bool homing_active = steering_homing_is_active(centering);
+        const bool oc_confirmation =
+            SteeringSupervisor_NeedsPostIsolationSample();
         Ina226DiagReason_t reason = ch5->fault_reason;
 
         /* Reversed polarity is meaningful only while current is intentionally
@@ -86,7 +88,7 @@ void SteeringSupervisor_Service(void)
          * electrical hazard.  Its sample-sequence guard rejects the retained
          * acquisition that originally caused the isolation. */
         in.ch5_sample_valid = raw_sample_valid && !homing_active &&
-            (eps_drive_active || Steering_IsAssistLatchedOff());
+            (eps_drive_active || oc_confirmation);
     } else {
         Steering_DisableAssistFault(EPS_FAULT_CH5_MISSING);
         in.ch5_reason       = INA226_CH_MISSING;

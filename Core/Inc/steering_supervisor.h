@@ -300,6 +300,10 @@ EpsFaultReason_t SteeringSupervisor_LastCause(void);
 /** @brief  Current overcurrent FSM state (diagnostics/tests). */
 OcState_t SteeringSupervisor_OcState(void);
 
+/** @brief true only while the OC FSM needs a fresh post-isolation CH5
+ *         sample.  Unrelated EPS latches must not start an OC sequence. */
+bool SteeringSupervisor_NeedsPostIsolationSample(void);
+
 /* ======================================================================
  *  Production entry point (steering_supervisor_io.c)
  * ====================================================================== */

@@ -2773,7 +2773,7 @@ static uint32_t        battlim_next_tx_ms = 0;
 
 static inline bool battlim_safety_ok(void)
 {
-    return (Safety_GetState() == SYS_STATE_STANDBY);
+    return BatteryLimitsStore_ServiceWriteAllowed();
 }
 
 static void battlim_seed_pending_if_needed(void)

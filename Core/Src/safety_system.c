@@ -2778,6 +2778,18 @@ void Safety_CheckBatteryVoltage(void)
         return;
     }
 
+    /* A valid raw sample below the critical cutoff is an immediate
+     * electrical protection event.  Never let the optional EMA delay SAFE;
+     * the filter is only for non-critical bands and stable recovery. */
+    const float uv_cutoff_v = batt_cv_to_v(batt_limits.cutoff_cv);
+    if (raw_voltage < uv_cutoff_v) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
+        Safety_SetState(SYS_STATE_SAFE);
+        batt_uv_recovery_pending = 0;
+        batt_v_filt_init = false;
+        return;
+    }
+
     /* ---- Optional voltage filter (FASE 3) ----
      * filter_ms == 0 (default): bypass — voltage == raw, identical to today.
      * filter_ms  > 0: first-order EMA with alpha = dt/(tc+dt) so the time
@@ -2804,7 +2816,6 @@ void Safety_CheckBatteryVoltage(void)
     }
 
     /* Runtime thresholds (seeded == historic #define values). */
-    const float uv_cutoff_v   = batt_cv_to_v(batt_limits.cutoff_cv);
     const float uv_recovery_v = batt_cv_to_v(batt_limits.recovery_cv);
     const float uv_limit_v    = batt_cv_to_v(batt_limits.limit_cv);
 

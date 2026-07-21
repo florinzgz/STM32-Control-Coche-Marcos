@@ -38,6 +38,7 @@
 #define ENDSTOP_NO_MOTION_MS             100U
 #define ENDSTOP_SAMPLE_MAX_AGE_MS        250U
 #define ENDSTOP_ENCODER_DELTA_COUNTS     2
+#define ENDSTOP_CONFIRM_SAMPLES           2U
 /* A hard-current sample cuts immediately.  The lower threshold additionally
  * requires no encoder movement, rejecting normal running current. */
 #define ENDSTOP_HARD_CURRENT_MA          20000U
@@ -130,6 +131,7 @@ typedef struct {
     int32_t reference_count;
     uint32_t last_motion_ms;
     uint32_t last_sample_sequence;
+    uint8_t pressure_confirm_samples;
     bool reverse_pending;
     uint32_t reverse_started_ms;
 } HomingGuard;
@@ -143,6 +145,7 @@ static void reset_observation(CenteringState_t state)
     s_guard.reference_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     s_guard.last_motion_ms = HAL_GetTick();
     s_guard.last_sample_sequence = 0U;
+    s_guard.pressure_confirm_samples = 0U;
 }
 
 static void reset_guard(void)
@@ -152,6 +155,7 @@ static void reset_guard(void)
     s_guard.reference_count = 0;
     s_guard.last_motion_ms = 0U;
     s_guard.last_sample_sequence = 0U;
+    s_guard.pressure_confirm_samples = 0U;
     s_guard.reverse_pending = false;
     s_guard.reverse_started_ms = 0U;
 }
@@ -176,12 +180,16 @@ static bool endstop_pressure_detected(void)
         ENDSTOP_ENCODER_DELTA_COUNTS) {
         s_guard.reference_count = count;
         s_guard.last_motion_ms = now;
+        s_guard.pressure_confirm_samples = 0U;
     }
 
     const Ina226ChannelDiag *diag = Sensor_GetChannel5Diag();
     if (diag == NULL || !diag->i2c_ack || !diag->shunt_read_ok ||
-        diag->sample_age_ms > ENDSTOP_SAMPLE_MAX_AGE_MS ||
-        diag->sample_sequence == s_guard.last_sample_sequence) {
+        diag->sample_age_ms > ENDSTOP_SAMPLE_MAX_AGE_MS) {
+        s_guard.pressure_confirm_samples = 0U;
+        return false;
+    }
+    if (diag->sample_sequence == s_guard.last_sample_sequence) {
         return false;
     }
 
@@ -190,14 +198,30 @@ static bool endstop_pressure_detected(void)
     const bool no_motion =
         (uint32_t)(now - s_guard.last_motion_ms) >= ENDSTOP_NO_MOTION_MS;
 
-    return current >= ENDSTOP_HARD_CURRENT_MA ||
-           (no_motion && current >= ENDSTOP_STALL_CURRENT_MA);
+    /* Never classify a moving high-friction point as an end stop.
+     * Require stationary encoder evidence plus two genuinely fresh CH5
+     * samples, including at the hard-current threshold. */
+    const bool pressure = no_motion &&
+        (current >= ENDSTOP_STALL_CURRENT_MA);
+    if (!pressure) {
+        s_guard.pressure_confirm_samples = 0U;
+        return false;
+    }
+    if (s_guard.pressure_confirm_samples < ENDSTOP_CONFIRM_SAMPLES) {
+        s_guard.pressure_confirm_samples++;
+    }
+    if (s_guard.pressure_confirm_samples < ENDSTOP_CONFIRM_SAMPLES) {
+        return false;
+    }
+    s_guard.pressure_confirm_samples = 0U;
+    return true;
 }
 
 static void begin_right_reverse(void)
 {
     /* Torque must disappear before the direction changes. */
     Homing_SetPwm(0U, false);
+    s_guard.pressure_confirm_samples = 0U;
     s_guard.reverse_pending = true;
     s_guard.reverse_started_ms = HAL_GetTick();
 }
@@ -238,7 +262,7 @@ static bool handle_endstop_pressure(void)
 
 static void transfer_completed_homing_to_eps(void)
 {
-    if (centering_state != CENTERING_DONE ||
+    if (centering_state != CENTERING_DONE || Encoder_HasFault() ||
         !Steering_IsCalibrated() || Steering_IsAssistLatchedOff()) {
         return;
     }
@@ -264,7 +288,8 @@ void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
 void SteeringCentering_Step(void)
 {
     if (centering_state != CENTERING_DONE &&
-        centering_state != CENTERING_FAULT && center_raw_stable()) {
+        centering_state != CENTERING_FAULT && !Encoder_HasFault() &&
+        center_raw_stable()) {
         Centering_Complete();
         transfer_completed_homing_to_eps();
         reset_guard();
@@ -301,7 +326,9 @@ void SteeringCentering_Step(void)
 void SteeringCentering_UpdateDiag(void)
 {
     Homing_BaseUpdateDiag();
-    if (is_sweep(centering_state)) {
+    if (s_guard.reverse_pending) {
+        s_diag.pwm_requested = 0U;
+    } else if (is_sweep(centering_state)) {
         s_diag.pwm_requested = HOMING_PWM_COUNTS;
     }
 }

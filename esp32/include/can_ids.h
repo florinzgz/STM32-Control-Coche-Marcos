@@ -425,11 +425,11 @@ inline constexpr uint16_t BATT_RECOVERY_MIN_CV = 1400;
 inline constexpr uint16_t BATT_RECOVERY_MAX_CV = 2900;
 inline constexpr uint16_t BATT_FILTER_MIN_MS   = 0;
 inline constexpr uint16_t BATT_FILTER_MAX_MS   = 5000;
-inline constexpr uint16_t BATT_WARNING_DEFAULT_CV  = 2000;
-inline constexpr uint16_t BATT_LIMIT_DEFAULT_CV    = 2000;
-inline constexpr uint16_t BATT_CUTOFF_DEFAULT_CV   = 1800;
-inline constexpr uint16_t BATT_RECOVERY_DEFAULT_CV = 1850;
-inline constexpr uint16_t BATT_FILTER_DEFAULT_MS   = 0;
+inline constexpr uint16_t BATT_WARNING_DEFAULT_CV  = 1800;
+inline constexpr uint16_t BATT_LIMIT_DEFAULT_CV    = 1700;
+inline constexpr uint16_t BATT_CUTOFF_DEFAULT_CV   = 1600;
+inline constexpr uint16_t BATT_RECOVERY_DEFAULT_CV = 1700;
+inline constexpr uint16_t BATT_FILTER_DEFAULT_MS   = 500;
 
 // -------------------------------------------------------------------------
 // Boot/Reset Diagnostic (0x312) — STM32→ESP32, 1 Hz, DLC 8

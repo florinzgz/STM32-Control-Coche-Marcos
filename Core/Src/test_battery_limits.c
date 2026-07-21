@@ -25,25 +25,6 @@ static int tests_failed;
 
 #define ASSERT_FALSE(expr) ASSERT_TRUE(!(expr))
 
-static bool test_validate(const BatteryLimits_t *b)
-{
-    if (!b) return false;
-    if (b->warning_cv  < BATT_WARNING_MIN_CV  || b->warning_cv  > BATT_WARNING_MAX_CV) return false;
-    if (b->limit_cv    < BATT_LIMIT_MIN_CV    || b->limit_cv    > BATT_LIMIT_MAX_CV) return false;
-    if (b->cutoff_cv   < BATT_CUTOFF_MIN_CV   || b->cutoff_cv   > BATT_CUTOFF_MAX_CV) return false;
-    if (b->recovery_cv < BATT_RECOVERY_MIN_CV || b->recovery_cv > BATT_RECOVERY_MAX_CV) return false;
-#if (BATT_FILTER_MIN_MS > 0U)
-    if (b->filter_ms < BATT_FILTER_MIN_MS) return false;
-#endif
-    if (b->filter_ms > BATT_FILTER_MAX_MS) return false;
-    if (b->warning_cv  <= b->cutoff_cv) return false;
-    if (b->limit_cv    <= b->cutoff_cv) return false;
-    if (b->recovery_cv <= b->cutoff_cv) return false;
-    if (b->warning_cv  > BATT_OV_WARNING_CV) return false;
-    if (b->limit_cv    > BATT_OV_WARNING_CV) return false;
-    return true;
-}
-
 static BatteryLimits_t defaults(void)
 {
     BatteryLimits_t b = {
@@ -59,7 +40,7 @@ static BatteryLimits_t defaults(void)
 int main(void)
 {
     BatteryLimits_t b = defaults();
-    ASSERT_TRUE(test_validate(&b));
+    ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
 
     /* Installed traction-pack defaults. */
     ASSERT_TRUE(BATT_WARNING_DEFAULT_CV  == 1800U);
@@ -68,25 +49,25 @@ int main(void)
     ASSERT_TRUE(BATT_RECOVERY_DEFAULT_CV == 1700U);
     ASSERT_TRUE(BATT_FILTER_DEFAULT_MS   == 500U);
 
-    b = defaults(); b.warning_cv = b.cutoff_cv;       ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.warning_cv = b.cutoff_cv - 1U;  ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.limit_cv = b.cutoff_cv;         ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.recovery_cv = b.cutoff_cv;      ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.recovery_cv = b.cutoff_cv - 1U; ASSERT_FALSE(test_validate(&b));
+    b = defaults(); b.warning_cv = b.cutoff_cv;       ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.warning_cv = b.cutoff_cv - 1U;  ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.limit_cv = b.cutoff_cv;         ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.recovery_cv = b.cutoff_cv;      ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.recovery_cv = b.cutoff_cv - 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
 
     ASSERT_TRUE(BATT_OV_WARNING_CV == 3000U);
-    b = defaults(); b.warning_cv = BATT_OV_WARNING_CV;      ASSERT_TRUE(test_validate(&b));
-    b = defaults(); b.warning_cv = BATT_OV_WARNING_CV + 1U; ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV;        ASSERT_TRUE(test_validate(&b));
-    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV + 1U;   ASSERT_FALSE(test_validate(&b));
+    b = defaults(); b.warning_cv = BATT_OV_WARNING_CV;      ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.warning_cv = BATT_OV_WARNING_CV + 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV;        ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV + 1U;   ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
 
-    b = defaults(); b.cutoff_cv = BATT_CUTOFF_MIN_CV - 1U; ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.cutoff_cv = BATT_CUTOFF_MAX_CV + 1U; ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.recovery_cv = BATT_RECOVERY_MAX_CV + 1U; ASSERT_FALSE(test_validate(&b));
-    b = defaults(); b.filter_ms = BATT_FILTER_MAX_MS + 1U; ASSERT_FALSE(test_validate(&b));
+    b = defaults(); b.cutoff_cv = BATT_CUTOFF_MIN_CV - 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.cutoff_cv = BATT_CUTOFF_MAX_CV + 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.recovery_cv = BATT_RECOVERY_MAX_CV + 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.filter_ms = BATT_FILTER_MAX_MS + 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
 
-    b = defaults(); b.filter_ms = 0U;    ASSERT_TRUE(test_validate(&b));
-    b = defaults(); b.filter_ms = 250U;  ASSERT_TRUE(test_validate(&b));
+    b = defaults(); b.filter_ms = 0U;    ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.filter_ms = 250U;  ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
 
     /* Exact requested low-voltage profile. */
     b.warning_cv = 1800U;
@@ -94,7 +75,7 @@ int main(void)
     b.cutoff_cv = 1600U;
     b.recovery_cv = 1700U;
     b.filter_ms = 500U;
-    ASSERT_TRUE(test_validate(&b));
+    ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
 
     printf("test_battery_limits: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed == 0 ? 0 : 1;

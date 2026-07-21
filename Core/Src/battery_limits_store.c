@@ -12,6 +12,7 @@
 #include "sensor_manager.h"
 #include <string.h>
 #include <stddef.h>
+#include <math.h>
 
 /* ---- Flash layout ---- */
 #define BATT_FLASH_PAGE   120U
@@ -75,7 +76,7 @@ static bool batt_slot_integrity_ok(const batt_flash_slot_t *slot)
     return (crc == slot->checksum);
 }
 
-static bool batt_stationary_service_write_safe(void)
+bool BatteryLimitsStore_ServiceWriteAllowed(void)
 {
     const SystemState_t state = Safety_GetState();
 
@@ -101,19 +102,26 @@ static bool batt_stationary_service_write_safe(void)
         return false;
     }
 
-    if (Pedal_GetPercent() >= BATT_SERVICE_PEDAL_MAX_PCT) {
+    const float pedal = Pedal_GetPercent();
+    if (!isfinite(pedal) || pedal >= BATT_SERVICE_PEDAL_MAX_PCT) {
         return false;
     }
 
+    /* motor_control_patched publishes the resolved REAL shadow duty,
+     * including Neutral's ramp.  Any non-zero output blocks flash. */
     if (Traction_GetFinalPwmPct() != 0U) {
         return false;
     }
 
-    if (Wheel_GetSpeed_FL() > BATT_SERVICE_SPEED_MAX_KMH ||
-        Wheel_GetSpeed_FR() > BATT_SERVICE_SPEED_MAX_KMH ||
-        Wheel_GetSpeed_RL() > BATT_SERVICE_SPEED_MAX_KMH ||
-        Wheel_GetSpeed_RR() > BATT_SERVICE_SPEED_MAX_KMH) {
-        return false;
+    const float speeds[4] = {
+        Wheel_GetSpeed_FL(), Wheel_GetSpeed_FR(),
+        Wheel_GetSpeed_RL(), Wheel_GetSpeed_RR()
+    };
+    for (uint8_t i = 0U; i < 4U; ++i) {
+        if (!isfinite(speeds[i]) ||
+            fabsf(speeds[i]) >= BATT_SERVICE_SPEED_MAX_KMH) {
+            return false;
+        }
     }
 
     return true;
@@ -131,23 +139,7 @@ void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out)
 
 bool BatteryLimitsStore_Validate(const BatteryLimits_t *b)
 {
-    if (!b) return false;
-
-    if (b->warning_cv  < BATT_WARNING_MIN_CV  || b->warning_cv  > BATT_WARNING_MAX_CV)  return false;
-    if (b->limit_cv    < BATT_LIMIT_MIN_CV    || b->limit_cv    > BATT_LIMIT_MAX_CV)    return false;
-    if (b->cutoff_cv   < BATT_CUTOFF_MIN_CV   || b->cutoff_cv   > BATT_CUTOFF_MAX_CV)   return false;
-    if (b->recovery_cv < BATT_RECOVERY_MIN_CV || b->recovery_cv > BATT_RECOVERY_MAX_CV) return false;
-#if (BATT_FILTER_MIN_MS > 0U)
-    if (b->filter_ms   < BATT_FILTER_MIN_MS) return false;
-#endif
-    if (b->filter_ms   > BATT_FILTER_MAX_MS) return false;
-
-    if (b->warning_cv  <= b->cutoff_cv) return false;
-    if (b->limit_cv    <= b->cutoff_cv) return false;
-    if (b->recovery_cv <= b->cutoff_cv) return false;
-    if (b->warning_cv  > BATT_OV_WARNING_CV) return false;
-    if (b->limit_cv    > BATT_OV_WARNING_CV) return false;
-    return true;
+    return BatteryLimits_ValidateValues(b);
 }
 
 void BatteryLimitsStore_Init(void)
@@ -190,7 +182,7 @@ bool BatteryLimitsStore_Save(const BatteryLimits_t *b)
 {
     if (!b) return false;
 
-    if (!batt_stationary_service_write_safe())
+    if (!BatteryLimitsStore_ServiceWriteAllowed())
         return false;
 
     if (!BatteryLimitsStore_Validate(b))

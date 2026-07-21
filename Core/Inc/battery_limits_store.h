@@ -93,6 +93,26 @@ typedef struct {
     uint16_t filter_ms;     /* EMA/debounce time constant (0 = off) */
 } BatteryLimits_t;
 
+/* HAL-free single source used by production and host tests. */
+static inline bool BatteryLimits_ValidateValues(const BatteryLimits_t *b)
+{
+    if (!b) return false;
+    if (b->warning_cv  < BATT_WARNING_MIN_CV  || b->warning_cv  > BATT_WARNING_MAX_CV)  return false;
+    if (b->limit_cv    < BATT_LIMIT_MIN_CV    || b->limit_cv    > BATT_LIMIT_MAX_CV)    return false;
+    if (b->cutoff_cv   < BATT_CUTOFF_MIN_CV   || b->cutoff_cv   > BATT_CUTOFF_MAX_CV)   return false;
+    if (b->recovery_cv < BATT_RECOVERY_MIN_CV || b->recovery_cv > BATT_RECOVERY_MAX_CV) return false;
+#if (BATT_FILTER_MIN_MS > 0U)
+    if (b->filter_ms < BATT_FILTER_MIN_MS) return false;
+#endif
+    if (b->filter_ms > BATT_FILTER_MAX_MS) return false;
+    if (b->warning_cv  <= b->cutoff_cv) return false;
+    if (b->limit_cv    <= b->cutoff_cv) return false;
+    if (b->recovery_cv <= b->cutoff_cv) return false;
+    if (b->warning_cv  > BATT_OV_WARNING_CV) return false;
+    if (b->limit_cv    > BATT_OV_WARNING_CV) return false;
+    return true;
+}
+
 void BatteryLimitsStore_Init(void);
 bool BatteryLimitsStore_IsValid(void);
 void BatteryLimitsStore_GetStored(BatteryLimits_t *out);
@@ -105,6 +125,10 @@ void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out);
  *        Warning <= OV, Limit <= OV.
  */
 bool BatteryLimitsStore_Validate(const BatteryLimits_t *b);
+
+/** Shared CAN/store gate.  True in STANDBY or in the narrowly verified
+ * stationary P/N service condition (UV-warning DEGRADED only). */
+bool BatteryLimitsStore_ServiceWriteAllowed(void);
 
 /**
  * @brief Persist a new parameter set to flash.
