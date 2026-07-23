@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'Core/Src/main.c'
       - 'Core/Src/steering_centering.c'
       - 'Core/Src/steering_centering_patched.c'
       - 'Core/Src/steering_centering_diag.c'
@@ -105,6 +106,21 @@ jobs:
           grep -q 'TCS_Update_Tuned' Core/Inc/build_sanity_checks.h
           ! grep -q 'Traction_SetDemand' Core/Src/tcs_tuned.c
 
+          python3 - <<'PY'
+          main = open('Core/Src/main.c', encoding='utf-8').read()
+          cycle = main.index('Wheel_UpdateSpeeds();')
+          abs_call = main.index('ABS_Update();', cycle)
+          tcs_call = main.index('TCS_Update();', abs_call)
+          traction_call = main.index('Traction_Update();', tcs_call)
+          assert cycle < abs_call < tcs_call < traction_call
+
+          safety = open('Core/Src/safety_system_patched.c', encoding='utf-8').read()
+          abs_fn = safety.index('void ABS_Update(void)')
+          reset_call = safety.index('PR_ResetWheelInterventionScales();', abs_fn)
+          abs_gate = safety.index('if (!ServiceMode_IsEnabled(MODULE_ABS)', abs_fn)
+          assert abs_fn < reset_call < abs_gate
+          PY
+
           grep -q 'Steering_ControlLoop_Base' Core/Src/motor_control_patched.c
           grep -q 'theta_real - eps_prev_angle_deg' Core/Src/motor_control_patched.c
           grep -q 'eps_prev_angle_deg = theta_real' Core/Src/motor_control_patched.c
@@ -140,9 +156,10 @@ jobs:
           grep -Eq '^#define BATT_CUTOFF_DEFAULT_CV[[:space:]]+1600U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_RECOVERY_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_FILTER_DEFAULT_MS[[:space:]]+500U$' Core/Inc/battery_limits_store.h
-          grep -q 'warningRaw(const vehicle::VehicleData& data)' esp32/src/screens/safe_screen.h
-          grep -q 'cutoffRaw(const vehicle::VehicleData& data)' esp32/src/screens/safe_screen.h
-          grep -q 'limits.warningCv' esp32/src/screens/safe_screen.h
-          grep -q 'limits.cutoffCv' esp32/src/screens/safe_screen.h
+          grep -q 'isCoherent(const vehicle::BatteryLimitsData& limits)' esp32/src/screens/safe_screen.h
+          grep -q '#define BATT_UV_WARN_RAW(d)' esp32/src/screens/safe_screen.h
+          grep -q '#define BATT_UV_CRIT_RAW(d)' esp32/src/screens/safe_screen.h
+          grep -q 'BATT_UV_WARN_RAW(data)' esp32/src/screens/safe_screen.cpp
+          grep -q 'BATT_UV_CRIT_RAW(data)' esp32/src/screens/safe_screen.cpp
           grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
           grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
