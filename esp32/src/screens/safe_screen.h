@@ -40,24 +40,25 @@
  * govern the HMI while retaining the installed defaults before telemetry is
  * available.  The macros are intentionally scoped to this header/screen. */
 namespace safe_battery_limits {
+inline bool isCoherent(const vehicle::BatteryLimitsData& limits) {
+    return limits.valid && limits.cutoffCv > 0U &&
+           limits.warningCv > limits.cutoffCv &&
+           limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW;
+}
 inline uint16_t warningRaw(const vehicle::VehicleData& data) {
     const vehicle::BatteryLimitsData& limits = data.batteryLimits();
-    return (limits.valid && limits.cutoffCv > 0U &&
-            limits.warningCv > limits.cutoffCv &&
-            limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW)
+    return isCoherent(limits)
         ? limits.warningCv : ui::cfg::BATT_UV_WARN_RAW;
 }
 inline uint16_t cutoffRaw(const vehicle::VehicleData& data) {
     const vehicle::BatteryLimitsData& limits = data.batteryLimits();
-    return (limits.valid && limits.cutoffCv > 0U &&
-            limits.warningCv > limits.cutoffCv &&
-            limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW)
+    return isCoherent(limits)
         ? limits.cutoffCv : ui::cfg::BATT_UV_CRIT_RAW;
 }
 }  // namespace safe_battery_limits
 
-#define BATT_UV_WARN_RAW (::safe_battery_limits::warningRaw(data))
-#define BATT_UV_CRIT_RAW (::safe_battery_limits::cutoffRaw(data))
+#define BATT_UV_WARN_RAW(d) (::safe_battery_limits::warningRaw(d))
+#define BATT_UV_CRIT_RAW(d) (::safe_battery_limits::cutoffRaw(d))
 
 /// Tile indices for SafeScreen
 enum SafeTile : uint8_t {
