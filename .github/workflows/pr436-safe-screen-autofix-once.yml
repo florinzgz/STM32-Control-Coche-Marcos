@@ -1,0 +1,52 @@
+name: PR436 Safe Screen Autofix Once
+
+on:
+  push:
+    branches:
+      - fix/steering-homing-battery-traction
+    paths:
+      - '.github/workflows/pr436-safe-screen-autofix-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-safe-screen-callsite-fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/steering-homing-battery-traction
+          fetch-depth: 0
+
+      - name: Parameterize battery-limit macro call sites
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('esp32/src/screens/safe_screen.cpp')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'batVoltRaw_ < BATT_UV_CRIT_RAW ||':
+                  'batVoltRaw_ < BATT_UV_CRIT_RAW(data) ||',
+              'batVoltRaw_ < BATT_UV_WARN_RAW ||':
+                  'batVoltRaw_ < BATT_UV_WARN_RAW(data) ||',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+
+      - name: Commit call-site fix
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add esp32/src/screens/safe_screen.cpp
+          git commit -m 'fix(hmi): pass battery limits explicitly'
+          git push origin HEAD:fix/steering-homing-battery-traction
