@@ -79,7 +79,8 @@ void TCS_Update_Tuned(void)
     if (!isfinite(dt) || dt <= 0.0f || dt > 1.0f) dt = 0.01f;
     s_tcs_last_tick = now;
 
-    if (!ServiceMode_IsEnabled(MODULE_TCS) || !Safety_PowertrainEngaged()) {
+    if (!ServiceMode_IsEnabled(MODULE_TCS) ||
+        !Safety_IsPowertrainEngaged()) {
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0U;
         for (uint8_t i = 0U; i < 4U; ++i) s_tcs_reduction[i] = 0.0f;
