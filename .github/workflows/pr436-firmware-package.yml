@@ -1,0 +1,87 @@
+name: PR436 Firmware Package
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Core/**'
+      - 'Drivers/**'
+      - 'esp32/**'
+      - 'Makefile'
+      - '.github/workflows/pr436-firmware-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install ARM GCC toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Build STM32 firmware
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2
+
+      - name: Build ESP32 firmware
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --user platformio
+          export PATH="$HOME/.local/bin:$PATH"
+          cd esp32
+          pio run -e esp32s3
+
+      - name: Assemble flash package
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/firmware/stm32 artifacts/firmware/esp32
+
+          cp build/STM32G474RE.bin artifacts/firmware/stm32/
+          cp build/STM32G474RE.hex artifacts/firmware/stm32/
+          cp build/STM32G474RE.elf artifacts/firmware/stm32/
+
+          cp esp32/.pio/build/esp32s3/firmware.bin artifacts/firmware/esp32/
+          cp esp32/.pio/build/esp32s3/firmware.elf artifacts/firmware/esp32/
+          cp esp32/.pio/build/esp32s3/bootloader.bin artifacts/firmware/esp32/
+          cp esp32/.pio/build/esp32s3/partitions.bin artifacts/firmware/esp32/
+
+          cat > artifacts/firmware/README-FLASH.txt <<'EOF'
+          PR #436 - firmware de prueba
+
+          STM32G474RE (firmware modificado en esta PR):
+          - Recomendado con STM32CubeProgrammer: stm32/STM32G474RE.hex
+          - Alternativa binaria: stm32/STM32G474RE.bin en 0x08000000
+          - Verificar descarga y reset después de programar.
+
+          ESP32-S3 (incluido para verificar la compilación completa):
+          - firmware.bin se programa normalmente en 0x10000.
+          - bootloader.bin y partitions.bin se incluyen como respaldo de la compilación.
+          - No es necesario reflashear el ESP32 para probar los cambios STM32 de esta PR.
+
+          Seguridad para la primera prueba:
+          - Vehículo inmovilizado o ruedas motrices elevadas.
+          - Parada de emergencia accesible.
+          - Comprobar primero homing, sensores de rueda, dirección y PWM sin carga.
+          EOF
+
+          printf '%s\n' "${GITHUB_SHA}" > artifacts/firmware/COMMIT.txt
+          (cd artifacts/firmware && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+
+      - name: Upload flashable firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: PR436-flashable-firmware-${{ github.sha }}
+          path: artifacts/firmware/
+          if-no-files-found: error
+          retention-days: 90
