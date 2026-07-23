@@ -30,11 +30,14 @@
 #include "tank_turn_policy.h"
 #include "steering_centering.h"
 #include "traction_output_policy.h"
+#include "drive_dynamics_policy.h"
 
 #define Traction_Update          Traction_Update_Base
 #define Traction_SetAxisRotation Traction_SetAxisRotation_Base
 #define Encoder_CheckHealth      Encoder_CheckHealth_Base
+#define Steering_ControlLoop     Steering_ControlLoop_Base
 #include "motor_control.c"
+#undef Steering_ControlLoop
 #undef Encoder_CheckHealth
 #undef Traction_SetAxisRotation
 #undef Traction_Update
@@ -53,6 +56,11 @@ _Static_assert((uint8_t)MOTOR_MODE_BRAKE == TRACTION_OUTPUT_MODE_BRAKE,
  * false ENC_MAX_JUMP fault, immediately isolating EPS/PC12 despite a healthy
  * encoder.  No existing fault is cleared here. */
 static CenteringState_t s_encoder_health_centering_state = CENTERING_IDLE;
+static uint8_t s_encoder_frozen_confirm_cycles;
+
+#define PR_ENC_FROZEN_TIMEOUT_MS       500U
+#define PR_ENC_MOTOR_ACTIVE_PCT        20.0f
+#define PR_ENC_FROZEN_CONFIRM_CYCLES   2U
 
 void Encoder_CheckHealth(void)
 {
@@ -63,12 +71,169 @@ void Encoder_CheckHealth(void)
         !Encoder_HasFault()) {
         enc_prev_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
         enc_last_change_tick = HAL_GetTick();
+        s_encoder_frozen_confirm_cycles = 0U;
         s_encoder_health_centering_state = state;
         return;
     }
 
     s_encoder_health_centering_state = state;
-    Encoder_CheckHealth_Base();
+    if (enc_fault) return;
+
+    const int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    const uint32_t now = HAL_GetTick();
+
+    if (count > ENC_MAX_COUNTS || count < -ENC_MAX_COUNTS) {
+        enc_fault = 1;
+        return;
+    }
+
+    int32_t delta = count - enc_prev_count;
+    if (delta < 0) delta = -delta;
+    if (delta > ENC_MAX_JUMP) {
+        enc_fault = 1;
+        return;
+    }
+
+    if (count != enc_prev_count) {
+        enc_last_change_tick = now;
+        s_encoder_frozen_confirm_cycles = 0U;
+    } else {
+        const float motor_pct = fabsf(eps_motor_effort);
+        if (motor_pct <= PR_ENC_MOTOR_ACTIVE_PCT) {
+            /* Start the frozen window only after meaningful effort begins. */
+            enc_last_change_tick = now;
+            s_encoder_frozen_confirm_cycles = 0U;
+        } else if ((now - enc_last_change_tick) > PR_ENC_FROZEN_TIMEOUT_MS) {
+            if (s_encoder_frozen_confirm_cycles < UINT8_MAX) {
+                ++s_encoder_frozen_confirm_cycles;
+            }
+            if (s_encoder_frozen_confirm_cycles >=
+                PR_ENC_FROZEN_CONFIRM_CYCLES) {
+                enc_fault = 1;
+                return;
+            }
+        }
+    }
+
+    enc_prev_count = count;
+}
+
+/* EPS intent must be derived from the real road-wheel angle.  Applying the
+ * mechanical deadband before differentiating erased the driver's initial
+ * movement and generated a false velocity spike at the deadband edge. */
+void Steering_ControlLoop(void)
+{
+    if (Steering_IsAssistLatchedOff()) {
+        Steering_Neutralize();
+        return;
+    }
+    if (!steering_calibrated) {
+        Steering_Neutralize();
+        return;
+    }
+    if (enc_fault) {
+        Motor_SetSigned(&motor_steer, 0);
+        eps_motor_effort = 0.0f;
+        return;
+    }
+
+    {
+        const SystemState_t st = Safety_GetState();
+        if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
+            Steering_Neutralize();
+            return;
+        }
+    }
+
+    const eps_params_t *p = EPS_Params_Get();
+    static uint32_t last_time;
+    const uint32_t now = HAL_GetTick();
+
+    if (last_time == 0U || (now - last_time) > 500U) {
+        last_time = now;
+        eps_prev_angle_deg = sanitize_float(
+            Steering_GetCurrentAngle() - p->center_offset_deg, 0.0f);
+        return;
+    }
+
+    const float dt = (float)(now - last_time) / 1000.0f;
+    if (dt < 0.001f) return;
+    last_time = now;
+
+    const float theta = sanitize_float(Steering_GetCurrentAngle(), 0.0f);
+    const float theta_real = theta - p->center_offset_deg;
+
+    float omega_raw = (theta_real - eps_prev_angle_deg) / dt;
+    omega_raw = sanitize_float(omega_raw, 0.0f);
+    eps_prev_angle_deg = theta_real;
+    eps_omega_filt += 0.3f * (omega_raw - eps_omega_filt);
+
+    float eff_theta = theta_real;
+    if (fabsf(eff_theta) < p->deadband_deg) eff_theta = 0.0f;
+
+    float v_kmh = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                   Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    v_kmh = sanitize_float(v_kmh, 0.0f);
+    if (v_kmh < 0.0f) v_kmh = 0.0f;
+
+    const float abs_omega = fabsf(eps_omega_filt);
+    const float lambda = DriveDynamics_EpsLambda(abs_omega);
+    const float g_v = 1.0f / (1.0f + v_kmh / p->assist_vs_speed);
+    const float h_v = 0.3f + v_kmh / p->return_vs_speed;
+
+    float fric_sign = 0.0f;
+    if (abs_omega < 2.0f && fabsf(eff_theta) > 1.0f) {
+        fric_sign = (eff_theta > 0.0f) ? -1.0f : 1.0f;
+    }
+
+    float tau = 0.0f;
+    tau += lambda * p->assist_strength * g_v * eps_omega_filt;
+    tau -= (1.0f - lambda) * p->center_strength * h_v * eff_theta;
+    tau -= p->damping * eps_omega_filt;
+    tau += p->friction_comp * fric_sign;
+
+    if (v_kmh > EPS_HS_FADE_START_KMH) {
+        const float hs_range = EPS_HS_FADE_END_KMH - EPS_HS_FADE_START_KMH;
+        float hs_fade = 1.0f - (1.0f - EPS_HS_FADE_MIN_FACTOR) *
+                        (v_kmh - EPS_HS_FADE_START_KMH) / hs_range;
+        if (hs_fade < EPS_HS_FADE_MIN_FACTOR) {
+            hs_fade = EPS_HS_FADE_MIN_FACTOR;
+        }
+        tau *= hs_fade;
+    }
+
+    if (Safety_IsDegraded()) tau *= Safety_GetSteeringLimitFactor();
+    tau = sanitize_float(tau, 0.0f);
+
+    float pwm_pct = tau;
+    if (pwm_pct > p->max_pwm_pct) pwm_pct = p->max_pwm_pct;
+    if (pwm_pct < -p->max_pwm_pct) pwm_pct = -p->max_pwm_pct;
+
+    float abs_pct = fabsf(pwm_pct);
+    if (abs_pct > 0.01f && abs_pct < p->min_drive_pct) {
+        pwm_pct = (pwm_pct > 0.0f) ? p->min_drive_pct : -p->min_drive_pct;
+        abs_pct = p->min_drive_pct;
+    }
+
+    if (abs_pct < p->coast_band_pct) {
+        Steering_Neutralize();
+        return;
+    }
+
+    int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
+    int16_t slew_counts =
+        (int16_t)(p->slew_rate_pct * (float)PWM_PERIOD / 100.0f);
+    if (slew_counts < 1) slew_counts = 1;
+
+    const int16_t delta_pwm = pwm_raw - eps_prev_pwm_raw;
+    if (delta_pwm > slew_counts) pwm_raw = eps_prev_pwm_raw + slew_counts;
+    if (delta_pwm < -slew_counts) pwm_raw = eps_prev_pwm_raw - slew_counts;
+    eps_prev_pwm_raw = pwm_raw;
+
+    const uint16_t pwm_abs =
+        (uint16_t)((pwm_raw >= 0) ? pwm_raw : -pwm_raw);
+    eps_motor_effort = (float)pwm_abs * 100.0f / (float)PWM_PERIOD;
+    Motor_SetSigned(&motor_steer, pwm_raw);
 }
 
 bool Traction_IsWheelDriven(uint8_t wheel)
@@ -259,12 +424,28 @@ void Traction_Update(void)
     };
     /* Capture the effective shadow hardware, not the legacy telemetry.
      * This preserves Neutral's bounded ramp and any per-cycle jerk limit. */
-    const uint16_t pwm[4] = {
+    uint16_t pwm[4] = {
         shadow_resolved_pwm(&motor_fl),
         shadow_resolved_pwm(&motor_fr),
         shadow_resolved_pwm(&motor_rl),
         shadow_resolved_pwm(&motor_rr)
     };
+
+    /* The base dynamic brake was tuned at 0.5 with a 60 % ceiling.  Preserve
+     * its direction/state decisions but reduce the final opposing torque to
+     * the field-safe 0.2-equivalent curve, capped at 30 %. */
+    if (dynbrake_pct > DYNBRAKE_ACTIVE_THRESHOLD) {
+        const float original_dynbrake = dynbrake_pct;
+        const float limited_dynbrake =
+            DriveDynamics_DynbrakeLimitedPct(original_dynbrake);
+        const float scale = (original_dynbrake > 0.0f)
+                          ? limited_dynbrake / original_dynbrake : 0.0f;
+        dynbrake_pct = limited_dynbrake;
+        if (motion_effective_demand < 0.0f) motion_effective_demand *= scale;
+        for (uint8_t i = 0U; i < 4U; ++i) {
+            pwm[i] = (uint16_t)((float)pwm[i] * scale);
+        }
+    }
 
     motor_fl = real[MOTOR_FL];
     motor_fr = real[MOTOR_FR];
