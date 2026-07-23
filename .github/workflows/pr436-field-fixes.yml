@@ -15,11 +15,15 @@ on:
       - 'Core/Src/test_centering_pc12_gate.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
+      - 'Core/Src/tcs_tuned.c'
       - 'Core/Inc/motor_control.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/safety_system_patched.c'
       - 'Core/Inc/traction_output_policy.h'
+      - 'Core/Inc/drive_dynamics_policy.h'
+      - 'Core/Inc/build_sanity_checks.h'
       - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_drive_dynamics_policy.c'
       - 'Core/Src/battery_limits_store.c'
       - 'Core/Inc/battery_limits_store.h'
       - 'Core/Inc/battery_service_policy.h'
@@ -94,10 +98,33 @@ jobs:
           grep -q 'TractionOutput_Resolve4x2Rear' Core/Src/motor_control_patched.c
           grep -q 'apply_plan' Core/Src/motor_control_patched.c
 
+          grep -Eq '^#define DRIVE_TCS_MIN_REFERENCE_KMH[[:space:]]+6\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_TCS_SLIP_THRESHOLD_PCT[[:space:]]+25\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_TCS_REDUCTION_RATE_PER_S[[:space:]]+1\.00f$' Core/Inc/drive_dynamics_policy.h
+          grep -q 'DriveDynamics_TcsReductionNext' Core/Src/tcs_tuned.c
+          grep -q 'TCS_Update_Tuned' Core/Inc/build_sanity_checks.h
+          ! grep -q 'Traction_SetDemand' Core/Src/tcs_tuned.c
+
+          grep -q 'Steering_ControlLoop_Base' Core/Src/motor_control_patched.c
+          grep -q 'theta_real - eps_prev_angle_deg' Core/Src/motor_control_patched.c
+          grep -q 'eps_prev_angle_deg = theta_real' Core/Src/motor_control_patched.c
+          grep -Eq '^#define DRIVE_EPS_INTENT_OMEGA_LO_DPS[[:space:]]+0\.5f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_EPS_INTENT_OMEGA_HI_DPS[[:space:]]+4\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define PR_ENC_FROZEN_TIMEOUT_MS[[:space:]]+500U$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define PR_ENC_MOTOR_ACTIVE_PCT[[:space:]]+20\.0f$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define PR_ENC_FROZEN_CONFIRM_CYCLES[[:space:]]+2U$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define DRIVE_DYNBRAKE_MAX_PCT[[:space:]]+30\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -q 'DriveDynamics_DynbrakeLimitedPct' Core/Src/motor_control_patched.c
+
           gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
             Core/Src/test_traction_output_policy.c \
             -lm -o /tmp/test_traction_output_policy
           /tmp/test_traction_output_policy
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_drive_dynamics_policy.c \
+            -lm -o /tmp/test_drive_dynamics_policy
+          /tmp/test_drive_dynamics_policy
 
           gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
             Core/Src/test_battery_limits.c \
