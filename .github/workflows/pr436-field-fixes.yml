@@ -31,6 +31,8 @@ on:
       - 'Core/Src/test_battery_limits.c'
       - 'Core/Src/can_handler.c'
       - 'esp32/include/can_ids.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
       - 'esp32/src/screens/safe_screen.cpp'
       - 'esp32/src/screens/safe_screen.h'
       - 'esp32/src/ui/battery_indicator.cpp'
@@ -163,3 +165,16 @@ jobs:
           grep -q 'BATT_UV_CRIT_RAW(data)' esp32/src/screens/safe_screen.cpp
           grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
           grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
+
+          # HMI telemetry freshness is presentation-only.  The 1500 ms heartbeat
+          # safety timeout remains untouched while 10 Hz and 1 Hz visual data use
+          # cadence-aware windows that prevent OK/SIN DATOS oscillation.
+          grep -Eq 'TELEMETRY_FAST_STALE_MS = 2500UL;' esp32/src/ui/ui_config.h
+          grep -Eq 'TELEMETRY_SLOW_STALE_MS = 3000UL;' esp32/src/ui/ui_config.h
+          grep -q 'ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - tts) > ui::cfg::TELEMETRY_FAST_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - mts) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - bts) > ui::cfg::TELEMETRY_FAST_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - lts) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - hts) <= can::CAN_LOSS_TIMEOUT_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(millis() - wd.timestampMs) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/engineering_screen.cpp
