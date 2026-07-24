@@ -5148,7 +5148,7 @@ static const char* wheelDiagReasonEs(uint8_t r) {
 //   MANUAL_MOVEMENT / DISABLED -> cyan  (expected, never a red alarm)
 //   channel fault active       -> red
 //   otherwise (debouncing/etc) -> amber
-// A 0x313 frame older than 2 s (or never seen) renders the block as STALE.
+// A 0x313 frame older than the 3-period freshness window (or never seen) renders the block as STALE.
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawWheelDiagBlock() {
     static const char* const kLbl[5] = { "FL", "FR", "RL", "RR", "ST" };
@@ -5163,7 +5163,7 @@ void EngineeringScreen::drawWheelDiagBlock() {
 
     const auto& wd = wheelSensorDiag_;
     const bool stale = (!wd.valid) ||
-        ((millis() - wd.timestampMs) > 2000UL);
+        ((millis() - wd.timestampMs) > ui::cfg::TELEMETRY_SLOW_STALE_MS);
 
     for (uint8_t i = 0; i < 5; ++i) {
         const int16_t y = y0 + i * lh;

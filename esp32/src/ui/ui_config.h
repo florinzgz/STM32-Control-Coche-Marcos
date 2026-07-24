@@ -96,6 +96,18 @@ inline constexpr uint8_t THR_TRACTION_DELTA  = 2;
 inline constexpr int8_t  THR_TEMP_DELTA      = 1;
 
 // =========================================================================
+// Visual Telemetry Freshness (presentation only)
+//
+// Keep per-signal display freshness separate from the 1500 ms
+// heartbeat safety timeout.  Fast frames get ample tolerance for a
+// short receive/scheduling gap; 1 Hz frames require three missed
+// periods before the HMI replaces their last valid value.
+// =========================================================================
+
+inline constexpr unsigned long TELEMETRY_FAST_STALE_MS = 2500UL;
+inline constexpr unsigned long TELEMETRY_SLOW_STALE_MS = 3000UL;
+
+// =========================================================================
 // Battery Indicator Hysteresis
 //
 // Text on the battery bar switches between dark-on-color and light-on-bg.
