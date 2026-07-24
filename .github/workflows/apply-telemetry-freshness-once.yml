@@ -1,0 +1,123 @@
+name: Apply telemetry freshness fix once
+
+on:
+  push:
+    branches:
+      - fix/steering-homing-battery-traction
+    paths:
+      - .github/workflows/apply-telemetry-freshness-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/steering-homing-battery-traction
+          fetch-depth: 0
+
+      - name: Apply guarded source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # Centralise presentation-only freshness windows.  These do not alter
+          # heartbeat/CAN-loss safety handling, which remains at 1500 ms.
+          replace_once(
+              "esp32/src/ui/ui_config.h",
+              "inline constexpr int8_t  THR_TEMP_DELTA      = 1;\n\n// =========================================================================\n// Battery Indicator Hysteresis",
+              "inline constexpr int8_t  THR_TEMP_DELTA      = 1;\n\n"
+              "// =========================================================================\n"
+              "// Visual Telemetry Freshness (presentation only)\n"
+              "//\n"
+              "// Keep per-signal display freshness separate from the 1500 ms\n"
+              "// heartbeat safety timeout.  Fast frames get ample tolerance for a\n"
+              "// short receive/scheduling gap; 1 Hz frames require three missed\n"
+              "// periods before the HMI replaces their last valid value.\n"
+              "// =========================================================================\n\n"
+              "inline constexpr unsigned long TELEMETRY_FAST_STALE_MS = 2500UL;\n"
+              "inline constexpr unsigned long TELEMETRY_SLOW_STALE_MS = 3000UL;\n\n"
+              "// =========================================================================\n"
+              "// Battery Indicator Hysteresis"
+          )
+
+          # Keep the WHEELS tile metadata out of the steering tile.  The renderer
+          # was already differential, but the logical regions must also be disjoint.
+          replace_once(
+              "esp32/src/screens/drive_screen.cpp",
+              "    tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,\n                   ui::SCREEN_W, ui::CAR_AREA_H);",
+              "    tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,\n                   ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H);"
+          )
+
+          # Use the cadence-aware visual windows only for individual telemetry.
+          # The heartbeat below intentionally keeps can::CAN_LOSS_TIMEOUT_MS.
+          replacements = [
+              (
+                  "        curTractionStale_ = (tts == 0) ||\n                            ((frameTimeMs - tts) > can::CAN_LOSS_TIMEOUT_MS);",
+                  "        curTractionStale_ = (tts == 0) ||\n                            ((frameTimeMs - tts) > ui::cfg::TELEMETRY_FAST_STALE_MS);"
+              ),
+              (
+                  "        curTempStale_ = (mts == 0) ||\n                        ((frameTimeMs - mts) > can::CAN_LOSS_TIMEOUT_MS);",
+                  "        curTempStale_ = (mts == 0) ||\n                        ((frameTimeMs - mts) > ui::cfg::TELEMETRY_SLOW_STALE_MS);"
+              ),
+              (
+                  "        const bool wsdFresh = wsd.valid &&\n                              ((frameTimeMs - wsd.timestampMs) <= can::CAN_LOSS_TIMEOUT_MS);",
+                  "        const bool wsdFresh = wsd.valid &&\n                              ((frameTimeMs - wsd.timestampMs) <= ui::cfg::TELEMETRY_SLOW_STALE_MS);"
+              ),
+              (
+                  "        curBattStale_ = (bts == 0) ||\n                        ((frameTimeMs - bts) > can::CAN_LOSS_TIMEOUT_MS);",
+                  "        curBattStale_ = (bts == 0) ||\n                        ((frameTimeMs - bts) > ui::cfg::TELEMETRY_FAST_STALE_MS);"
+              ),
+              (
+                  "        bool pedalStale = (pts == 0) ||\n                          ((frameTimeMs - pts) > can::CAN_LOSS_TIMEOUT_MS);",
+                  "        bool pedalStale = (pts == 0) ||\n                          ((frameTimeMs - pts) > ui::cfg::TELEMETRY_FAST_STALE_MS);"
+              ),
+              (
+                  "        bool lightsStale = (lts == 0) ||\n                           ((frameTimeMs - lts) > can::CAN_LOSS_TIMEOUT_MS);",
+                  "        bool lightsStale = (lts == 0) ||\n                           ((frameTimeMs - lts) > ui::cfg::TELEMETRY_SLOW_STALE_MS);"
+              ),
+          ]
+          for old, new in replacements:
+              replace_once("esp32/src/screens/drive_screen.cpp", old, new)
+
+          # The engineering 0x313 panel receives one frame per second.  Require
+          # three missed periods before showing every channel as SIN DATOS.
+          replace_once(
+              "esp32/src/screens/engineering_screen.cpp",
+              "// A 0x313 frame older than 2 s (or never seen) renders the block as STALE.",
+              "// A 0x313 frame older than the 3-period freshness window (or never seen) renders the block as STALE."
+          )
+          replace_once(
+              "esp32/src/screens/engineering_screen.cpp",
+              "        ((millis() - wd.timestampMs) > 2000UL);",
+              "        ((millis() - wd.timestampMs) > ui::cfg::TELEMETRY_SLOW_STALE_MS);"
+          )
+
+          # One-shot workflow: remove itself from the resulting source commit.
+          Path(".github/workflows/apply-telemetry-freshness-once.yml").unlink()
+
+      - name: Commit guarded fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esp32/src/ui/ui_config.h \
+                  esp32/src/screens/drive_screen.cpp \
+                  esp32/src/screens/engineering_screen.cpp \
+                  .github/workflows/apply-telemetry-freshness-once.yml
+          git diff --cached --check
+          git commit -m "fix: stabilize HMI telemetry freshness"
+          git push origin HEAD:fix/steering-homing-battery-traction
