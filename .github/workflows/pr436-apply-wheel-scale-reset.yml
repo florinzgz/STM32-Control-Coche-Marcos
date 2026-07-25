@@ -1,28 +1,22 @@
-name: PR436 Apply Wheel Scale Cycle Reset
+name: PR436 Export Wheel Scale Cycle Reset
 
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/pr436-apply-wheel-scale-reset.yml'
-  push:
-    branches:
-      - fix/steering-homing-battery-traction
-    paths:
-      - '.github/workflows/pr436-apply-wheel-scale-reset.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-fix:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+  export-fix:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
           ref: fix/steering-homing-battery-traction
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Apply explicit per-cycle ABS/TCS baseline reset
         run: |
@@ -121,11 +115,19 @@ jobs:
           grep -q '^void Safety_ResetWheelInterventionScales(void)$' Core/Src/safety_system_patched.c
           grep -q '^void Safety_ResetWheelInterventionScales(void);$' Core/Inc/safety_system.h
 
-      - name: Commit source correction
+      - name: Stage corrected files
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Core/Inc/safety_system.h Core/Src/safety_system_patched.c Core/Src/main.c .github/workflows/pr436-field-fixes.yml
-          git commit -m 'fix: reset ABS/TCS wheel scales at cycle entry'
-          git push origin HEAD:fix/steering-homing-battery-traction
+          mkdir -p exported/Core/Inc exported/Core/Src exported/.github/workflows
+          cp Core/Inc/safety_system.h exported/Core/Inc/
+          cp Core/Src/safety_system_patched.c exported/Core/Src/
+          cp Core/Src/main.c exported/Core/Src/
+          cp .github/workflows/pr436-field-fixes.yml exported/.github/workflows/
+          git diff -- Core/Inc/safety_system.h Core/Src/safety_system_patched.c Core/Src/main.c .github/workflows/pr436-field-fixes.yml > exported/wheel-scale-cycle-reset.patch
+
+      - name: Upload corrected sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr436-wheel-scale-cycle-reset-sources
+          path: exported/
+          if-no-files-found: error
