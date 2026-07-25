@@ -547,12 +547,11 @@ static float PR_RobustReference(const float spd[NUM_WHEELS], uint8_t candidate)
     return (n == 2U) ? v[0] : v[n / 2U];
 }
 
-/* ABS owns the start-of-cycle baseline because main.c always calls ABS_Update()
- * immediately before TCS_Update().  Rebuild all four permissions from 1.0 every
- * 10 ms, then let ABS and TCS apply only their CURRENT reductions.  The motor
- * controller reapplies independent temperature/current cutoffs later in the
- * same cycle, so no real hardware protection is weakened. */
-static void PR_ResetWheelInterventionScales(void)
+/* The scheduler owns the start-of-cycle baseline and calls this once after
+ * Wheel_UpdateSpeeds() and before ABS/TCS.  ABS also invokes it defensively so
+ * direct test or diagnostic calls cannot inherit a stale historical reduction.
+ * Temperature/current cutoffs are reapplied independently by Traction_Update(). */
+void Safety_ResetWheelInterventionScales(void)
 {
     for (uint8_t i = 0U; i < NUM_WHEELS; ++i) {
         safety_status.wheel_scale[i] = 1.0f;
@@ -579,7 +578,7 @@ static bool PR_IsBrakingDemand(void)
 void ABS_Update(void)
 {
     const uint32_t now = HAL_GetTick();
-    PR_ResetWheelInterventionScales();
+    Safety_ResetWheelInterventionScales();
 
     /* Dynamic braking usually occurs after the physical pedal has returned to
      * zero, so Safety_PowertrainEngaged() (which keys from pedal demand) is not

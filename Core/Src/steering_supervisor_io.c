@@ -2,17 +2,6 @@
   ****************************************************************************
   * @file    steering_supervisor_io.c
   * @brief   Production data-gathering glue for the EPS assist supervisor.
-  *
-  * Reads the REAL steering detectors (INA226 CH5 diagnosis, EPS parameter
-  * store, steering calibration store, encoder Z, centering FSM) once per
-  * control cycle, hands the snapshot to the pure supervisor decision logic in
-  * steering_supervisor.c, and — only on a proven, persistent electrical
-  * hazard — escalates to the safety subsystem (SAFE/ERROR).  It never touches
-  * traction, gear, the traction relays or the pedal: an isolable assist loss
-  * leaves purely mechanical steering with full traction.
-  *
-  * This translation unit is deliberately thin so the decision logic stays
-  * host-testable while the hardware/global dependencies live here.
   ****************************************************************************
   */
 
@@ -24,79 +13,100 @@
 #include "steering_z.h"
 #include "motor_control.h"
 #include "safety_system.h"
+#include "main.h"
 
 #include <stddef.h>
 #include <string.h>
-
 #include "stm32g4xx_hal.h"
 
-/**
- * @brief  Run the EPS assist supervisor for one control cycle.
- *
- *         Called from the 100 Hz main task after the steering motor writer
- *         (centering FSM or EPS loop) has run.  Builds the detector snapshot
- *         and drives the idempotent EPS isolation API through
- *         SteeringSupervisor_Apply().
- */
+#ifndef HOST_TEST
+extern TIM_HandleTypeDef htim3;
+#endif
+
+static bool steering_homing_is_active(CenteringState_t cs)
+{
+    return cs == CENTERING_WAIT_RAIL ||
+           cs == CENTERING_SWEEP_LEFT ||
+           cs == CENTERING_SWEEP_RIGHT;
+}
+
+static bool steering_output_is_actively_driven(const Ina226ChannelDiag *ch5)
+{
+#ifdef HOST_TEST
+    /* The host integration test has no TIM3/GPIO register model for this TU.
+     * current_expected is its existing explicit command seam. */
+    return ch5 != NULL && ch5->current_expected;
+#else
+    (void)ch5;
+    const uint32_t ch1 = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+    const uint32_t ch2 = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+    const bool exactly_one_pwm = (ch1 > 0U) != (ch2 > 0U);
+    const bool bridge_enabled =
+        HAL_GPIO_ReadPin(GPIOC, PIN_EN_STEER) == GPIO_PIN_SET;
+    const bool rail_enabled =
+        HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) == GPIO_PIN_SET;
+    return exactly_one_pwm && bridge_enabled && rail_enabled;
+#endif
+}
+
 void SteeringSupervisor_Service(void)
 {
     const Ina226ChannelDiag *ch5 = Sensor_GetChannel5Diag();
     const uint32_t now = HAL_GetTick();
+    const CenteringState_t centering = SteeringCentering_GetState();
 
     SteeringSupervisorInputs in;
     memset(&in, 0, sizeof(in));
     in.now_ms = now;
 
-    /* --- INA226 CH5 steering current sensor --------------------------- */
     if (ch5 != NULL) {
-        in.ch5_reason       = ch5->fault_reason;
+        const bool raw_sample_valid = ch5->i2c_ack && ch5->shunt_read_ok &&
+                                      ch5->bus_read_ok;
+        const bool eps_drive_active = steering_output_is_actively_driven(ch5);
+        const bool homing_active = steering_homing_is_active(centering);
+        const bool oc_confirmation =
+            SteeringSupervisor_NeedsPostIsolationSample();
+        Ina226DiagReason_t reason = ch5->fault_reason;
+
+        /* Reversed polarity is meaningful only while current is intentionally
+         * commanded.  Do not let a retained direction classification from the
+         * last homing sample isolate PC12 after PB5 has already stopped PWM. */
+        if (reason == INA226_CH_POLARITY_REVERSED &&
+            (!eps_drive_active || homing_active)) {
+            reason = INA226_CH_OK;
+        }
+
+        in.ch5_reason       = reason;
         in.ch5_current_ma   = ch5->signed_current_ma;
-        /* Real acquisition identity: the sensor layer increments
-         * sample_sequence EXACTLY ONCE per new, valid CH5 acquisition (20 Hz),
-         * so the 100 Hz supervisor sees the SAME value across the 5 cycles that
-         * re-read one sample and only observes a change when a genuinely new
-         * sample lands.  This is what the overcurrent confirm step waits on —
-         * NOT a value derived from the supervisor's own tick.               */
         in.ch5_sample_id    = ch5->sample_sequence;
-        /* Real acquisition-ATTEMPT identity: the sensor layer increments
-         * probe_sequence EXACTLY ONCE per real CH5 probe (valid OR invalid),
-         * so the 100 Hz supervisor advances the isolable-fault debounce only
-         * once per genuine 20 Hz acquisition, never five times for the same
-         * re-read snapshot.                                                  */
         in.ch5_probe_id     = ch5->probe_sequence;
-        in.ch5_sample_valid = ch5->i2c_ack && ch5->shunt_read_ok &&
-                              ch5->bus_read_ok;
+
+        /* Normal EPS overcurrent is actionable only with a live output command.
+         * Homing owns its end-stop current policy.  Once the assist is latched
+         * off, fresh CH5 acquisitions become eligible again so the supervisor
+         * can prove that current disappeared or escalate a genuinely persistent
+         * electrical hazard.  Its sample-sequence guard rejects the retained
+         * acquisition that originally caused the isolation. */
+        in.ch5_sample_valid = raw_sample_valid && !homing_active &&
+            (eps_drive_active || oc_confirmation);
     } else {
-        /* Sensor_GetChannel5Diag() normally returns a permanent static object.
-         * NULL therefore means the diagnostic source itself is unavailable,
-         * not a single transient I2C acquisition.  There is no probe_sequence
-         * that could advance the normal three-acquisition debounce; treating
-         * this as UNKNOWN would count one fault and then remain fail-open
-         * forever.  Isolate the assistance immediately through the shared,
-         * idempotent path.  Mechanical steering and traction remain available. */
         Steering_DisableAssistFault(EPS_FAULT_CH5_MISSING);
         in.ch5_reason       = INA226_CH_MISSING;
         in.ch5_sample_valid = false;
     }
 
-    /* --- EPS parameter store (fresh defaults vs corrupt flash) -------- */
     in.params_flash_valid   = EPS_Params_IsFlashValid();
     in.params_flash_present = in.params_flash_valid ||
                               EPS_Params_IsFlashCorrupt();
 
-    /* --- Steering calibration store ---------------------------------- */
     in.cal_flash_corrupt = SteeringCal_IsFlashCorrupt();
     in.cal_flash_present = SteeringCal_IsRestoredValid() || in.cal_flash_corrupt;
     in.cal_valid         = Steering_IsCalibrated();
+    in.centering_finished = (centering == CENTERING_DONE) ||
+                            (centering == CENTERING_FAULT);
+    in.centering_recovered = Steering_IsCalibrated();
 
-    {
-        const CenteringState_t cs = SteeringCentering_GetState();
-        in.centering_finished  = (cs == CENTERING_DONE) || (cs == CENTERING_FAULT);
-        in.centering_recovered = Steering_IsCalibrated();
-    }
-
-    /* --- Encoder Z policy -------------------------------------------- */
-    in.z_required     = (STEERING_Z_REQUIRED != 0);
+    in.z_required = (STEERING_Z_REQUIRED != 0);
     {
         const SteeringZStatus_t zs = SteeringZ_GetStatus();
         in.z_status       = (int)zs;
@@ -105,10 +115,6 @@ void SteeringSupervisor_Service(void)
 
     SteeringSupervisor_Apply(&in);
 
-    /* --- Non-isolable electrical hazard → hand to the safety subsystem *
-     * for SAFE/ERROR escalation.  Only reached after the motor has been
-     * isolated (PA6/PA7=0, PC4 LOW, PC12 OFF) and the overcurrent proved
-     * to persist on a fresh CH5 sample.                                  */
     if (SteeringSupervisor_WantsSafe()) {
         Safety_SetError(SAFETY_ERROR_OVERCURRENT);
         Safety_SetState(SYS_STATE_SAFE);

@@ -90,7 +90,7 @@ void DriveScreen::onEnter() {
                                    2 * ui::DIAL_R + 4, 2 * ui::DIAL_R + 4);
     tiles_.setRect(DTILE_OBSTACLE,   0,   ui::SENSOR_Y, ui::SCREEN_W, ui::SENSOR_H);
     tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,
-                   ui::SCREEN_W, ui::CAR_AREA_H);
+                   ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H);
     tiles_.setRect(DTILE_STEERING,   ui::STEER_TILE_X, ui::CAR_AREA_Y,
                    ui::STEER_TILE_W, ui::CAR_AREA_H);
     tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0,
@@ -199,10 +199,10 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     {
         unsigned long tts = data.wheelEffort().timestampMs;
         curTractionStale_ = (tts == 0) ||
-                            ((frameTimeMs - tts) > can::CAN_LOSS_TIMEOUT_MS);
+                            ((frameTimeMs - tts) > ui::cfg::TELEMETRY_FAST_STALE_MS);
         unsigned long mts = data.tempMap().timestampMs;
         curTempStale_ = (mts == 0) ||
-                        ((frameTimeMs - mts) > can::CAN_LOSS_TIMEOUT_MS);
+                        ((frameTimeMs - mts) > ui::cfg::TELEMETRY_SLOW_STALE_MS);
 
         // Powertrain engaged: read the 0x313 diagnostic flag when the frame is
         // fresh.  When the wheel-diag frame is missing/stale we default to
@@ -210,7 +210,7 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         // red alarm.
         const auto& wsd = data.wheelSensorDiag();
         const bool wsdFresh = wsd.valid &&
-                              ((frameTimeMs - wsd.timestampMs) <= can::CAN_LOSS_TIMEOUT_MS);
+                              ((frameTimeMs - wsd.timestampMs) <= ui::cfg::TELEMETRY_SLOW_STALE_MS);
         curPowertrainActive_ = wsdFresh &&
                                ((wsd.flags & can::WHEEL_DIAG_FLAG_POWERTRAIN) != 0);
     }
@@ -252,7 +252,7 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     {
         unsigned long bts = data.battery().timestampMs;
         curBattStale_ = (bts == 0) ||
-                        ((frameTimeMs - bts) > can::CAN_LOSS_TIMEOUT_MS);
+                        ((frameTimeMs - bts) > ui::cfg::TELEMETRY_FAST_STALE_MS);
     }
 
     // Pedal/throttle — real Hall pedal travel published by the STM32 on the
@@ -264,7 +264,7 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     {
         unsigned long pts = data.pedal().timestampMs;
         bool pedalStale = (pts == 0) ||
-                          ((frameTimeMs - pts) > can::CAN_LOSS_TIMEOUT_MS);
+                          ((frameTimeMs - pts) > ui::cfg::TELEMETRY_FAST_STALE_MS);
         curPedalPct_ = pedalStale ? 0 : data.pedal().percent;
     }
 
@@ -301,7 +301,7 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     {
         unsigned long lts = data.lights().timestampMs;
         bool lightsStale = (lts == 0) ||
-                           ((frameTimeMs - lts) > can::CAN_LOSS_TIMEOUT_MS);
+                           ((frameTimeMs - lts) > ui::cfg::TELEMETRY_SLOW_STALE_MS);
         curFrontLedOn_ = lightsStale ? false : data.lights().frontRelayOn;
         curRearLedOn_  = lightsStale ? false : data.lights().rearRelayOn;
     }

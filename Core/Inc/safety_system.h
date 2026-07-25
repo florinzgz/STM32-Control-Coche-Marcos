@@ -284,6 +284,9 @@ typedef enum {
 
 /* Function prototypes */
 void Safety_Init(void);
+/* Rebuild the per-wheel ABS/TCS authority baseline once at the start
+ * of each 100 Hz control cycle, before ABS_Update() and TCS_Update(). */
+void Safety_ResetWheelInterventionScales(void);
 void ABS_Update(void);
 bool ABS_IsActive(void);
 void ABS_Reset(void);

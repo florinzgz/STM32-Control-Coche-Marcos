@@ -29,9 +29,36 @@
 #include "screen.h"
 #include "ui/tile_engine.h"
 #include "ui/gear_display.h"
+#include "ui/ui_config.h"
 #include "led_controller.h"
 #include <cstdint>
 #include <array>
+
+/* SafeScreen historically consumed the fixed ui_config thresholds directly.
+ * Keep those names at the existing call sites, but resolve them from the latest
+ * valid active 0x311 values.  This makes the editable Warning/Cutoff fields
+ * govern the HMI while retaining the installed defaults before telemetry is
+ * available.  The macros are intentionally scoped to this header/screen. */
+namespace safe_battery_limits {
+inline bool isCoherent(const vehicle::BatteryLimitsData& limits) {
+    return limits.valid && limits.cutoffCv > 0U &&
+           limits.warningCv > limits.cutoffCv &&
+           limits.warningCv <= ui::cfg::BATT_OV_WARN_RAW;
+}
+inline uint16_t warningRaw(const vehicle::VehicleData& data) {
+    const vehicle::BatteryLimitsData& limits = data.batteryLimits();
+    return isCoherent(limits)
+        ? limits.warningCv : ui::cfg::BATT_UV_WARN_RAW;
+}
+inline uint16_t cutoffRaw(const vehicle::VehicleData& data) {
+    const vehicle::BatteryLimitsData& limits = data.batteryLimits();
+    return isCoherent(limits)
+        ? limits.cutoffCv : ui::cfg::BATT_UV_CRIT_RAW;
+}
+}  // namespace safe_battery_limits
+
+#define BATT_UV_WARN_RAW(d) (::safe_battery_limits::warningRaw(d))
+#define BATT_UV_CRIT_RAW(d) (::safe_battery_limits::cutoffRaw(d))
 
 /// Tile indices for SafeScreen
 enum SafeTile : uint8_t {
@@ -128,12 +155,12 @@ private:
     bool     previ2cEverOk_     = true;
 
     // Main battery indicator (passive, read-only) — voltage from CAN 0x207,
-    // INA-BAT health from CAN 0x309.  State computed in update() so draw() and
-    // the tile hash stay deterministic for a given (VehicleData, frameTimeMs).
-    uint16_t batVoltRaw_     = 0;            // 0.01 V units (display only)
-    BatState batState_       = BatState::NoData;
-    bool     batSafe_        = false;        // SAFE forced by a battery error code
-    unsigned long batAgeMs_  = 0;            // age of last 0x207 frame
+    // INA-BAT health from CAN 0x309. LOW/CRITICAL uses active 0x311 limits via
+    // the scoped compatibility expressions above, with safe fallback defaults.
+    uint16_t batVoltRaw_      = 0;            // 0.01 V units (display only)
+    BatState batState_        = BatState::NoData;
+    bool     batSafe_         = false;        // SAFE forced by a battery error code
+    unsigned long batAgeMs_   = 0;            // age of last 0x207 frame
 };
 
 #endif // SAFE_SCREEN_H

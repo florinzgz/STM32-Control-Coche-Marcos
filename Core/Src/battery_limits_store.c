@@ -2,30 +2,15 @@
   ****************************************************************************
   * @file    battery_limits_store.c
   * @brief   Persistent battery-limit storage — flash persistence
-  *
-  * Stores the runtime-tunable battery-voltage protection thresholds (low-V
-  * warning, derate limit, SAFE cutoff, recovery, voltage filter) in flash
-  * page 120 (0x08078000, 4 KB) of the STM32G474RE.  A 32-bit CRC32 checksum
-  * plus a 32-bit magic word ("BAT1") provide integrity, identical to the
-  * proven gear_limits_store.c implementation.
-  *
-  * Page 120 is reserved for battery limits only and is separate from page
-  * 121 (drive tuning), 122 (gear limits), 123 (sensor map), 124 (pedal cal),
-  * 125 (error log), 126 (steering cal) and 127 (EPS params).
-  *
-  * Safety invariants:
-  *   - The safety STATE MACHINE is not modified; only the threshold values
-  *     it compares against become runtime variables.  With defaults the
-  *     comparisons reproduce the historic #define values exactly.
-  *   - Flash data alone NEVER authorises ACTIVE or clears startup_inhibit.
-  *   - On CRC / magic / range failure: silent fallback to defaults.  Boot
-  *     is never blocked.
   ****************************************************************************
   */
 
 #include "battery_limits_store.h"
+#include "battery_service_policy.h"
 #include "stm32g4xx_hal.h"
 #include "safety_system.h"
+#include "motor_control.h"
+#include "sensor_manager.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -40,33 +25,33 @@
 /* ---- Flash-wear rate limit ---- */
 #define BATT_WRITE_MIN_INTERVAL_MS  1000U
 
-/* ---- On-flash slot format ----
- * Exactly 24 bytes, double-word aligned (3 doublewords).               */
+/* A service save outside STANDBY is accepted only when the vehicle is proven
+ * stationary and no traction command can reach the hardware.  This closes the
+ * deadlock where a low-voltage warning itself keeps the state in DEGRADED and
+ * therefore made it impossible to correct the thresholds from the HMI. */
+#define BATT_SERVICE_PEDAL_MAX_PCT  3.0f
+#define BATT_SERVICE_SPEED_MAX_KMH  0.5f
+
 typedef struct {
-    uint32_t magic;          /* BATT_MAGIC                              */
-    uint16_t warning_cv;     /* low-V warning (centivolts)              */
-    uint16_t limit_cv;       /* derate threshold (centivolts)           */
-    uint16_t cutoff_cv;      /* SAFE cutoff (centivolts)                */
-    uint16_t recovery_cv;    /* recovery threshold (centivolts)         */
-    uint16_t filter_ms;      /* voltage filter time constant (ms)       */
-    uint8_t  validity_flag;  /* BATT_VALID_FLAG when committed          */
-    uint8_t  reserved0;      /* padding                                 */
-    uint32_t reserved1;      /* padding / future use                    */
-    uint32_t checksum;       /* CRC32 of all fields before this field   */
+    uint32_t magic;
+    uint16_t warning_cv;
+    uint16_t limit_cv;
+    uint16_t cutoff_cv;
+    uint16_t recovery_cv;
+    uint16_t filter_ms;
+    uint8_t  validity_flag;
+    uint8_t  reserved0;
+    uint32_t reserved1;
+    uint32_t checksum;
 } batt_flash_slot_t;
 
-/* Compile-time guarantee that the on-flash layout is exactly 24 bytes. */
 typedef char batt_size_check_[(sizeof(batt_flash_slot_t) == 24) ? 1 : -1];
 
-/* ---- RAM state ---- */
 static bool            batt_flash_valid = false;
 static BatteryLimits_t batt_stored      = {0};
+static bool             batt_has_written_once = false;
+static uint32_t         batt_last_write_tick  = 0U;
 
-/* ---- Flash-wear rate-limit bookkeeping ---- */
-static bool     batt_has_written_once = false;
-static uint32_t batt_last_write_tick  = 0U;
-
-/* ---- CRC32 (same polynomial as gear_limits_store) ---- */
 static uint32_t batt_crc32(const void *data, uint32_t len)
 {
     const uint8_t *p = (const uint8_t *)data;
@@ -91,9 +76,57 @@ static bool batt_slot_integrity_ok(const batt_flash_slot_t *slot)
     return (crc == slot->checksum);
 }
 
-/* ==================================================================
- *  Public API
- * ================================================================== */
+bool BatteryLimitsStore_ServiceWriteAllowed(void)
+{
+    const SystemState_t state = Safety_GetState();
+
+    BatteryServiceWriteInputs in;
+    memset(&in, 0, sizeof(in));
+    in.in_standby = (state == SYS_STATE_STANDBY);
+
+    /* Preserve the established STANDBY configuration path without touching
+     * live sensor getters.  The pure policy still owns this decision. */
+    if (in.in_standby) {
+        return BatteryServiceWrite_Evaluate(&in,
+                                            BATT_SERVICE_PEDAL_MAX_PCT,
+                                            BATT_SERVICE_SPEED_MAX_KMH);
+    }
+
+    in.in_active   = (state == SYS_STATE_ACTIVE);
+    in.in_degraded = (state == SYS_STATE_DEGRADED);
+    in.degraded_is_battery_uv_warning =
+        (Safety_GetError() == SAFETY_ERROR_BATTERY_UV_WARNING);
+
+    const GearPosition_t gear = Traction_GetGear();
+    in.gear_is_park_or_neutral =
+        (gear == GEAR_PARK) || (gear == GEAR_NEUTRAL);
+    in.pedal_pct = Pedal_GetPercent();
+
+    /* Use exact raw ticks from the resolved physical-output telemetry.  The
+     * percentage getter truncates values below 1%, which could otherwise hide
+     * the final few ticks of Neutral's ramp.  A missing state pointer fails
+     * closed by keeping UINT16_MAX. */
+    const TractionState_t *traction = Traction_GetState();
+    in.final_pwm_ticks = UINT16_MAX;
+    if (traction != NULL) {
+        in.final_pwm_ticks = 0U;
+        for (uint8_t i = 0U; i < 4U; ++i) {
+            if (traction->wheels[i].pwm > in.final_pwm_ticks) {
+                in.final_pwm_ticks = traction->wheels[i].pwm;
+            }
+        }
+    }
+
+    in.active_brake_pwm_ticks = Motor_GetBrakeActiveOverride();
+    in.wheel_speed_kmh[0] = Wheel_GetSpeed_FL();
+    in.wheel_speed_kmh[1] = Wheel_GetSpeed_FR();
+    in.wheel_speed_kmh[2] = Wheel_GetSpeed_RL();
+    in.wheel_speed_kmh[3] = Wheel_GetSpeed_RR();
+
+    return BatteryServiceWrite_Evaluate(&in,
+                                        BATT_SERVICE_PEDAL_MAX_PCT,
+                                        BATT_SERVICE_SPEED_MAX_KMH);
+}
 
 void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out)
 {
@@ -107,25 +140,7 @@ void BatteryLimitsStore_GetDefaults(BatteryLimits_t *out)
 
 bool BatteryLimitsStore_Validate(const BatteryLimits_t *b)
 {
-    if (!b) return false;
-
-    /* Hard ranges. */
-    if (b->warning_cv  < BATT_WARNING_MIN_CV  || b->warning_cv  > BATT_WARNING_MAX_CV)  return false;
-    if (b->limit_cv    < BATT_LIMIT_MIN_CV    || b->limit_cv    > BATT_LIMIT_MAX_CV)    return false;
-    if (b->cutoff_cv   < BATT_CUTOFF_MIN_CV   || b->cutoff_cv   > BATT_CUTOFF_MAX_CV)   return false;
-    if (b->recovery_cv < BATT_RECOVERY_MIN_CV || b->recovery_cv > BATT_RECOVERY_MAX_CV) return false;
-#if (BATT_FILTER_MIN_MS > 0U)
-    if (b->filter_ms   < BATT_FILTER_MIN_MS)                                             return false;
-#endif
-    if (b->filter_ms   > BATT_FILTER_MAX_MS)                                             return false;
-
-    /* Coherence rules (FASE 4). */
-    if (b->warning_cv  <= b->cutoff_cv)   return false;  /* Warning  > Cutoff   */
-    if (b->limit_cv    <= b->cutoff_cv)   return false;  /* Limit    > Cutoff   */
-    if (b->recovery_cv <= b->cutoff_cv)   return false;  /* Recovery > Cutoff   */
-    if (b->warning_cv  >  BATT_OV_WARNING_CV) return false; /* Warning <= OV    */
-    if (b->limit_cv    >  BATT_OV_WARNING_CV) return false; /* Limit   <= OV    */
-    return true;
+    return BatteryLimits_ValidateValues(b);
 }
 
 void BatteryLimitsStore_Init(void)
@@ -138,7 +153,7 @@ void BatteryLimitsStore_Init(void)
     const batt_flash_slot_t *slot = (const batt_flash_slot_t *)BATT_FLASH_BASE;
 
     if (!batt_slot_integrity_ok(slot))
-        return;  /* silent fallback to defaults */
+        return;
 
     BatteryLimits_t cand;
     cand.warning_cv  = slot->warning_cv;
@@ -168,14 +183,12 @@ bool BatteryLimitsStore_Save(const BatteryLimits_t *b)
 {
     if (!b) return false;
 
-    /* Defense in depth: never persist while actuators may be live. */
-    if (Safety_GetState() != SYS_STATE_STANDBY)
+    if (!BatteryLimitsStore_ServiceWriteAllowed())
         return false;
 
     if (!BatteryLimitsStore_Validate(b))
         return false;
 
-    /* Flash-wear guard #1 — no-op elision. */
     if (batt_flash_valid &&
         batt_stored.warning_cv  == b->warning_cv  &&
         batt_stored.limit_cv    == b->limit_cv    &&
@@ -185,7 +198,6 @@ bool BatteryLimitsStore_Save(const BatteryLimits_t *b)
         return true;
     }
 
-    /* Flash-wear guard #2 — minimum write interval. */
     uint32_t now = HAL_GetTick();
     if (batt_has_written_once &&
         (uint32_t)(now - batt_last_write_tick) < BATT_WRITE_MIN_INTERVAL_MS) {

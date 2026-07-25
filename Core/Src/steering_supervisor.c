@@ -348,3 +348,8 @@ void SteeringSupervisor_Apply(const SteeringSupervisorInputs *in)
 bool SteeringSupervisor_WantsSafe(void)      { return s_want_safe; }
 EpsFaultReason_t SteeringSupervisor_LastCause(void) { return s_last_cause; }
 OcState_t SteeringSupervisor_OcState(void)   { return s_oc.state; }
+bool SteeringSupervisor_NeedsPostIsolationSample(void)
+{
+    return s_oc.state == OC_STATE_CONFIRM_WAIT ||
+           s_oc.state == OC_STATE_ISOLATED_UNCONFIRMED;
+}

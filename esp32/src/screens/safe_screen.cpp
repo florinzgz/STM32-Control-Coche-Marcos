@@ -206,12 +206,12 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         } else if (inaBatFail) {
             batState_ = BatState::InaFail;
         } else if (batVoltRaw_ == 0 ||
-                   batVoltRaw_ < BATT_UV_CRIT_RAW ||
+                   batVoltRaw_ < BATT_UV_CRIT_RAW(data) ||
                    batVoltRaw_ > BATT_OV_CRIT_RAW ||
                    errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_CRIT ||
                    errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_CRIT) {
             batState_ = BatState::Critical;
-        } else if (batVoltRaw_ < BATT_UV_WARN_RAW ||
+        } else if (batVoltRaw_ < BATT_UV_WARN_RAW(data) ||
                    batVoltRaw_ > BATT_OV_WARN_RAW ||
                    errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_WARN ||
                    errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_WARN) {

@@ -9,7 +9,7 @@
 
 namespace ui {
 
-// 24V lead-acid/LiFePO4 pack: 18.0V = 0%, 25.2V = 100%
+// Installed traction pack display: 16.0 V = 0%, 28.5 V = 100%.
 static constexpr uint16_t BATT_MIN_RAW = cfg::BATT_VOLTAGE_MIN_RAW;
 static constexpr uint16_t BATT_MAX_RAW = cfg::BATT_VOLTAGE_MAX_RAW;
 

@@ -1,0 +1,186 @@
+name: PR436 Field Fixes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Core/Src/main.c'
+      - 'Core/Src/steering_centering.c'
+      - 'Core/Src/steering_centering_patched.c'
+      - 'Core/Src/steering_centering_diag.c'
+      - 'Core/Src/steering_supervisor.c'
+      - 'Core/Src/steering_supervisor_io.c'
+      - 'Core/Inc/steering_supervisor.h'
+      - 'Core/Src/steering_eps.c'
+      - 'Core/Src/steering_output.c'
+      - 'Core/Src/test_centering_pc12_gate.c'
+      - 'Core/Src/motor_control.c'
+      - 'Core/Src/motor_control_patched.c'
+      - 'Core/Src/tcs_tuned.c'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/safety_system_patched.c'
+      - 'Core/Inc/safety_system.h'
+      - 'Core/Inc/traction_output_policy.h'
+      - 'Core/Inc/drive_dynamics_policy.h'
+      - 'Core/Inc/build_sanity_checks.h'
+      - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_drive_dynamics_policy.c'
+      - 'Core/Src/battery_limits_store.c'
+      - 'Core/Inc/battery_limits_store.h'
+      - 'Core/Inc/battery_service_policy.h'
+      - 'Core/Src/test_battery_limits.c'
+      - 'Core/Src/can_handler.c'
+      - 'esp32/include/can_ids.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
+      - 'esp32/src/screens/safe_screen.cpp'
+      - 'esp32/src/screens/safe_screen.h'
+      - 'esp32/src/ui/battery_indicator.cpp'
+      - 'esp32/src/ui/ui_config.h'
+      - 'analysis_artifacts/stubs/**'
+      - '.github/workflows/pr436-field-fixes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  effective-homing-wrapper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Compile and run PC12 gate against effective wrapper
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+            -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+            -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+            Core/Src/test_centering_pc12_gate.c \
+            Core/Src/steering_centering_patched.c \
+            Core/Src/steering_centering_diag.c \
+            Core/Src/steering_eps.c \
+            Core/Src/steering_output.c \
+            Core/Src/steering_supervisor_io.c \
+            Core/Src/steering_supervisor.c \
+            Core/Src/safety_system_patched.c \
+            Core/Src/boot_validation.c \
+            Core/Src/ina226_channel_diag.c \
+            Core/Src/math_safety.c \
+            -lm -o /tmp/test_centering_pc12_gate_effective
+          /tmp/test_centering_pc12_gate_effective
+
+  field-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Execute steering, traction, HMI and battery contracts
+        run: |
+          set -euo pipefail
+
+          grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define REVERSE_DEADTIME_MS[[:space:]]+100U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define ENDSTOP_CONFIRM_SAMPLES[[:space:]]+2U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define ENDSTOP_HARD_CURRENT_MA[[:space:]]+20000U$' Core/Src/steering_centering_patched.c
+          grep -q 'current >= ENDSTOP_HARD_CURRENT_MA' Core/Src/steering_centering_patched.c
+          grep -q 's_guard.hard_current_samples' Core/Src/steering_centering_patched.c
+          ! grep -q 'ServiceMode_IsEnabled(MODULE_STEER_CENTER)' Core/Src/steering_centering_patched.c
+          grep -q '!Encoder_HasFault()' Core/Src/steering_centering_patched.c
+          grep -q 's_diag.pwm_requested = 0U' Core/Src/steering_centering_patched.c
+          grep -q 'SteeringSupervisor_NeedsPostIsolationSample' Core/Src/steering_supervisor_io.c
+
+          grep -q 'return wheel == MOTOR_RL || wheel == MOTOR_RR;' Core/Src/motor_control_patched.c
+          grep -q 'return Traction_IsWheelDriven(idx);' Core/Src/safety_system_patched.c
+          grep -q 'shadow_resolved_pwm' Core/Src/motor_control_patched.c
+          grep -q 'TractionOutput_Resolve4x4' Core/Src/motor_control_patched.c
+          grep -q 'TractionOutput_Resolve4x2Rear' Core/Src/motor_control_patched.c
+          grep -q 'apply_plan' Core/Src/motor_control_patched.c
+
+          grep -Eq '^#define DRIVE_TCS_MIN_REFERENCE_KMH[[:space:]]+6\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_TCS_SLIP_THRESHOLD_PCT[[:space:]]+25\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_TCS_REDUCTION_RATE_PER_S[[:space:]]+1\.00f$' Core/Inc/drive_dynamics_policy.h
+          grep -q 'DriveDynamics_TcsReductionNext' Core/Src/tcs_tuned.c
+          grep -q 'TCS_Update_Tuned' Core/Inc/build_sanity_checks.h
+          ! grep -q 'Traction_SetDemand' Core/Src/tcs_tuned.c
+
+          python3 - <<'PY'
+          main = open('Core/Src/main.c', encoding='utf-8').read()
+          cycle = main.index('Wheel_UpdateSpeeds();')
+          reset_call = main.index('Safety_ResetWheelInterventionScales();', cycle)
+          abs_call = main.index('ABS_Update();', reset_call)
+          tcs_call = main.index('TCS_Update();', abs_call)
+          traction_call = main.index('Traction_Update();', tcs_call)
+          assert cycle < reset_call < abs_call < tcs_call < traction_call
+
+          header = open('Core/Inc/safety_system.h', encoding='utf-8').read()
+          assert 'void Safety_ResetWheelInterventionScales(void);' in header
+
+          safety = open('Core/Src/safety_system_patched.c', encoding='utf-8').read()
+          reset_fn = safety.index('void Safety_ResetWheelInterventionScales(void)')
+          abs_fn = safety.index('void ABS_Update(void)', reset_fn)
+          defensive_reset = safety.index('Safety_ResetWheelInterventionScales();', abs_fn)
+          abs_gate = safety.index('if (!ServiceMode_IsEnabled(MODULE_ABS)', abs_fn)
+          assert reset_fn < abs_fn < defensive_reset < abs_gate
+          PY
+
+          grep -q 'Steering_ControlLoop_Base' Core/Src/motor_control_patched.c
+          grep -q 'theta_real - eps_prev_angle_deg' Core/Src/motor_control_patched.c
+          grep -q 'eps_prev_angle_deg = theta_real' Core/Src/motor_control_patched.c
+          grep -Eq '^#define DRIVE_EPS_INTENT_OMEGA_LO_DPS[[:space:]]+0\.5f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define DRIVE_EPS_INTENT_OMEGA_HI_DPS[[:space:]]+4\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -Eq '^#define PR_ENC_FROZEN_TIMEOUT_MS[[:space:]]+500U$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define PR_ENC_MOTOR_ACTIVE_PCT[[:space:]]+20\.0f$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define PR_ENC_FROZEN_CONFIRM_CYCLES[[:space:]]+2U$' Core/Src/motor_control_patched.c
+          grep -Eq '^#define DRIVE_DYNBRAKE_MAX_PCT[[:space:]]+30\.0f$' Core/Inc/drive_dynamics_policy.h
+          grep -q 'DriveDynamics_DynbrakeLimitedPct' Core/Src/motor_control_patched.c
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_traction_output_policy.c \
+            -lm -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_drive_dynamics_policy.c \
+            -lm -o /tmp/test_drive_dynamics_policy
+          /tmp/test_drive_dynamics_policy
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_battery_limits.c \
+            -lm -o /tmp/test_battery_limits_pr436
+          /tmp/test_battery_limits_pr436
+
+          grep -q 'return BatteryLimitsStore_ServiceWriteAllowed();' Core/Src/can_handler.c
+          grep -q 'BatteryServiceWrite_Evaluate' Core/Src/battery_limits_store.c
+          grep -q 'Motor_GetBrakeActiveOverride' Core/Src/battery_limits_store.c
+          grep -q 'raw_voltage < uv_cutoff_v' Core/Src/safety_system.c
+          grep -Eq '^#define BATT_WARNING_DEFAULT_CV[[:space:]]+1800U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_LIMIT_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_CUTOFF_DEFAULT_CV[[:space:]]+1600U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_RECOVERY_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_FILTER_DEFAULT_MS[[:space:]]+500U$' Core/Inc/battery_limits_store.h
+          grep -q 'isCoherent(const vehicle::BatteryLimitsData& limits)' esp32/src/screens/safe_screen.h
+          grep -q '#define BATT_UV_WARN_RAW(d)' esp32/src/screens/safe_screen.h
+          grep -q '#define BATT_UV_CRIT_RAW(d)' esp32/src/screens/safe_screen.h
+          grep -q 'BATT_UV_WARN_RAW(data)' esp32/src/screens/safe_screen.cpp
+          grep -q 'BATT_UV_CRIT_RAW(data)' esp32/src/screens/safe_screen.cpp
+          grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
+          grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
+
+          # HMI telemetry freshness is presentation-only.  The 1500 ms heartbeat
+          # safety timeout remains untouched while 10 Hz and 1 Hz visual data use
+          # cadence-aware windows that prevent OK/SIN DATOS oscillation.
+          grep -Eq 'TELEMETRY_FAST_STALE_MS = 2500UL;' esp32/src/ui/ui_config.h
+          grep -Eq 'TELEMETRY_SLOW_STALE_MS = 3000UL;' esp32/src/ui/ui_config.h
+          grep -q 'ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - tts) > ui::cfg::TELEMETRY_FAST_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - mts) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - bts) > ui::cfg::TELEMETRY_FAST_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - lts) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(frameTimeMs - hts) <= can::CAN_LOSS_TIMEOUT_MS' esp32/src/screens/drive_screen.cpp
+          grep -q '(millis() - wd.timestampMs) > ui::cfg::TELEMETRY_SLOW_STALE_MS' esp32/src/screens/engineering_screen.cpp

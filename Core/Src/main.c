@@ -455,6 +455,10 @@ int main(void)
              * Must precede ABS/TCS/Safety which read Wheel_GetSpeed_*().*/
             Wheel_UpdateSpeeds();
 
+            /* Start every ABS/TCS arbitration cycle from full per-wheel
+             * authority.  ABS and tuned TCS may only lower the current
+             * cycle values; no historical reduction can remain latched. */
+            Safety_ResetWheelInterventionScales();
             ABS_Update();
             TCS_Update();
             Safety_CheckCurrent();

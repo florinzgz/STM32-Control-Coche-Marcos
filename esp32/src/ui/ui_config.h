@@ -96,6 +96,18 @@ inline constexpr uint8_t THR_TRACTION_DELTA  = 2;
 inline constexpr int8_t  THR_TEMP_DELTA      = 1;
 
 // =========================================================================
+// Visual Telemetry Freshness (presentation only)
+//
+// Keep per-signal display freshness separate from the 1500 ms
+// heartbeat safety timeout.  Fast frames get ample tolerance for a
+// short receive/scheduling gap; 1 Hz frames require three missed
+// periods before the HMI replaces their last valid value.
+// =========================================================================
+
+inline constexpr unsigned long TELEMETRY_FAST_STALE_MS = 2500UL;
+inline constexpr unsigned long TELEMETRY_SLOW_STALE_MS = 3000UL;
+
+// =========================================================================
 // Battery Indicator Hysteresis
 //
 // Text on the battery bar switches between dark-on-color and light-on-bg.
@@ -109,9 +121,9 @@ inline constexpr uint8_t BATT_HYSTERESIS_HIGH = 55;
 // Switch FROM dark text when fill < this %
 inline constexpr uint8_t BATT_HYSTERESIS_LOW  = 45;
 
-// Battery voltage range (0.01V units) for 24V pack
-inline constexpr uint16_t BATT_VOLTAGE_MIN_RAW = 1800;  // 18.00 V = 0%
-inline constexpr uint16_t BATT_VOLTAGE_MAX_RAW = 2520;  // 25.20 V = 100%
+// Installed traction-pack visual range (0.01V units).
+inline constexpr uint16_t BATT_VOLTAGE_MIN_RAW = 1600;  // 16.00 V = 0%
+inline constexpr uint16_t BATT_VOLTAGE_MAX_RAW = 2850;  // 28.50 V = 100%
 
 // =========================================================================
 // ACK Visual Feedback
@@ -322,8 +334,8 @@ inline constexpr unsigned long BAT_DIAG_STALE_MS = 2000;
 
 // Battery voltage thresholds (0.01 V units) mirroring the STM32 firmware limits
 // reported via SafetyError codes (BATTERY_UV_WARN/CRIT, BATTERY_OV_WARN/CRIT).
-inline constexpr uint16_t BATT_UV_WARN_RAW = 2000;  // < 20.0 V → LOW  (amber)
-inline constexpr uint16_t BATT_UV_CRIT_RAW = 1800;  // < 18.0 V → CRITICAL (red)
+inline constexpr uint16_t BATT_UV_WARN_RAW = 1800;  // < 18.0 V → LOW  (amber)
+inline constexpr uint16_t BATT_UV_CRIT_RAW = 1600;  // < 16.0 V → CRITICAL (red)
 inline constexpr uint16_t BATT_OV_WARN_RAW = 3000;  // > 30.0 V → HIGH (amber)
 inline constexpr uint16_t BATT_OV_CRIT_RAW = 3500;  // > 35.0 V → CRITICAL (red)
 

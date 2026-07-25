@@ -1,13 +1,11 @@
 /**
   ******************************************************************************
   * @file    build_sanity_checks.h
-  * @brief   Compile-time validation — catches CubeMX regressions early.
+  * @brief   Compile-time validation and productive entry-point routing.
   *
-  *          PURE preprocessor logic.  No variables, no functions, no memory,
-  *          no runtime cost.  Include ONCE from main.c after all other headers.
-  *
-  *          Fails compilation (#error) only when something is clearly broken.
-  *          Uses #warning for non-critical hints (compiler-dependent).
+  *          Include ONCE from main.c after all other headers.  The checks catch
+  *          CubeMX regressions early and the final section selects the tuned TCS
+  *          entry point without changing the auditable legacy wrappers.
   ******************************************************************************
   */
 
@@ -121,5 +119,17 @@
   #endif
 
 #endif /* __GNUC__ */
+
+/* ========================================================================== */
+/*  5) Productive TCS entry point                                             */
+/* ========================================================================== */
+/* main.c includes this file after safety_system.h.  Route only the scheduler
+ * call to the quantisation-tolerant implementation; the legacy and patched
+ * symbols remain available to their focused host tests and audits. */
+void TCS_Update_Tuned(void);
+#ifdef TCS_Update
+  #undef TCS_Update
+#endif
+#define TCS_Update TCS_Update_Tuned
 
 #endif /* BUILD_SANITY_CHECKS_H */

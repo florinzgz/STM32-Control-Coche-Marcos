@@ -24,6 +24,13 @@
   *              - ANY latched fault forces PC12 OFF and prevents every
   *                reconnection for the rest of the power cycle.
   *
+  *          The same source also contains wrapper-specific field cases.  They
+  *          execute only when steering_centering_patched.c is linked:
+  *              - PB5 active-low completion works even when its optional
+  *                service module is disabled and no EXTI edge is injected;
+  *              - two fresh >=20 A CH5 samples cut PWM even while encoder counts
+  *                continue changing, followed by the full 100 ms dead-time.
+  *
   *          Per-TU host GPIO model: steering_centering.c commands PC12 in its
   *          OWN translation unit, while Safety_SteerRelaySupervise() reads PC12
   *          in the safety TU.  The write observer mirrors the centering FSM's
@@ -31,12 +38,12 @@
   *          so the supervisor decides on the SAME PC12 the homing FSM raised —
   *          faithfully modelling the single shared GPIOC register on hardware.
   *
-  *          Compile (from repository root):
+  *          Compile the effective wrapper from repository root:
   *            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
   *                -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
   *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
   *                Core/Src/test_centering_pc12_gate.c \
-  *                Core/Src/steering_centering.c \
+  *                Core/Src/steering_centering_patched.c \
   *                Core/Src/steering_centering_diag.c \
   *                Core/Src/steering_eps.c \
   *                Core/Src/steering_output.c \
@@ -56,6 +63,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "safety_system.h"
@@ -71,6 +79,7 @@
 #include "relay_health_diag.h"
 #include "steering_eps.h"
 #include "steering_centering.h"
+#include "steering_centering_diag.h"
 #include "steering_supervisor.h"
 #include "steering_z.h"
 #include "ina226_channel_diag.h"
@@ -96,12 +105,31 @@ bool i2c_init_ok   = true;
 /* ---- Centering / encoder hardware model. ---- */
 static bool     s_encoder_fault = false;   /* Encoder_HasFault() latch    */
 static bool     s_center_found  = false;   /* PB5 inductive centre pulse  */
+static bool     s_pb5_active    = false;   /* shared raw active-low level */
 static bool     s_calibrated    = false;   /* Steering_IsCalibrated()     */
 
-/* PWM-start instrumentation: capture whether PC12 was ON the instant the
- * homing sweep first commanded steering PWM. */
-static bool s_pwm_started      = false;
-static bool s_pc12_on_at_pwm   = false;
+/* Strong host override for the weak hook in steering_centering_patched.c.
+ * It avoids the HAL stub's intentional per-translation-unit GPIO copies. */
+bool SteeringCentering_TestPb5Active(void) { return s_pb5_active; }
+
+/* The legacy host suite also links this test against steering_centering.c.
+ * The weak marker is present only in the effective patched wrapper, so the two
+ * wrapper-specific tests can be skipped in the legacy/base linkage while the
+ * dedicated PR workflow must execute them. */
+extern bool SteeringCentering_EffectiveWrapperPresent(void)
+    __attribute__((weak));
+
+static bool effective_wrapper_present(void)
+{
+    return SteeringCentering_EffectiveWrapperPresent != NULL &&
+           SteeringCentering_EffectiveWrapperPresent();
+}
+
+/* PWM instrumentation: capture start conditions and the latest command. */
+static bool     s_pwm_started        = false;
+static bool     s_pc12_on_at_pwm     = false;
+static uint16_t s_last_steer_pwm     = 0U;
+static bool     s_last_steer_reverse = false;
 
 static TIM_TypeDef  fake_tim2_regs;
 static TIM_TypeDef  fake_tim3_regs;
@@ -161,6 +189,8 @@ GearPosition_t Traction_GetGear(void)       { return (GearPosition_t)0; }
 void  Traction_SetGear(GearPosition_t g)    { (void)g; }
 const TractionState_t* Traction_GetState(void) { static TractionState_t s; return &s; }
 
+/* Intentionally leave MODULE_STEER_CENTER disabled.  PB5 homing must not depend
+ * on this optional service-mode flag. */
 bool  ServiceMode_IsEnabled(ModuleID_t id)   { return (id == MODULE_STEER_ENCODER); }
 ModuleFault_t ServiceMode_GetFault(ModuleID_t id) { (void)id; return (ModuleFault_t)0; }
 void  ServiceMode_SetFault(ModuleID_t id, ModuleFault_t f) { (void)id; (void)f; }
@@ -192,10 +222,11 @@ void  ErrorLog_Record(uint8_t code, uint8_t subsystem, uint8_t st, uint8_t flags
 /* ---- Centering hardware boundary ---- */
 void  Motor_SetPWM_Steering(uint16_t pwm, bool reverse)
 {
-    (void)pwm; (void)reverse;
+    s_last_steer_pwm = pwm;
+    s_last_steer_reverse = reverse;
     /* The homing sweep just commanded PWM: record whether PC12 was already ON
      * (the whole point of the gate fix). */
-    if (!s_pwm_started) {
+    if (pwm > 0U && !s_pwm_started) {
         s_pwm_started    = true;
         s_pc12_on_at_pwm = pc12_on();
     }
@@ -260,14 +291,17 @@ static void set_encoder(int32_t v) { fake_tim2_regs.CNT = (uint32_t)v; }
  * homing FSM back at IDLE. */
 static void bring_up_standby_healthy(void)
 {
-    g_stub_hal_tick   = 0;
-    s_encoder_fault   = false;
-    s_center_found    = false;
-    s_calibrated      = false;
-    s_pwm_started     = false;
-    s_pc12_on_at_pwm  = false;
-    s_pc12_set_writes = 0;
-    s_mirror_guard    = false;
+    g_stub_hal_tick      = 0;
+    s_encoder_fault      = false;
+    s_center_found       = false;
+    s_pb5_active         = false;
+    s_calibrated         = false;
+    s_pwm_started        = false;
+    s_pc12_on_at_pwm     = false;
+    s_last_steer_pwm     = 0U;
+    s_last_steer_reverse = false;
+    s_pc12_set_writes    = 0;
+    s_mirror_guard       = false;
 
     htim2.Instance = &fake_tim2_regs;
     htim3.Instance = &fake_tim3_regs;
@@ -298,7 +332,7 @@ static void bring_up_standby_healthy(void)
 
 /* One 10 ms (100 Hz) main-loop pass in the EXACT production order.  Each new
  * cycle advances the real CH5 acquisition identity so the supervisor treats it
- * as a genuine fresh 20 Hz-style sample. */
+ * as a genuine fresh sample. */
 static void main_cycle(void)
 {
     g_stub_hal_tick += 10U;
@@ -321,6 +355,14 @@ static void main_cycle(void)
     }
     SteeringCentering_UpdateDiag();
     SteeringSupervisor_Service();
+}
+
+static void advance_to_left_sweep(void)
+{
+    int guard = 0;
+    while (!s_pwm_started && guard++ < 50) main_cycle();
+    CHECK(s_pwm_started);
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
 }
 
 /* ==================================================================
@@ -372,9 +414,7 @@ static void test_latched_fault_kills_pc12_forever(void)
     bring_up_standby_healthy();
 
     /* Start the sweep exactly as before (PC12 ON). */
-    int guard = 0;
-    while (!s_pwm_started && guard++ < 50) main_cycle();
-    CHECK(s_pwm_started);
+    advance_to_left_sweep();
     CHECK(pc12_on());
 
     /* Latch an encoder A/B fault: the REAL homing FSM aborts → isolates the
@@ -397,10 +437,88 @@ static void test_latched_fault_kills_pc12_forever(void)
     CHECK(Steering_IsMechanicalOnly());          /* still latched                  */
 }
 
+/* ==================================================================
+ *  Test 3: PB5 level remains mandatory even when service mode disables it.
+ * ================================================================== */
+static void test_pb5_level_ignores_optional_service_disable(void)
+{
+    bring_up_standby_healthy();
+    CHECK(!ServiceMode_IsEnabled(MODULE_STEER_CENTER));
+    advance_to_left_sweep();
+
+    /* No EXTI/event flag: only the raw active-low level is presented. */
+    s_center_found = false;
+    s_pb5_active = true;
+
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+    main_cycle();
+
+    CHECK(SteeringCentering_GetState() == CENTERING_DONE);
+    CHECK(Steering_IsCalibrated());
+    CHECK(!Steering_IsMechanicalOnly());
+}
+
+/* ==================================================================
+ *  Test 4: two fresh >=20 A samples cut even while encoder still changes.
+ * ================================================================== */
+static void test_hard_current_cuts_while_encoder_moves(void)
+{
+    bring_up_standby_healthy();
+    advance_to_left_sweep();
+
+    /* Prime the end-stop observation in the current sweep with a normal sample. */
+    set_encoder(5);
+    g_ch5.signed_current_ma = 0;
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+
+    /* First hard-current acquisition while encoder moves: reject as a lone spike. */
+    set_encoder(10);
+    g_ch5.signed_current_ma = 21000;
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+    CHECK(SteeringCentering_GetDiag()->pwm_requested == 4249U);
+
+    /* Second genuinely fresh hard-current acquisition while it STILL moves:
+     * torque must be zeroed immediately and reversal dead-time must begin. */
+    set_encoder(15);
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+    CHECK(SteeringCentering_GetDiag()->pwm_requested == 0U);
+    CHECK(s_last_steer_pwm == 0U);
+
+    /* 90 ms is still inside the mandatory 100 ms zero-output interval. */
+    for (int i = 0; i < 9; ++i) {
+        set_encoder(20 + i * 5);
+        main_cycle();
+        CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+        CHECK(SteeringCentering_GetDiag()->pwm_requested == 0U);
+        CHECK(s_last_steer_pwm == 0U);
+    }
+
+    /* At/after 100 ms the right sweep may start, but never earlier. */
+    set_encoder(70);
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_RIGHT);
+    CHECK(SteeringCentering_GetDiag()->pwm_requested == 4249U);
+    CHECK(s_last_steer_pwm == 4249U);
+    CHECK(!s_last_steer_reverse);  /* base right-sweep convention */
+}
+
 int main(void)
 {
     test_homing_keeps_pc12_on_and_completes();
     test_latched_fault_kills_pc12_forever();
+
+    if (effective_wrapper_present()) {
+        test_pb5_level_ignores_optional_service_disable();
+        test_hard_current_cuts_while_encoder_moves();
+    } else {
+        printf("SKIP wrapper-specific PB5/CH5 cases (base FSM linkage)\n");
+    }
 
     printf("==== test_centering_pc12_gate: %d run, %d failed ====\n",
            tests_run, tests_failed);
