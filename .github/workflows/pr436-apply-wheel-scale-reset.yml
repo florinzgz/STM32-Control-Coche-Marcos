@@ -1,6 +1,10 @@
 name: PR436 Apply Wheel Scale Cycle Reset
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/pr436-apply-wheel-scale-reset.yml'
   push:
     branches:
       - fix/steering-homing-battery-traction
@@ -12,6 +16,7 @@ permissions:
 
 jobs:
   apply-fix:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
