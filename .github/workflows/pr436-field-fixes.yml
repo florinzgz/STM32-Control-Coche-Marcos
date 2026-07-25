@@ -20,6 +20,7 @@ on:
       - 'Core/Inc/motor_control.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/safety_system_patched.c'
+      - 'Core/Inc/safety_system.h'
       - 'Core/Inc/traction_output_policy.h'
       - 'Core/Inc/drive_dynamics_policy.h'
       - 'Core/Inc/build_sanity_checks.h'
@@ -111,16 +112,21 @@ jobs:
           python3 - <<'PY'
           main = open('Core/Src/main.c', encoding='utf-8').read()
           cycle = main.index('Wheel_UpdateSpeeds();')
-          abs_call = main.index('ABS_Update();', cycle)
+          reset_call = main.index('Safety_ResetWheelInterventionScales();', cycle)
+          abs_call = main.index('ABS_Update();', reset_call)
           tcs_call = main.index('TCS_Update();', abs_call)
           traction_call = main.index('Traction_Update();', tcs_call)
-          assert cycle < abs_call < tcs_call < traction_call
+          assert cycle < reset_call < abs_call < tcs_call < traction_call
+
+          header = open('Core/Inc/safety_system.h', encoding='utf-8').read()
+          assert 'void Safety_ResetWheelInterventionScales(void);' in header
 
           safety = open('Core/Src/safety_system_patched.c', encoding='utf-8').read()
-          abs_fn = safety.index('void ABS_Update(void)')
-          reset_call = safety.index('PR_ResetWheelInterventionScales();', abs_fn)
+          reset_fn = safety.index('void Safety_ResetWheelInterventionScales(void)')
+          abs_fn = safety.index('void ABS_Update(void)', reset_fn)
+          defensive_reset = safety.index('Safety_ResetWheelInterventionScales();', abs_fn)
           abs_gate = safety.index('if (!ServiceMode_IsEnabled(MODULE_ABS)', abs_fn)
-          assert abs_fn < reset_call < abs_gate
+          assert reset_fn < abs_fn < defensive_reset < abs_gate
           PY
 
           grep -q 'Steering_ControlLoop_Base' Core/Src/motor_control_patched.c
