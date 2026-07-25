@@ -121,12 +121,11 @@ jobs:
           grep -q '^void Safety_ResetWheelInterventionScales(void)$' Core/Src/safety_system_patched.c
           grep -q '^void Safety_ResetWheelInterventionScales(void);$' Core/Inc/safety_system.h
 
-      - name: Commit correction and remove one-shot workflow
+      - name: Commit source correction
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/pr436-apply-wheel-scale-reset.yml
           git add Core/Inc/safety_system.h Core/Src/safety_system_patched.c Core/Src/main.c .github/workflows/pr436-field-fixes.yml
           git commit -m 'fix: reset ABS/TCS wheel scales at cycle entry'
           git push origin HEAD:fix/steering-homing-battery-traction
