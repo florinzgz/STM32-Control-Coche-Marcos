@@ -1,4 +1,4 @@
-name: PR436 Firmware Package
+name: Firmware Package
 
 on:
   pull_request:
@@ -7,7 +7,10 @@ on:
       - 'Core/**'
       - 'Drivers/**'
       - 'esp32/**'
+      - 'scripts/**'
       - 'Makefile'
+      - '.cproject'
+      - 'STM32G474RETX_FLASH.ld'
       - '.github/workflows/pr436-firmware-package.yml'
   workflow_dispatch:
 
@@ -16,10 +19,9 @@ permissions:
 
 jobs:
   package-firmware:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.number == 436
     runs-on: ubuntu-24.04
+    env:
+      PACKAGE_LABEL: PR${{ github.event.pull_request.number || github.run_number }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,10 +61,10 @@ jobs:
           cp esp32/.pio/build/esp32s3/bootloader.bin artifacts/firmware/esp32/
           cp esp32/.pio/build/esp32s3/partitions.bin artifacts/firmware/esp32/
 
-          cat > artifacts/firmware/README-FLASH.txt <<'EOF'
-          PR #436 - firmware de prueba
+          cat > artifacts/firmware/README-FLASH.txt <<EOF
+          ${PACKAGE_LABEL} - firmware de prueba
 
-          STM32G474RE (firmware modificado en esta PR):
+          STM32G474RE (firmware modificado en esta PR/ejecución):
           - Recomendado con STM32CubeProgrammer: stm32/STM32G474RE.hex
           - Alternativa binaria: stm32/STM32G474RE.bin en 0x08000000
           - Verificar descarga y reset después de programar.
@@ -70,7 +72,7 @@ jobs:
           ESP32-S3 (incluido para verificar la compilación completa):
           - firmware.bin se programa normalmente en 0x10000.
           - bootloader.bin y partitions.bin se incluyen como respaldo de la compilación.
-          - No es necesario reflashear el ESP32 para probar los cambios STM32 de esta PR.
+          - No es necesario reflashear el ESP32 si la PR solo cambia el STM32.
 
           Seguridad para la primera prueba:
           - Vehículo inmovilizado o ruedas motrices elevadas.
@@ -84,7 +86,7 @@ jobs:
       - name: Upload flashable firmware
         uses: actions/upload-artifact@v4
         with:
-          name: PR436-flashable-firmware-${{ github.sha }}
+          name: ${{ env.PACKAGE_LABEL }}-flashable-firmware-${{ github.sha }}
           path: artifacts/firmware/
           if-no-files-found: error
           retention-days: 90
