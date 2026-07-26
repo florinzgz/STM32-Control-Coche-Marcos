@@ -1,0 +1,38 @@
+name: Apply Effective EPS Wrapper Fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/apply_effective_eps_wrapper_fix.py'
+      - '.github/workflows/apply-effective-eps-wrapper-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+
+      - name: Patch the compiled EPS wrapper
+        run: python3 .github/scripts/apply_effective_eps_wrapper_fix.py
+
+      - name: Commit productive source change
+        run: |
+          set -euo pipefail
+          git add Core/Src/motor_control_patched.c
+          if git diff --cached --quiet; then
+            echo 'Effective wrapper already patched.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: enforce power gate and coast-first in effective EPS wrapper'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
