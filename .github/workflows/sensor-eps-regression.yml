@@ -1,0 +1,70 @@
+name: Sensor and EPS Regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'Core/Inc/current_plausibility.h'
+      - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/motor_control.c'
+      - 'Core/Src/test_current_plausibility.c'
+      - 'Core/Src/test_eps_output_policy.c'
+      - 'esp32/src/degraded_banner.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/src/test_degraded_banner.cpp'
+      - '.github/workflows/sensor-eps-regression.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'Core/Inc/current_plausibility.h'
+      - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/motor_control.c'
+      - 'Core/Src/test_current_plausibility.c'
+      - 'Core/Src/test_eps_output_policy.c'
+      - 'esp32/src/degraded_banner.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/src/test_degraded_banner.cpp'
+      - '.github/workflows/sensor-eps-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Current plausibility policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_current_plausibility.c -lm \
+            -o /tmp/test_current_plausibility
+          /tmp/test_current_plausibility
+
+      - name: EPS coast and minimum-drive policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_output_policy.c -lm \
+            -o /tmp/test_eps_output_policy
+          /tmp/test_eps_output_policy
+
+      - name: HMI degraded-level banner
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/src/test_degraded_banner.cpp \
+            -o /tmp/test_degraded_banner
+          /tmp/test_degraded_banner
+
+      - name: Production integration guards
+        run: |
+          grep -q 'CurrentPlausibility_IsFault' Core/Src/safety_system.c
+          grep -q 'EpsOutput_Resolve' Core/Src/motor_control.c
+          grep -q 'Safety_IsPowerReady' Core/Src/motor_control.c
+          grep -q 'PIN_RELAY_STEER_PWR' Core/Src/motor_control.c
+          grep -q 'curDegradedLevel_' esp32/src/screens/drive_screen.cpp
