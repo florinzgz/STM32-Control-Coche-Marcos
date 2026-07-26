@@ -22,6 +22,7 @@
 #include "error_log.h"
 #include "can_handler.h"
 #include "math_safety.h"
+#include "current_plausibility.h"
 #include "relay_health_diag.h"    /* Problem 3: evidence-graded relay/current diagnosis */
 #include "steering_eps.h"         /* EPS local isolation authority (mechanical-only) */
 #include <math.h>       /* isnan(), isinf() — NaN/Inf hardening */
@@ -2370,19 +2371,21 @@ void Safety_CheckSensors(void)
         }
     }
 
-    /* Current plausibility: significantly negative or extremely high = fault.
-     * A small negative reading (> −1 A) is expected due to INA226 offset
-     * and inductive motor flyback during deceleration — not a fault.
-     * Traced to base firmware system.cpp selfTest: current sensors
-     * are OPTIONAL and use MODE_DEGRADED.                               */
+    /* Current plausibility.  Motor channels are bidirectional, so
+     * regeneration/back-EMF is validated by absolute magnitude rather than
+     * by sign.  The battery channel keeps the legacy −1 A offset tolerance.
+     * CH5 polarity is classified by its dedicated INA226 supervisor instead
+     * of being collapsed into the global SENSOR_FAULT bucket.             */
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         float a = Current_GetAmps(i);
         float ceil = (i == INA226_CHANNEL_BATTERY)
                    ? SENSOR_CURRENT_MAX_BATT_A : SENSOR_CURRENT_MAX_A;
-        /* NaN/Inf hardening: invalid sensor reading → plausibility fault */
-        if (isnan(a) || isinf(a) || a < -1.0f || a > ceil) {
+        /* Motor channels accept either sign inside their physical range.
+         * The battery channel remains unidirectional with −1 A tolerance. */
+        if (CurrentPlausibility_IsFault(i == INA226_CHANNEL_BATTERY,
+                                        a, ceil)) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
