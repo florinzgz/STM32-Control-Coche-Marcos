@@ -20,22 +20,48 @@ jobs:
           show-progress: false
 
       - name: Execute deterministic patch embedded in bootstrap workflow
+        id: patch
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
           import textwrap
+          import traceback
 
-          workflow = Path('.github/workflows/bootstrap-sensor-eps-fix.yml').read_text(encoding='utf-8')
-          marker = "python3 <<'PY'\n"
-          body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
-          exec(compile(textwrap.dedent(body), 'bootstrap-sensor-eps-fix', 'exec'))
+          try:
+              workflow = Path('.github/workflows/bootstrap-sensor-eps-fix.yml').read_text(encoding='utf-8')
+              marker = "python3 <<'PY'\n"
+              body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+              exec(compile(textwrap.dedent(body), 'bootstrap-sensor-eps-fix', 'exec'))
+          except BaseException:
+              Path('.bootstrap-error.txt').write_text(traceback.format_exc(), encoding='utf-8')
+              raise
           PY
 
           rm -f .github/workflows/bootstrap-pr-apply.yml
 
+      - name: Persist bootstrap failure and stop trigger
+        if: steps.patch.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .bootstrap-error.txt
+          rm -f .github/workflows/bootstrap-pr-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: capture bootstrap patch failure"
+          git push origin HEAD:fix/sensor-eps-workflow
+
+      - name: Fail after persisting traceback
+        if: steps.patch.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
       - name: Run focused regression tests
+        if: steps.patch.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +85,7 @@ jobs:
           git diff --check
 
       - name: Commit fixes
+        if: steps.patch.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
