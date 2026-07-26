@@ -14,7 +14,7 @@ on:
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
-      - 'esp32/src/test_degraded_banner.cpp'
+      - 'esp32/host_tests/test_degraded_banner.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
   pull_request:
     branches: [ main, develop ]
@@ -28,7 +28,7 @@ on:
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
-      - 'esp32/src/test_degraded_banner.cpp'
+      - 'esp32/host_tests/test_degraded_banner.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
 
 permissions:
@@ -57,7 +57,7 @@ jobs:
       - name: HMI degraded-level banner
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
-            esp32/src/test_degraded_banner.cpp \
+            esp32/host_tests/test_degraded_banner.cpp \
             -o /tmp/test_degraded_banner
           /tmp/test_degraded_banner
 
