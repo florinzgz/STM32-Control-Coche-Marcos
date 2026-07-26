@@ -1,0 +1,377 @@
+name: Bootstrap sensor and EPS safety fixes
+
+on:
+  push:
+    branches:
+      - fix/sensor-eps-workflow
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/sensor-eps-workflow
+          fetch-depth: 0
+
+      - name: Apply deterministic source patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count} occurrence(s), found {found}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          # ------------------------------------------------------------------
+          # 1) Current plausibility: motor channels are bidirectional.
+          # ------------------------------------------------------------------
+          Path("Core/Inc/current_plausibility.h").write_text(r'''#ifndef CURRENT_PLAUSIBILITY_H
+          #define CURRENT_PLAUSIBILITY_H
+
+          #include <stdbool.h>
+          #include <math.h>
+
+          /* Pure, host-testable current plausibility policy.
+           *
+           * Motor INA226 channels are bidirectional: regeneration, inductive
+           * flyback and back-EMF can legitimately produce negative current.
+           * Their plausibility envelope is therefore based on magnitude.
+           *
+           * The battery channel keeps the historical -1 A offset tolerance;
+           * a more-negative battery reading remains implausible because this
+           * topology has no battery-charging regeneration path.
+           *
+           * CH5 polarity/wiring diagnosis remains owned by the dedicated
+           * Ina226_ClassifyChannel()/steering supervisor path. */
+          static inline bool CurrentPlausibility_IsFault(bool battery_channel,
+                                                          float amps,
+                                                          float ceiling_a)
+          {
+              if (isnan(amps) || isinf(amps) ||
+                  isnan(ceiling_a) || isinf(ceiling_a) || ceiling_a <= 0.0f) {
+                  return true;
+              }
+
+              if (battery_channel) {
+                  return (amps < -1.0f) || (amps > ceiling_a);
+              }
+
+              return fabsf(amps) > ceiling_a;
+          }
+
+          #endif /* CURRENT_PLAUSIBILITY_H */
+          '''.replace("          ", ""), encoding="utf-8")
+
+          Path("Core/Src/test_current_plausibility.c").write_text(r'''#include <math.h>
+          #include <stdbool.h>
+          #include <stdio.h>
+          #include "current_plausibility.h"
+
+          static int failed;
+          #define CHECK(expr) do { \
+              if (!(expr)) { \
+                  fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); \
+                  failed++; \
+              } \
+          } while (0)
+
+          int main(void)
+          {
+              CHECK(!CurrentPlausibility_IsFault(false, -0.5f, 50.0f));
+              CHECK(!CurrentPlausibility_IsFault(false, -25.0f, 50.0f));
+              CHECK(!CurrentPlausibility_IsFault(false,  50.0f, 50.0f));
+              CHECK( CurrentPlausibility_IsFault(false, -50.1f, 50.0f));
+              CHECK( CurrentPlausibility_IsFault(false,  50.1f, 50.0f));
+
+              CHECK(!CurrentPlausibility_IsFault(true, -0.9f, 100.0f));
+              CHECK( CurrentPlausibility_IsFault(true, -1.1f, 100.0f));
+              CHECK( CurrentPlausibility_IsFault(true, 100.1f, 100.0f));
+
+              CHECK(CurrentPlausibility_IsFault(false, NAN, 50.0f));
+              CHECK(CurrentPlausibility_IsFault(false, INFINITY, 50.0f));
+              CHECK(CurrentPlausibility_IsFault(false, 1.0f, 0.0f));
+
+              if (failed != 0) return 1;
+              puts("current plausibility tests: PASS");
+              return 0;
+          }
+          '''.replace("          ", ""), encoding="utf-8")
+
+          for path in ("Core/Src/safety_system.c", "Core/Src/safety_system_patched.c"):
+              replace_exact(
+                  path,
+                  '#include "math_safety.h"\n',
+                  '#include "math_safety.h"\n#include "current_plausibility.h"\n'
+              )
+              replace_exact(
+                  path,
+                  '''    /* Current plausibility: significantly negative or extremely high = fault.\n     * A small negative reading (> −1 A) is expected due to INA226 offset\n     * and inductive motor flyback during deceleration — not a fault.\n     * Traced to base firmware system.cpp selfTest: current sensors\n     * are OPTIONAL and use MODE_DEGRADED.                               */\n''',
+                  '''    /* Current plausibility.  Motor channels are bidirectional, so\n     * regeneration/back-EMF is validated by absolute magnitude rather than\n     * by sign.  The battery channel keeps the legacy −1 A offset tolerance.\n     * CH5 polarity is classified by its dedicated INA226 supervisor instead\n     * of being collapsed into the global SENSOR_FAULT bucket.             */\n'''
+              )
+              replace_exact(
+                  path,
+                  '''        /* NaN/Inf hardening: invalid sensor reading → plausibility fault */\n        if (isnan(a) || isinf(a) || a < -1.0f || a > ceil) {\n            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);\n            fault_count++;\n        }\n''',
+                  '''        /* Motor channels accept either sign inside their physical range.\n         * The battery channel remains unidirectional with −1 A tolerance. */\n        if (CurrentPlausibility_IsFault(i == INA226_CHANNEL_BATTERY,\n                                        a, ceil)) {\n            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);\n            fault_count++;\n        }\n'''
+              )
+
+          # ------------------------------------------------------------------
+          # 2) EPS output policy: coast before minimum-drive compensation.
+          # ------------------------------------------------------------------
+          Path("Core/Inc/eps_output_policy.h").write_text(r'''#ifndef EPS_OUTPUT_POLICY_H
+          #define EPS_OUTPUT_POLICY_H
+
+          #include <stdbool.h>
+          #include <math.h>
+
+          typedef struct {
+              float pwm_pct;
+              bool  coast;
+          } EpsOutputDecision_t;
+
+          /* Pure output shaper for the EPS torque request.
+           * A request inside the coast band must physically release the bridge
+           * before minimum-drive compensation is considered.  Only a genuine
+           * request outside that band may be raised to min_drive_pct. */
+          static inline EpsOutputDecision_t
+          EpsOutput_Resolve(float pwm_pct, float coast_band_pct, float min_drive_pct)
+          {
+              EpsOutputDecision_t out = { 0.0f, true };
+
+              if (isnan(pwm_pct) || isinf(pwm_pct) ||
+                  isnan(coast_band_pct) || isinf(coast_band_pct) ||
+                  isnan(min_drive_pct) || isinf(min_drive_pct) ||
+                  coast_band_pct < 0.0f || min_drive_pct < 0.0f) {
+                  return out;
+              }
+
+              const float abs_pct = fabsf(pwm_pct);
+              if (abs_pct <= 0.01f || abs_pct < coast_band_pct) {
+                  return out;
+              }
+
+              out.pwm_pct = pwm_pct;
+              if (abs_pct < min_drive_pct) {
+                  out.pwm_pct = (pwm_pct > 0.0f) ? min_drive_pct : -min_drive_pct;
+              }
+              out.coast = false;
+              return out;
+          }
+
+          #endif /* EPS_OUTPUT_POLICY_H */
+          '''.replace("          ", ""), encoding="utf-8")
+
+          Path("Core/Src/test_eps_output_policy.c").write_text(r'''#include <math.h>
+          #include <stdio.h>
+          #include "eps_output_policy.h"
+
+          static int failed;
+          #define CHECK(expr) do { \
+              if (!(expr)) { \
+                  fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); \
+                  failed++; \
+              } \
+          } while (0)
+          #define NEAR(a,b) (fabsf((a) - (b)) < 0.001f)
+
+          int main(void)
+          {
+              EpsOutputDecision_t d;
+
+              d = EpsOutput_Resolve(0.5f, 3.0f, 8.0f);
+              CHECK(d.coast && NEAR(d.pwm_pct, 0.0f));
+
+              d = EpsOutput_Resolve(2.99f, 3.0f, 8.0f);
+              CHECK(d.coast && NEAR(d.pwm_pct, 0.0f));
+
+              d = EpsOutput_Resolve(3.0f, 3.0f, 8.0f);
+              CHECK(!d.coast && NEAR(d.pwm_pct, 8.0f));
+
+              d = EpsOutput_Resolve(-5.0f, 3.0f, 8.0f);
+              CHECK(!d.coast && NEAR(d.pwm_pct, -8.0f));
+
+              d = EpsOutput_Resolve(12.0f, 3.0f, 8.0f);
+              CHECK(!d.coast && NEAR(d.pwm_pct, 12.0f));
+
+              d = EpsOutput_Resolve(NAN, 3.0f, 8.0f);
+              CHECK(d.coast && NEAR(d.pwm_pct, 0.0f));
+
+              if (failed != 0) return 1;
+              puts("EPS output policy tests: PASS");
+              return 0;
+          }
+          '''.replace("          ", ""), encoding="utf-8")
+
+          for path in ("Core/Src/motor_control.c", "Core/Src/motor_control_patched.c"):
+              replace_exact(
+                  path,
+                  '#include "eps_params.h"\n',
+                  '#include "eps_params.h"\n#include "eps_output_policy.h"\n'
+              )
+              replace_exact(
+                  path,
+                  '''    /* ---- Guard: encoder fault → disable motor ---- */\n''',
+                  '''    /* ---- Guard: relay sequence / steering rail not ready → coast ----\n     * Safety_IsPowerReady() proves the shared relay sequence completed; the\n     * explicit PC12 command check prevents EPS PWM while the steering motor\n     * rail is isolated.  Never energise PC4/PA6/PA7 against an open rail. */\n    if (!Safety_IsPowerReady() ||\n        HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) != GPIO_PIN_SET) {\n        Steering_Neutralize();\n        return;\n    }\n\n    /* ---- Guard: encoder fault → disable motor ---- */\n'''
+              )
+              replace_exact(
+                  path,
+                  '''    /* ---- Dead-zone compensation: jump to min_drive_pct ---- */\n    float abs_pct = fabsf(pwm_pct);\n    if (abs_pct > 0.01f && abs_pct < p->min_drive_pct) {\n        pwm_pct = (pwm_pct > 0.0f) ? p->min_drive_pct : -p->min_drive_pct;\n        abs_pct = p->min_drive_pct;\n    }\n\n    /* ---- Coast band: below coast_band_pct → motor off (EN=LOW) ---- */\n    if (abs_pct < p->coast_band_pct) {\n        Steering_Neutralize();\n        return;\n    }\n''',
+                  '''    /* ---- Coast first; minimum-drive only for genuine intent ----\n     * Previously a tiny request was raised to ~8 % before the coast test,\n     * which kept the bridge enabled and made the wheel fight the driver. */\n    EpsOutputDecision_t output = EpsOutput_Resolve(\n        pwm_pct, p->coast_band_pct, p->min_drive_pct);\n    if (output.coast) {\n        Steering_Neutralize();\n        return;\n    }\n    pwm_pct = output.pwm_pct;\n'''
+              )
+
+          # ------------------------------------------------------------------
+          # 3) HMI: render the real DEGRADED level instead of fixed 40 %.
+          # ------------------------------------------------------------------
+          Path("esp32/src/degraded_banner.h").write_text(r'''#ifndef DEGRADED_BANNER_H
+          #define DEGRADED_BANNER_H
+
+          #include <cstdint>
+
+          namespace degraded_banner {
+
+          inline const char* text(uint8_t level)
+          {
+              switch (level) {
+                  case 1: return "DEGRADED L1 70%";
+                  case 2: return "DEGRADED L2 50%";
+                  case 3: return "DEGRADED L3 40%";
+                  default: return "DEGRADED";
+              }
+          }
+
+          } // namespace degraded_banner
+
+          #endif /* DEGRADED_BANNER_H */
+          '''.replace("          ", ""), encoding="utf-8")
+
+          Path("esp32/src/test_degraded_banner.cpp").write_text(r'''#include <cstring>
+          #include <iostream>
+          #include "degraded_banner.h"
+
+          static int failed;
+          #define CHECK_EQ(got, expected) do { \
+              if (std::strcmp((got), (expected)) != 0) { \
+                  std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ \
+                            << " got='" << (got) << "' expected='" << (expected) << "'\n"; \
+                  failed++; \
+              } \
+          } while (0)
+
+          int main()
+          {
+              CHECK_EQ(degraded_banner::text(0), "DEGRADED");
+              CHECK_EQ(degraded_banner::text(1), "DEGRADED L1 70%");
+              CHECK_EQ(degraded_banner::text(2), "DEGRADED L2 50%");
+              CHECK_EQ(degraded_banner::text(3), "DEGRADED L3 40%");
+              CHECK_EQ(degraded_banner::text(9), "DEGRADED");
+              if (failed != 0) return 1;
+              std::cout << "degraded banner tests: PASS\n";
+              return 0;
+          }
+          '''.replace("          ", ""), encoding="utf-8")
+
+          replace_exact(
+              "esp32/src/screens/drive_screen.h",
+              '''    can::SystemState curSystemState_  = can::SystemState::ACTIVE;\n    can::SystemState prevSystemState_ = can::SystemState::ACTIVE;\n''',
+              '''    can::SystemState curSystemState_  = can::SystemState::ACTIVE;\n    can::SystemState prevSystemState_ = can::SystemState::ACTIVE;\n    uint8_t          curDegradedLevel_ = 0;  // 0x315: 0=unknown/none, 1..3\n'''
+          )
+
+          replace_exact(
+              "esp32/src/screens/drive_screen.cpp",
+              '#include "drive_screen.h"\n',
+              '#include "drive_screen.h"\n#include "degraded_banner.h"\n'
+          )
+          replace_exact(
+              "esp32/src/screens/drive_screen.cpp",
+              '''    curSystemState_  = can::SystemState::ACTIVE;\n    prevSystemState_ = can::SystemState::ACTIVE;\n    curFaultFlags_   = 0;\n''',
+              '''    curSystemState_   = can::SystemState::ACTIVE;\n    prevSystemState_  = can::SystemState::ACTIVE;\n    curDegradedLevel_ = 0;\n    curFaultFlags_    = 0;\n'''
+          )
+          replace_exact(
+              "esp32/src/screens/drive_screen.cpp",
+              '''    // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)\n    curSystemState_ = data.heartbeat().systemState;\n\n    // Safety error code for LIMP HOME banner reason — identifies the cause\n''',
+              '''    // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)\n    curSystemState_ = data.heartbeat().systemState;\n\n    // Real degradation level comes from 0x315 at 10 Hz.  Never invent 40 %\n    // when the frame is missing: level 0 renders the neutral "DEGRADED" label.\n    {\n        const auto& mi = data.motionInhibit();\n        const bool miFresh = mi.valid &&\n            ((frameTimeMs - mi.timestampMs) <= ui::cfg::TELEMETRY_FAST_STALE_MS);\n        curDegradedLevel_ = miFresh ? mi.degradedLevel : 0;\n    }\n\n    // Safety error code for LIMP HOME banner reason — identifies the cause\n'''
+          )
+          replace_exact(
+              "esp32/src/screens/drive_screen.cpp",
+              '''    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(\n        (uint32_t)curDegradedVisible_ | ((uint32_t)curLimpErrorCode_ << 8)));\n''',
+              '''    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(\n        (uint32_t)curDegradedVisible_ |\n        ((uint32_t)curLimpErrorCode_ << 8) |\n        ((uint32_t)curDegradedLevel_ << 16)));\n'''
+          )
+          replace_exact(
+              "esp32/src/screens/drive_screen.cpp",
+              '        bannerText = "DEGRADED  40%";\n',
+              '        bannerText = degraded_banner::text(curDegradedLevel_);\n'
+          )
+
+          # ------------------------------------------------------------------
+          # 4) Reactivate manual Firmware Validation and register new tests.
+          # ------------------------------------------------------------------
+          workflow = ".github/workflows/firmware-validation.yml"
+          replace_exact(
+              workflow,
+              '''on:\n  push:\n''',
+              '''on:\n  workflow_dispatch:\n  push:\n'''
+          )
+          replace_exact(
+              workflow,
+              '''              Core/Src/test_motor_control.c \\\n              Core/Src/test_math_safety.c \\\n''',
+              '''              Core/Src/test_motor_control.c \\\n              Core/Src/test_current_plausibility.c \\\n              Core/Src/test_eps_output_policy.c \\\n              Core/Src/test_math_safety.c \\\n'''
+          )
+          replace_exact(
+              workflow,
+              '''            echo "-- test_eps_limits_contract.cpp"\n            g++ -std=c++17 -Wall -Wextra -Iesp32/src \\\n              esp32/src/test_eps_limits_contract.cpp \\\n              -o /tmp/test_eps_limits_contract\n            /tmp/test_eps_limits_contract\n''',
+              '''            echo "-- test_eps_limits_contract.cpp"\n            g++ -std=c++17 -Wall -Wextra -Iesp32/src \\\n              esp32/src/test_eps_limits_contract.cpp \\\n              -o /tmp/test_eps_limits_contract\n            /tmp/test_eps_limits_contract\n\n            echo "-- test_degraded_banner.cpp"\n            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \\\n              esp32/src/test_degraded_banner.cpp \\\n              -o /tmp/test_degraded_banner\n            /tmp/test_degraded_banner\n'''
+          )
+
+          # Production and host-patched mirrors are contractually identical.
+          for production, patched in (
+              ("Core/Src/safety_system.c", "Core/Src/safety_system_patched.c"),
+              ("Core/Src/motor_control.c", "Core/Src/motor_control_patched.c"),
+          ):
+              if Path(production).read_bytes() != Path(patched).read_bytes():
+                  raise SystemExit(f"parity failure: {production} != {patched}")
+
+          # Remove this one-shot workflow from the final branch diff.
+          Path(".github/workflows/bootstrap-sensor-eps-fix.yml").unlink()
+          PY
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_current_plausibility.c -lm \
+            -o /tmp/test_current_plausibility
+          /tmp/test_current_plausibility
+
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_output_policy.c -lm \
+            -o /tmp/test_eps_output_policy
+          /tmp/test_eps_output_policy
+
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/src/test_degraded_banner.cpp \
+            -o /tmp/test_degraded_banner
+          /tmp/test_degraded_banner
+
+          diff -u Core/Src/safety_system.c Core/Src/safety_system_patched.c
+          diff -u Core/Src/motor_control.c Core/Src/motor_control_patched.c
+          git diff --check
+
+      - name: Commit fixes to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: prevent false sensor faults and EPS braking"
+          git push origin HEAD:fix/sensor-eps-workflow
