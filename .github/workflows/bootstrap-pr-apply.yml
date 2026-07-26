@@ -1,0 +1,68 @@
+name: Apply sensor and EPS fixes on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/sensor-eps-workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/sensor-eps-workflow
+          fetch-depth: 0
+
+      - name: Execute deterministic patch embedded in bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/bootstrap-sensor-eps-fix.yml').read_text(encoding='utf-8')
+          marker = "python3 <<'PY'\n"
+          body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          exec(compile(textwrap.dedent(body), 'bootstrap-sensor-eps-fix', 'exec'))
+          PY
+
+          rm -f .github/workflows/bootstrap-pr-apply.yml
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_current_plausibility.c -lm \
+            -o /tmp/test_current_plausibility
+          /tmp/test_current_plausibility
+
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_output_policy.c -lm \
+            -o /tmp/test_eps_output_policy
+          /tmp/test_eps_output_policy
+
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/src/test_degraded_banner.cpp \
+            -o /tmp/test_degraded_banner
+          /tmp/test_degraded_banner
+
+          diff -u Core/Src/safety_system.c Core/Src/safety_system_patched.c
+          diff -u Core/Src/motor_control.c Core/Src/motor_control_patched.c
+          git diff --check
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: prevent false sensor faults and EPS braking"
+          git push origin HEAD:fix/sensor-eps-workflow
