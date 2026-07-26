@@ -8,6 +8,7 @@
 #include "motor_control.h"
 #include "ackermann.h"
 #include "eps_params.h"
+#include "eps_output_policy.h"
 #include "steering_eps.h"
 #include "steering_supervisor.h"
 #include "steering_output.h"
@@ -2298,6 +2299,15 @@ void Steering_ControlLoop(void)
         return;
     }
 
+    /* ---- Guard: steering power path not ready → coast ----
+     * The EPS may only write PC4/PA6/PA7 after the relay sequence has
+     * completed and the steering-motor rail command (PC12) is ON. */
+    if (!Safety_IsPowerReady() ||
+        HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) != GPIO_PIN_SET) {
+        Steering_Neutralize();
+        return;
+    }
+
     /* ---- Guard: encoder fault → disable motor ---- */
     if (enc_fault) {
         Motor_SetSigned(&motor_steer, 0);
@@ -2421,18 +2431,16 @@ void Steering_ControlLoop(void)
     if (pwm_pct >  p->max_pwm_pct) pwm_pct =  p->max_pwm_pct;
     if (pwm_pct < -p->max_pwm_pct) pwm_pct = -p->max_pwm_pct;
 
-    /* ---- Dead-zone compensation: jump to min_drive_pct ---- */
-    float abs_pct = fabsf(pwm_pct);
-    if (abs_pct > 0.01f && abs_pct < p->min_drive_pct) {
-        pwm_pct = (pwm_pct > 0.0f) ? p->min_drive_pct : -p->min_drive_pct;
-        abs_pct = p->min_drive_pct;
-    }
-
-    /* ---- Coast band: below coast_band_pct → motor off (EN=LOW) ---- */
-    if (abs_pct < p->coast_band_pct) {
+    /* ---- Coast first; minimum-drive only for genuine intent ----
+     * Previously a tiny request was raised to min_drive_pct before this
+     * decision, keeping the bridge enabled and fighting the driver. */
+    EpsOutputDecision_t output = EpsOutput_Resolve(
+        pwm_pct, p->coast_band_pct, p->min_drive_pct);
+    if (output.coast) {
         Steering_Neutralize();
         return;
     }
+    pwm_pct = output.pwm_pct;
 
     /* ---- Convert to PWM counts ---- */
     int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);

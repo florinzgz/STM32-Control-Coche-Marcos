@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<stdin>", line 9, in <module>
-  File "bootstrap-sensor-eps-fix", line 87, in <module>
-  File "bootstrap-sensor-eps-fix", line 8, in replace_exact
-SystemExit: Core/Src/safety_system_patched.c: expected 1 occurrence(s), found 0: '#include "math_safety.h"\n'

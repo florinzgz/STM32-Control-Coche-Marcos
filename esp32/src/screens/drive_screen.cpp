@@ -32,6 +32,7 @@
 // =============================================================================
 
 #include "drive_screen.h"
+#include "degraded_banner.h"
 #include "ui/car_renderer.h"
 #include "ui/pedal_bar.h"
 #include "ui/gear_display.h"
@@ -140,9 +141,10 @@ void DriveScreen::onEnter() {
     ackIndicatorDirty_ = false;
 
     // Reset degraded/fault overlay state
-    curSystemState_  = can::SystemState::ACTIVE;
-    prevSystemState_ = can::SystemState::ACTIVE;
-    curFaultFlags_   = 0;
+    curSystemState_   = can::SystemState::ACTIVE;
+    prevSystemState_  = can::SystemState::ACTIVE;
+    curDegradedLevel_ = 0;
+    curFaultFlags_    = 0;
     prevFaultFlags_  = 0;
 
     // Reset overlay visibility tracking
@@ -312,6 +314,15 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)
     curSystemState_ = data.heartbeat().systemState;
 
+    // Real degradation level comes from 0x315 at 10 Hz.  When that frame is
+    // unavailable, render a neutral DEGRADED label instead of inventing 40 %.
+    {
+        const auto& mi = data.motionInhibit();
+        const bool miFresh = mi.valid &&
+            ((frameTimeMs - mi.timestampMs) <= ui::cfg::TELEMETRY_FAST_STALE_MS);
+        curDegradedLevel_ = miFresh ? mi.degradedLevel : 0;
+    }
+
     // Safety error code for LIMP HOME banner reason — identifies the cause
     curLimpErrorCode_ = data.safety().errorCode;
 
@@ -437,7 +448,9 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     curDegradedVisible_ = (curSystemState_ == can::SystemState::DEGRADED ||
                            curSystemState_ == can::SystemState::LIMP_HOME);
     tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(
-        (uint32_t)curDegradedVisible_ | ((uint32_t)curLimpErrorCode_ << 8)));
+        (uint32_t)curDegradedVisible_ |
+        ((uint32_t)curLimpErrorCode_ << 8) |
+        ((uint32_t)curDegradedLevel_ << 16)));
 
     // FAULTS overlay tile — visibility precomputed for draw()
     curFaultsVisible_ = (curFaultFlags_ != 0);
@@ -947,7 +960,7 @@ void DriveScreen::drawDegradedOverlay() {
     static char limpBuf[40];
 
     if (curSystemState_ == can::SystemState::DEGRADED) {
-        bannerText = "DEGRADED  40%";
+        bannerText = degraded_banner::text(curDegradedLevel_);
         bannerCol  = ui::COL_AMBER;
     } else if (curSystemState_ == can::SystemState::LIMP_HOME) {
         const char* reason = limpHomeReasonLabel(curLimpErrorCode_);
