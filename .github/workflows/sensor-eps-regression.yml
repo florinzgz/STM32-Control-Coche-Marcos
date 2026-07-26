@@ -5,12 +5,15 @@ on:
   push:
     branches: [ main, develop ]
     paths:
+      - 'Makefile'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
+      - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
@@ -19,12 +22,15 @@ on:
   pull_request:
     branches: [ main, develop ]
     paths:
+      - 'Makefile'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
+      - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
@@ -39,6 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Current plausibility policy
         run: |
@@ -54,6 +62,9 @@ jobs:
             -o /tmp/test_eps_output_policy
           /tmp/test_eps_output_policy
 
+      - name: Effective production EPS wrapper
+        run: python3 scripts/check_effective_eps_wrapper.py
+
       - name: HMI degraded-level banner
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
@@ -61,10 +72,7 @@ jobs:
             -o /tmp/test_degraded_banner
           /tmp/test_degraded_banner
 
-      - name: Production integration guards
+      - name: Remaining production integration guards
         run: |
           grep -q 'CurrentPlausibility_IsFault' Core/Src/safety_system.c
-          grep -q 'EpsOutput_Resolve' Core/Src/motor_control.c
-          grep -q 'Safety_IsPowerReady' Core/Src/motor_control.c
-          grep -q 'PIN_RELAY_STEER_PWR' Core/Src/motor_control.c
           grep -q 'curDegradedLevel_' esp32/src/screens/drive_screen.cpp
