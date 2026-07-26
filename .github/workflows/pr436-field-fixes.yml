@@ -110,23 +110,95 @@ jobs:
           ! grep -q 'Traction_SetDemand' Core/Src/tcs_tuned.c
 
           python3 - <<'PY'
-          main = open('Core/Src/main.c', encoding='utf-8').read()
-          cycle = main.index('Wheel_UpdateSpeeds();')
-          reset_call = main.index('Safety_ResetWheelInterventionScales();', cycle)
-          abs_call = main.index('ABS_Update();', reset_call)
-          tcs_call = main.index('TCS_Update();', abs_call)
-          traction_call = main.index('Traction_Update();', tcs_call)
-          assert cycle < reset_call < abs_call < tcs_call < traction_call
+          import re
+          from pathlib import Path
 
-          header = open('Core/Inc/safety_system.h', encoding='utf-8').read()
-          assert 'void Safety_ResetWheelInterventionScales(void);' in header
+          def strip_comments_and_literals(source: str) -> str:
+              token = re.compile(
+                  r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+                  re.DOTALL,
+              )
 
-          safety = open('Core/Src/safety_system_patched.c', encoding='utf-8').read()
-          reset_fn = safety.index('void Safety_ResetWheelInterventionScales(void)')
-          abs_fn = safety.index('void ABS_Update(void)', reset_fn)
-          defensive_reset = safety.index('Safety_ResetWheelInterventionScales();', abs_fn)
-          abs_gate = safety.index('if (!ServiceMode_IsEnabled(MODULE_ABS)', abs_fn)
-          assert reset_fn < abs_fn < defensive_reset < abs_gate
+              def blank(match: re.Match[str]) -> str:
+                  return ''.join('\n' if ch == '\n' else ' '
+                                 for ch in match.group(0))
+
+              return token.sub(blank, source)
+
+          def braced_block_after(source: str, pattern: str, label: str) -> str:
+              match = re.search(pattern, source, re.MULTILINE)
+              assert match is not None, f'{label}: declaration not found'
+              opening = source.find('{', match.end())
+              assert opening >= 0, f'{label}: opening brace not found'
+
+              depth = 0
+              for pos in range(opening, len(source)):
+                  char = source[pos]
+                  if char == '{':
+                      depth += 1
+                  elif char == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return source[opening + 1:pos]
+              raise AssertionError(f'{label}: closing brace not found')
+
+          def exact_statement(block: str, statement: str, label: str) -> int:
+              matches = list(re.finditer(
+                  rf'(?m)^\s*{re.escape(statement)}\s*;\s*$', block))
+              assert len(matches) == 1, (
+                  f'{label}: expected one executable statement, found '
+                  f'{len(matches)}')
+              return matches[0].start()
+
+          main_source = strip_comments_and_literals(
+              Path('Core/Src/main.c').read_text(encoding='utf-8'))
+          main_body = braced_block_after(
+              main_source, r'\bint\s+main\s*\([^)]*\)', 'main()')
+          main_loop = braced_block_after(
+              main_body, r'\bwhile\s*\(\s*1(?:U)?\s*\)', 'main while(1)')
+          control_cycle = braced_block_after(
+              main_loop,
+              r'\bif\s*\(\s*\(\s*now\s*-\s*tick_10ms\s*\)\s*'
+              r'>=\s*10(?:U)?\s*\)',
+              '100 Hz control block')
+
+          ordered_statements = (
+              'Wheel_UpdateSpeeds()',
+              'Safety_ResetWheelInterventionScales()',
+              'ABS_Update()',
+              'TCS_Update()',
+              'Traction_Update()',
+          )
+          positions = [
+              exact_statement(control_cycle, statement, statement)
+              for statement in ordered_statements
+          ]
+          assert positions == sorted(positions), (
+              '100 Hz executable order must be Wheel -> reset -> ABS -> '
+              'TCS -> traction')
+
+          header = strip_comments_and_literals(
+              Path('Core/Inc/safety_system.h').read_text(encoding='utf-8'))
+          assert re.search(
+              r'\bvoid\s+Safety_ResetWheelInterventionScales\s*'
+              r'\(\s*void\s*\)\s*;', header), (
+              'Safety_ResetWheelInterventionScales declaration missing')
+
+          safety_source = strip_comments_and_literals(
+              Path('Core/Src/safety_system_patched.c').read_text(
+                  encoding='utf-8'))
+          abs_body = braced_block_after(
+              safety_source, r'\bvoid\s+ABS_Update\s*\(\s*void\s*\)',
+              'ABS_Update()')
+          defensive_reset = exact_statement(
+              abs_body, 'Safety_ResetWheelInterventionScales()',
+              'ABS defensive reset')
+          abs_gate = re.search(
+              r'\bif\s*\(\s*!\s*ServiceMode_IsEnabled\s*'
+              r'\(\s*MODULE_ABS\s*\)', abs_body)
+          assert abs_gate is not None, 'ABS service-mode gate missing'
+          assert defensive_reset < abs_gate.start(), (
+              'ABS defensive reset must execute before its service-mode gate')
           PY
 
           grep -q 'Steering_ControlLoop_Base' Core/Src/motor_control_patched.c

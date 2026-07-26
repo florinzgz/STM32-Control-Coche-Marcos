@@ -136,6 +136,7 @@ private:
     // System state for degraded/limp overlays (HMI_STATE_MODEL §2.4)
     can::SystemState curSystemState_  = can::SystemState::ACTIVE;
     can::SystemState prevSystemState_ = can::SystemState::ACTIVE;
+    uint8_t          curDegradedLevel_ = 0;  // 0x315: 0=unknown, 1..3
 
     // Safety error code shown in LIMP HOME banner — identifies the cause
     uint8_t curLimpErrorCode_ = 0;
