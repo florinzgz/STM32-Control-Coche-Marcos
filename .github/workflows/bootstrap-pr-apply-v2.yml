@@ -20,7 +20,18 @@ jobs:
           show-progress: false
 
       - name: Apply deterministic source fixes
-        run: python3 scripts/apply_sensor_eps_fix.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/apply_sensor_eps_fix.py
+
+          # GitHub's action token may write repository contents but cannot
+          # author workflow-file changes. Restore workflow files in this
+          # working tree; they are updated/removed separately via GitHub API.
+          git checkout HEAD -- \
+            .github/workflows/firmware-validation.yml \
+            .github/workflows/bootstrap-sensor-eps-fix.yml \
+            .github/workflows/bootstrap-pr-apply-v2.yml
 
       - name: Run focused regression tests
         shell: bash
