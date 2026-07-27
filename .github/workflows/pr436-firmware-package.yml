@@ -1,4 +1,4 @@
-name: PR436 Firmware Package
+name: Firmware Package
 
 on:
   pull_request:
@@ -7,7 +7,10 @@ on:
       - 'Core/**'
       - 'Drivers/**'
       - 'esp32/**'
+      - 'scripts/**'
       - 'Makefile'
+      - '.cproject'
+      - 'STM32G474RETX_FLASH.ld'
       - '.github/workflows/pr436-firmware-package.yml'
   workflow_dispatch:
 
@@ -16,10 +19,9 @@ permissions:
 
 jobs:
   package-firmware:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.number == 436
     runs-on: ubuntu-24.04
+    env:
+      PACKAGE_LABEL: PR${{ github.event.pull_request.number || github.run_number }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,10 +47,12 @@ jobs:
           cd esp32
           pio run -e esp32s3
 
-      - name: Assemble flash package
+      - name: Assemble flash and source package
         run: |
           set -euo pipefail
-          mkdir -p artifacts/firmware/stm32 artifacts/firmware/esp32
+          mkdir -p artifacts/firmware/stm32 \
+                   artifacts/firmware/esp32 \
+                   artifacts/firmware/source
 
           cp build/STM32G474RE.bin artifacts/firmware/stm32/
           cp build/STM32G474RE.hex artifacts/firmware/stm32/
@@ -59,32 +63,42 @@ jobs:
           cp esp32/.pio/build/esp32s3/bootloader.bin artifacts/firmware/esp32/
           cp esp32/.pio/build/esp32s3/partitions.bin artifacts/firmware/esp32/
 
-          cat > artifacts/firmware/README-FLASH.txt <<'EOF'
-          PR #436 - firmware de prueba
+          git archive --format=zip \
+            --prefix="STM32-Control-Coche-Marcos-${PACKAGE_LABEL}/" \
+            HEAD > "artifacts/firmware/source/STM32-Control-Coche-Marcos-${PACKAGE_LABEL}-source.zip"
 
-          STM32G474RE (firmware modificado en esta PR):
+          cat > artifacts/firmware/README-FLASH.txt <<EOF
+          ${PACKAGE_LABEL} - firmware y fuentes validadas
+
+          STM32G474RE:
           - Recomendado con STM32CubeProgrammer: stm32/STM32G474RE.hex
           - Alternativa binaria: stm32/STM32G474RE.bin en 0x08000000
           - Verificar descarga y reset después de programar.
 
-          ESP32-S3 (incluido para verificar la compilación completa):
+          ESP32-S3:
           - firmware.bin se programa normalmente en 0x10000.
           - bootloader.bin y partitions.bin se incluyen como respaldo de la compilación.
-          - No es necesario reflashear el ESP32 para probar los cambios STM32 de esta PR.
+          - No es necesario reflashear el ESP32 si la PR solo cambia el STM32.
+
+          Código fuente completo:
+          - source/STM32-Control-Coche-Marcos-${PACKAGE_LABEL}-source.zip
+          - Es un snapshot del commit exacto compilado por este workflow.
+          - Para STM32: extraer el ZIP y ejecutar make clean && make -j2.
+          - Para ESP32: entrar en esp32 y ejecutar pio run -e esp32s3.
 
           Seguridad para la primera prueba:
-          - Vehículo inmovilizado o ruedas motrices elevadas.
+          - Vehículo inmovilizado y ruedas motrices elevadas.
           - Parada de emergencia accesible.
-          - Comprobar primero homing, sensores de rueda, dirección y PWM sin carga.
+          - Comprobar primero homing, sensores, dirección y PWM sin carga.
           EOF
 
           printf '%s\n' "${GITHUB_SHA}" > artifacts/firmware/COMMIT.txt
           (cd artifacts/firmware && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
-      - name: Upload flashable firmware
+      - name: Upload flashable firmware and complete source
         uses: actions/upload-artifact@v4
         with:
-          name: PR436-flashable-firmware-${{ github.sha }}
+          name: ${{ env.PACKAGE_LABEL }}-firmware-and-source-${{ github.sha }}
           path: artifacts/firmware/
           if-no-files-found: error
           retention-days: 90

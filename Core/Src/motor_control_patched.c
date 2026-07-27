@@ -131,6 +131,16 @@ void Steering_ControlLoop(void)
         Steering_Neutralize();
         return;
     }
+
+    /* The Makefile compiles this wrapper, not motor_control.c directly.  Keep
+     * the effective EPS writer electrically gated by the completed relay
+     * sequence and by the commanded state of the steering power relay. */
+    if (!Safety_IsPowerReady() ||
+        HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) != GPIO_PIN_SET) {
+        Steering_Neutralize();
+        return;
+    }
+
     if (enc_fault) {
         Motor_SetSigned(&motor_steer, 0);
         eps_motor_effort = 0.0f;
@@ -209,16 +219,16 @@ void Steering_ControlLoop(void)
     if (pwm_pct > p->max_pwm_pct) pwm_pct = p->max_pwm_pct;
     if (pwm_pct < -p->max_pwm_pct) pwm_pct = -p->max_pwm_pct;
 
-    float abs_pct = fabsf(pwm_pct);
-    if (abs_pct > 0.01f && abs_pct < p->min_drive_pct) {
-        pwm_pct = (pwm_pct > 0.0f) ? p->min_drive_pct : -p->min_drive_pct;
-        abs_pct = p->min_drive_pct;
-    }
-
-    if (abs_pct < p->coast_band_pct) {
+    /* Resolve COAST before minimum-drive compensation.  A tiny control
+     * residue must not be promoted to the configured breakaway PWM and keep
+     * the BTS7960 fighting the driver near centre. */
+    const EpsOutputDecision_t output = EpsOutput_Resolve(
+        pwm_pct, p->coast_band_pct, p->min_drive_pct);
+    if (output.coast) {
         Steering_Neutralize();
         return;
     }
+    pwm_pct = output.pwm_pct;
 
     int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
     int16_t slew_counts =
