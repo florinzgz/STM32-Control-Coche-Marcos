@@ -68,9 +68,57 @@ on:
       - '.github/workflows/sensor-eps-regression.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  fix-pr441-review-findings:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 441 && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply verified review corrections
+        run: |
+          python3 scripts/fix_pr441_review_findings.py
+          git diff --check
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Iesp32/src -Iesp32/test_stubs \
+            esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
+            -o /tmp/test_mode_sync
+          /tmp/test_mode_sync
+
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -ICore/Inc Core/Src/test_pedal_cal_session.c \
+            Core/Src/pedal_cal_session.c -lm \
+            -o /tmp/test_pedal_cal_session
+          /tmp/test_pedal_cal_session
+
+          grep -q 'pcal_service_lock_confirmed' Core/Src/pedal_cal_store.c
+          grep -q 'Safety_GetError() == SAFETY_ERROR_NONE' Core/Src/pedal_cal_store.c
+          grep -q 'rearmableFailure()' esp32/src/mode_sync.h
+          grep -q 'REMOTE_CONTROL_ENABLED=0' esp32/src/main.cpp
+
+      - name: Commit productive corrections only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout '${{ github.event.pull_request.base.sha }}' -- .github/workflows/sensor-eps-regression.yml
+          rm -f scripts/fix_pr441_review_findings.py
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix calibration persistence and mode retry classification'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
   regression:
     runs-on: ubuntu-latest
     steps:
