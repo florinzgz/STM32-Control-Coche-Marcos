@@ -151,13 +151,16 @@ static unsigned long lastRtMonMs      = 0;
 // ---- LED relay state tracking ----
 static bool     frontLedLocalState = false;  // front LED relay desired state
 static bool     rearLedLocalState  = false;  // rear LED relay desired state
-// One-shot NVS relay restore after boot (retries until the STM32 echoes the
-// desired relay state, so a dropped CMD_LED frame can't leave the strips off).
+// Desired LED-relay state synchroniser.  Manual touches and boot restore use
+// the same physical relay echo as confirmation.  A lost CMD_LED frame is
+// retried in bounded bursts with a cooldown, so the HMI cannot silently diverge
+// from the STM32 while still avoiding CAN flooding during a hardware fault.
 static bool          ledBootRestoreDone     = false;
 static uint8_t       ledBootRestoreAttempts = 0;
 static unsigned long ledBootRestoreLastMs   = 0;
-static constexpr uint8_t       LED_BOOT_RESTORE_MAX_ATTEMPTS = 10;
-static constexpr unsigned long LED_BOOT_RESTORE_RETRY_MS     = 500;
+static constexpr uint8_t       LED_BOOT_RESTORE_MAX_ATTEMPTS = 8;
+static constexpr unsigned long LED_BOOT_RESTORE_RETRY_MS     = 300;
+static constexpr unsigned long LED_BOOT_RESTORE_COOLDOWN_MS  = 2000;
 
 // ---- Shifter gear tracking ----
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
@@ -190,6 +193,8 @@ static ModeSync      g_modeSync(can::ACK_TIMEOUT_MS, MODE_SYNC_MAX_RETRIES);
 static unsigned long g_modeSendMs   = 0;     // millis() of last FSM-driven send
 static unsigned long g_lastModeAckTs = 0;    // last CMD_MODE ACK consumed by FSM
 static unsigned long g_lastModeEchoTs = 0;   // last heartbeat frame fed as mode echo
+static unsigned long g_lastModeFailureRearmMs = 0;
+static constexpr unsigned long MODE_SYNC_FAILURE_REARM_MS = 2000;
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -516,8 +521,14 @@ static void sendLedCommand(bool front, bool rear) {
     frame.data_length_code = 2;
     frame.data[0]          = front ? 1 : 0;
     frame.data[1]          = rear  ? 1 : 0;
-    ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking; relay echo drives retries
     ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
+}
+
+static void requestLedRelaySync(void) {
+    ledBootRestoreDone     = false;
+    ledBootRestoreAttempts = 0;
+    ledBootRestoreLastMs   = 0;
 }
 
 /// Send pre-power-cut safe-state request to STM32 via CAN 0x130.
@@ -1557,20 +1568,25 @@ void loop() {
             // STM32 echoes the desired relay state so a dropped CAN frame can't
             // silently leave the strips off.
             if (!ledBootRestoreDone && stm32IsAlive &&
-                (hb.systemState == can::SystemState::STANDBY ||
-                 hb.systemState == can::SystemState::ACTIVE)) {
-                if (!frontLedLocalState && !rearLedLocalState) {
-                    ledBootRestoreDone = true;  // OFF saved — respect it, nothing to do
-                } else if (vehicleData.lights().frontRelayOn == frontLedLocalState &&
-                           vehicleData.lights().rearRelayOn  == rearLedLocalState) {
-                    ledBootRestoreDone = true;  // STM32 already reflects saved state
+                hb.systemState != can::SystemState::BOOT) {
+                if (vehicleData.lights().frontRelayOn == frontLedLocalState &&
+                    vehicleData.lights().rearRelayOn  == rearLedLocalState) {
+                    ledBootRestoreDone = true;
+                    ledBootRestoreAttempts = 0;
+                    Serial.printf("[LED] Relay echo confirmed → front=%s rear=%s\n",
+                                  frontLedLocalState ? "ON" : "OFF",
+                                  rearLedLocalState ? "ON" : "OFF");
                 } else if (ledBootRestoreAttempts >= LED_BOOT_RESTORE_MAX_ATTEMPTS) {
-                    ledBootRestoreDone = true;  // give up after bounded retries
+                    /* Bounded burst exhausted: cool down, then start another
+                     * bounded burst until the physical relay echo matches. */
+                    if ((now - ledBootRestoreLastMs) >= LED_BOOT_RESTORE_COOLDOWN_MS) {
+                        ledBootRestoreAttempts = 0;
+                    }
                 } else if ((now - ledBootRestoreLastMs) >= LED_BOOT_RESTORE_RETRY_MS) {
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     ledBootRestoreLastMs = now;
                     ledBootRestoreAttempts++;
-                    Serial.printf("[LED] Boot restore from NVS (try %u) → front=%s rear=%s\n",
+                    Serial.printf("[LED] Relay sync (try %u) → front=%s rear=%s\n",
                                   ledBootRestoreAttempts,
                                   frontLedLocalState ? "ON" : "OFF",
                                   rearLedLocalState ? "ON" : "OFF");
@@ -1746,6 +1762,13 @@ void loop() {
                     g_modeSync.blocked() ? " (blocked/retry)" : "",
                     g_modeSync.failed() ? " -> FAILED" : "");
             }
+            if (g_modeSync.failed() && stm32IsAlive &&
+                !g_modeSync.inSync() &&
+                (now - g_lastModeFailureRearmMs) >= MODE_SYNC_FAILURE_REARM_MS) {
+                g_lastModeFailureRearmMs = now;
+                g_modeSync.rearmFailedAttempt();
+                Serial.println("[MODESYNC] no-response burst re-armed");
+            }
             if (g_modeSync.update(millis(), stm32IsAlive)
                     == ModeSync::Action::SEND) {
                 g_modeSendMs = millis();
@@ -1770,6 +1793,7 @@ void loop() {
                 case TouchAction::FRONT_LED_TOGGLE:
                     if (remoteAuthorityActive) break;
                     frontLedLocalState = !frontLedLocalState;
+                    requestLedRelaySync();
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setFrontLedEnabled(frontLedLocalState);
                     audio::play(frontLedLocalState ? audio::Sound::LIGHTS_ON
@@ -1782,6 +1806,7 @@ void loop() {
                 case TouchAction::REAR_LED_TOGGLE:
                     if (remoteAuthorityActive) break;
                     rearLedLocalState = !rearLedLocalState;
+                    requestLedRelaySync();
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setRearLedEnabled(rearLedLocalState);
                     audio::play(rearLedLocalState ? audio::Sound::LIGHTS_ON
@@ -1816,6 +1841,7 @@ void loop() {
         if (frontLedLocalState != lightsOn || rearLedLocalState != lightsOn) {
             frontLedLocalState = lightsOn;
             rearLedLocalState  = lightsOn;
+            requestLedRelaySync();
             sendLedCommand(frontLedLocalState, rearLedLocalState);
             config_store::setFrontLedEnabled(frontLedLocalState);
             config_store::setRearLedEnabled(rearLedLocalState);

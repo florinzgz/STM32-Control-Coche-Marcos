@@ -281,6 +281,18 @@ public:
     /** Alias for invalidateConfirmed() used on a heartbeat/link-lost edge. */
     void onLinkLost() { invalidateConfirmed(); }
 
+    /* Re-arm a bounded no-response failure after an owner-controlled cooldown.
+     * Temporary REJECTED/BLOCKED ACKs already retry internally; this method is
+     * only for the case where every CMD_MODE frame or ACK in a burst was lost. */
+    void rearmFailedAttempt() {
+        if (!failed_) return;
+        failed_       = false;
+        pending_      = false;
+        blocked_      = false;
+        blockedArmed_ = false;
+        retries_      = 0;
+    }
+
     /** Payload to transmit when update() returns SEND. */
     uint8_t sendMode()  const { return pendingMode_; }
 

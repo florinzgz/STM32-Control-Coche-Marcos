@@ -440,10 +440,36 @@ static void test_block_diagnostics() {
     ASSERT(ms.requestAgeMs(t + 3 * BACKOFF) == 0);  // no episode in flight
 }
 
+
+// A complete no-response burst may be retried by the owner after a cooldown.
+// This is used by main.cpp so one congested CAN interval cannot permanently
+// disable a valid local 4x4/360 request.
+static void test_failed_burst_can_be_rearmed() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x03);
+    uint32_t t = 0;
+    ASSERT(ms.update(t, true) == Action::SEND);
+    for (uint8_t i = 0; i < MAX_RETRIES; ++i) {
+        t += ACK_TIMEOUT_MS;
+        ASSERT(ms.update(t, true) == Action::SEND);
+    }
+    t += ACK_TIMEOUT_MS;
+    ASSERT(ms.update(t, true) == Action::NONE);
+    ASSERT(ms.failed());
+
+    ms.rearmFailedAttempt();
+    ASSERT(!ms.failed());
+    ASSERT(ms.update(t + 1, true) == Action::SEND);
+    ASSERT_EQ(ms.sendMode(), 0x03);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
+}
+
 int main() {
     test_no_send_without_heartbeat();
     test_ack_confirms_and_stops();
     test_bounded_retry_then_fail();
+    test_failed_burst_can_be_rearmed();
     test_late_ack_confirms();
     test_invalid_latches_failed();
     test_blocked_retries_until_active();

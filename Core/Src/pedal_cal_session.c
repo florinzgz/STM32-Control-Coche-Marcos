@@ -69,6 +69,10 @@ static uint32_t abort_mask(const PedalCalConds *c)
     uint32_t bits = PEDAL_CAL_SESS_OK;
     if (c->safe_state)        bits |= PEDAL_CAL_ABORT_SAFE;
     if (c->critical_error)    bits |= PEDAL_CAL_ABORT_ERROR;
+    /* Losing the virtual-STANDBY service lock or leaving P/N is equivalent
+     * to losing the physical movement lock and aborts immediately. */
+    if (!c->in_standby || !c->gear_park_or_neutral)
+        bits |= PEDAL_CAL_ABORT_LOCK_LOST;
     if (c->emergency)         bits |= PEDAL_CAL_ABORT_EMERGENCY;
     if (c->wheels_moving)     bits |= PEDAL_CAL_ABORT_MOVEMENT;
     if (c->can_loss)          bits |= PEDAL_CAL_ABORT_CAN_LOSS;

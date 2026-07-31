@@ -503,6 +503,13 @@ void CAN_PedalCalBurstUpdate(void);
  * publishes the 0x319 session-status frame.  No-op while the session is IDLE. */
 void CAN_PedalCalCaptureTick(void);
 
+/* True while the pedal-calibration service lock owns the powertrain.
+ * The lock is entered only after verifying P/N, stopped wheels, released and
+ * plausible pedal, healthy CAN and no active safety error.  While true, the
+ * relay sequencer and productive traction wrapper must keep all traction
+ * outputs in physical COAST and both power relays de-energised. */
+bool CAN_PedalCalServiceActive(void);
+
 /* Drives the on-demand 0x30D gear power-limit telemetry burst.
  * Call once per 100 ms tick — the function is a no-op while no burst
  * is in progress, so it is safe to call unconditionally and has zero
