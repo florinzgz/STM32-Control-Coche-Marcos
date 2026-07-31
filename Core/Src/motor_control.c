@@ -1369,6 +1369,14 @@ uint8_t Traction_GetWheelFinalPwmPct(uint8_t wheel)
     return (uint8_t)pct;
 }
 
+/* Diagnostic-only accessor for the brake-to-drive release ramp.  The state
+ * remains owned by Traction_Update(); CAN 0x31A observes it without changing
+ * control behaviour. */
+float Traction_GetBrakeReleasePct(void)
+{
+    return sanitize_float(brake_release_pct, 0.0f);
+}
+
 void Traction_Update(void)
 {
     /* --- Power-ready gate ---

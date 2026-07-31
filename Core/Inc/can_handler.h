@@ -163,6 +163,13 @@ extern "C" {
                                          //   Byte 2-3: reason bitmask (PEDAL_CAL_SESS_* u16 LE)
                                          //   Byte 4-5: captured adc_min (u16 LE)
                                          //   Byte 6-7: captured adc_max (u16 LE)
+#define CAN_ID_DIAG_TRACTION_LIMITS 0x31A // STM32 → ESP32 (1000ms) post-demand traction limiting factors
+                                         //   Byte 0: obstacle_scale percent (0..100)
+                                         //   Byte 1: degraded traction_cap percent (0..100)
+                                         //   Byte 2: brake_release ramp percent (0..100)
+                                         //   Byte 3: ObstacleState_t (0 NO_SENSOR,1 NORMAL,2 CONFIRMING,
+                                         //           3 ACTIVE,4 CLEARING,5 SENSOR_FAULT)
+                                         //   Instrumentation only; drives no control path.
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -466,6 +473,7 @@ void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (
 void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
 void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
+void CAN_SendTractionLimitDiag(void); /* 1 Hz obstacle/cap/brake-ramp telemetry (0x31A) */
 void CAN_SendSteeringCenteringDiag(void); /* 1 Hz steering homing telemetry (0x316) */
 void CAN_SendRelayHealthDiag(void);       /* 1 Hz relay/current-sense health (0x317) */
 void CAN_SendIna226Ch5Diag(void);         /* 1 Hz steering INA226 CH5 diagnostic (0x318) */

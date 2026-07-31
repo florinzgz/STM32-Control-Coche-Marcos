@@ -120,6 +120,7 @@ uint16_t Traction_GetMotionInhibit(void);
 float    Traction_GetEffectiveDemandPct(void);
 uint8_t  Traction_GetFinalPwmPct(void);
 uint8_t  Traction_GetWheelFinalPwmPct(uint8_t wheel);
+float    Traction_GetBrakeReleasePct(void);
 const TractionState_t* Traction_GetState(void);
 
 /* Single source of truth for the physical driven-wheel layout.

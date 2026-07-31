@@ -846,6 +846,11 @@ int main(void)
              * with a signed shunt/current that is never zeroed.               */
             CAN_SendIna226Ch5Diag();
 
+            /* Post-demand traction-limit factors (0x31A): obstacle scale,
+             * degraded traction cap, brake-release ramp and obstacle FSM.
+             * Diagnostic only; no control path consumes this frame. */
+            CAN_SendTractionLimitDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

@@ -15,7 +15,7 @@
 // arriving during the render frame do NOT affect the in-progress draw.
 // This guarantees frame-consistent, zero-jitter display output.
 //
-// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.0
+// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.20
 // =============================================================================
 
 #ifndef VEHICLE_DATA_H
@@ -27,6 +27,7 @@
 #include "steering_diag_view.h"
 #include "relay_health_view.h"
 #include "ina226_ch5_view.h"
+#include "traction_limit_diag_view.h"
 
 namespace vehicle {
 
@@ -410,6 +411,13 @@ struct MotionInhibitData {
     unsigned long timestampMs = 0;
 };
 
+// 0x31A DIAG_TRACTION_LIMITS — slow post-demand limit observability.
+struct TractionLimitDiagData {
+    traction_limit_diag_view::TractionLimitView view{};
+    bool valid = false;
+    unsigned long timestampMs = 0;
+};
+
 // -------------------------------------------------------------------------
 // 0x316 DIAG_STEERING_CENTERING — steering homing telemetry.
 // Explains WHY the automatic centering sweep did/did not progress so the HMI
@@ -690,6 +698,7 @@ public:
     void setBootReset(const BootResetData& d)       { bootReset_ = d; }
     void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
     void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
+    void setTractionLimitDiag(const TractionLimitDiagData& d) { tractionLimitDiag_ = d; }
     void setSteeringCenteringDiag(const SteeringCenteringDiagData& d) { steeringCenteringDiag_ = d; }
     void setRelayHealthDiag(const RelayHealthDiagData& d) { relayHealthDiag_ = d; }
     void setIna226Ch5Diag(const Ina226Ch5DiagData& d) { ina226Ch5Diag_ = d; }
@@ -733,6 +742,7 @@ public:
     const BootResetData&    bootReset()    const { return bootReset_; }
     const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
     const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
+    const TractionLimitDiagData& tractionLimitDiag() const { return tractionLimitDiag_; }
     const SteeringCenteringDiagData& steeringCenteringDiag() const { return steeringCenteringDiag_; }
     const RelayHealthDiagData& relayHealthDiag() const { return relayHealthDiag_; }
     const Ina226Ch5DiagData& ina226Ch5Diag() const { return ina226Ch5Diag_; }
@@ -777,6 +787,7 @@ private:
     BootResetData    bootReset_;
     WheelSensorDiagData wheelSensorDiag_;
     MotionInhibitData   motionInhibit_;
+    TractionLimitDiagData tractionLimitDiag_;
     SteeringCenteringDiagData steeringCenteringDiag_;
     RelayHealthDiagData relayHealthDiag_;
     Ina226Ch5DiagData   ina226Ch5Diag_;

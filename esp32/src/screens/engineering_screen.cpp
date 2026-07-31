@@ -2730,6 +2730,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             miPrevDegraded_ = 0xFFu;
                             miPrevFresh_    = 0xFFu;
                             miPrevAgeMs_    = 0xFFFFFFFFu;
+                            miPrevLimitSignature_ = 0xFFFFFFFFu;
                             miPrevValid_    = false;
                             currentMenu_ = SubMenu::MOTION_INHIBIT_DIAG;
                             break;
@@ -6187,6 +6188,8 @@ constexpr int16_t MI_STAT_Y   = 36;   // freshness/state line y
 constexpr int16_t MI_AGE_VX   = 48;   // age value x        ("AGE:" label)
 constexpr int16_t MI_MASK_LX  = 250;  // mask label x
 constexpr int16_t MI_MASK_VX  = 312;  // mask value x
+constexpr int16_t MI_LIMIT_LX = 250; // 0x31A O/T/B label x
+constexpr int16_t MI_LIMIT_VX = 294; // 0x31A values x
 constexpr int16_t MI_META_Y   = 52;   // age + mask line y
 constexpr int16_t MI_RSN_X    = 250;  // reasons column x
 constexpr int16_t MI_RSN_HDR_Y= 74;   // "ACTIVE REASONS" header y
@@ -6219,6 +6222,7 @@ void EngineeringScreen::drawMotionInhibitDiag() {
     tft.drawString("STATE:", MI_LX, MI_STAT_Y);
     tft.drawString("AGE:",   MI_LX, MI_META_Y);
     tft.drawString("MASK:",  MI_MASK_LX, MI_META_Y);
+    tft.drawString("O/T/B:", MI_LIMIT_LX, MI_STAT_Y);
 
     // Divider under the meta rows.
     tft.drawFastHLine(0, 68, ui::SCREEN_W, ui::COL_DARK_GRAY);
@@ -6252,6 +6256,7 @@ void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
     }
 
     const vehicle::MotionInhibitData& mi = data_->motionInhibit();
+    const vehicle::TractionLimitDiagData& tl = data_->tractionLimitDiag();
     const uint32_t now   = (uint32_t)lastFrameTimeMs_;
     const uint32_t stamp = (uint32_t)mi.timestampMs;
     const miv::Freshness fresh = miv::freshness(mi.valid, now, stamp);
@@ -6296,6 +6301,38 @@ void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
         putVal(MI_AGE_VX, MI_META_Y, b,
                (fresh == miv::Freshness::VALID) ? ui::COL_WHITE : ui::COL_AMBER);
         miPrevAgeMs_ = age;
+    }
+
+    // ---- 0x31A post-demand limit factors (slow frame, 3 s stale timeout) ----
+    namespace tlv = traction_limit_diag_view;
+    const tlv::Freshness tlFresh = tlv::freshness(
+        tl.valid, now, (uint32_t)tl.timestampMs);
+    const uint32_t limitSignature =
+        ((uint32_t)tl.view.obstacleScalePct) |
+        ((uint32_t)tl.view.tractionCapPct << 8) |
+        ((uint32_t)tl.view.brakeReleasePct << 16) |
+        ((uint32_t)(tl.view.obstacleState & 0x3FU) << 24) |
+        (tl.valid ? 0x40000000UL : 0UL) |
+        ((tlFresh == tlv::Freshness::STALE) ? 0x80000000UL : 0UL);
+    if (force || limitSignature != miPrevLimitSignature_) {
+        if (!tl.valid) {
+            snprintf(b, sizeof(b), "%-24s", "---/---/--- NO-DATA");
+        } else {
+            const char* stateText =
+                (tlFresh == tlv::Freshness::STALE) ? "STALE"
+                                                   : tlv::obstacleStateText(tl.view.obstacleState);
+            snprintf(b, sizeof(b), "%3u/%3u/%3u %-7s",
+                     (unsigned)tl.view.obstacleScalePct,
+                     (unsigned)tl.view.tractionCapPct,
+                     (unsigned)tl.view.brakeReleasePct, stateText);
+        }
+        const bool limited = tl.valid &&
+            (tl.view.obstacleScalePct < 100U || tl.view.tractionCapPct < 100U);
+        putVal(MI_LIMIT_VX, MI_STAT_Y, b,
+               !tl.valid ? ui::COL_GRAY
+                         : ((tlFresh == tlv::Freshness::STALE || limited)
+                            ? ui::COL_AMBER : ui::COL_GREEN));
+        miPrevLimitSignature_ = limitSignature;
     }
 
     // ---- Reason mask (hex, 4 digits) ----

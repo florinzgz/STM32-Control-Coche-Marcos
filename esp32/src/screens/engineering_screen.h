@@ -591,6 +591,7 @@ private:
     uint8_t       miPrevDegraded_  = 0xFFu;
     uint8_t       miPrevFresh_     = 0xFFu;   // motion_inhibit_view::Freshness
     uint32_t      miPrevAgeMs_     = 0xFFFFFFFFu;
+    uint32_t      miPrevLimitSignature_ = 0xFFFFFFFFu; // 0x31A O/T/B/state/freshness
     bool          miPrevValid_     = false;
 };
 

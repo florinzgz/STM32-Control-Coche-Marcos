@@ -82,7 +82,8 @@ jobs:
 
           Código fuente completo:
           - source/STM32-Control-Coche-Marcos-${PACKAGE_LABEL}-source.zip
-          - Es un snapshot del commit exacto compilado por este workflow.
+          - Es un snapshot del merge de validación compilado por este workflow.
+          - COMMIT.txt identifica BUILD_SHA, PR_HEAD_SHA y BASE_SHA.
           - Para STM32: extraer el ZIP y ejecutar make clean && make -j2.
           - Para ESP32: entrar en esp32 y ejecutar pio run -e esp32s3.
 
@@ -92,7 +93,11 @@ jobs:
           - Comprobar primero homing, sensores, dirección y PWM sin carga.
           EOF
 
-          printf '%s\n' "${GITHUB_SHA}" > artifacts/firmware/COMMIT.txt
+          {
+            printf 'BUILD_SHA=%s\n' "${GITHUB_SHA}"
+            printf 'PR_HEAD_SHA=%s\n' "${{ github.event.pull_request.head.sha || github.sha }}"
+            printf 'BASE_SHA=%s\n' "${{ github.event.pull_request.base.sha || github.sha }}"
+          } > artifacts/firmware/COMMIT.txt
           (cd artifacts/firmware && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
       - name: Upload flashable firmware and complete source

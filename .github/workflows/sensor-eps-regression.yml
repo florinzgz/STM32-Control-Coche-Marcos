@@ -6,35 +6,65 @@ on:
     branches: [ main, develop ]
     paths:
       - 'Makefile'
+      - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/can_handler.c'
+      - 'Core/Src/main.c'
+      - 'esp32/include/can_ids.h'
+      - 'esp32/src/vehicle_data.h'
+      - 'esp32/src/can_rx.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.h'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
+      - 'Core/Inc/traction_limit_frame.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
+      - 'Core/Src/test_traction_limit_frame.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
       - 'esp32/host_tests/test_degraded_banner.cpp'
+      - 'esp32/src/traction_limit_diag_view.h'
+      - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'Makefile'
+      - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/can_handler.c'
+      - 'Core/Src/main.c'
+      - 'esp32/include/can_ids.h'
+      - 'esp32/src/vehicle_data.h'
+      - 'esp32/src/can_rx.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.h'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
+      - 'Core/Inc/traction_limit_frame.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
+      - 'Core/Src/test_traction_limit_frame.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
       - 'esp32/host_tests/test_degraded_banner.cpp'
+      - 'esp32/src/traction_limit_diag_view.h'
+      - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
 
 permissions:
@@ -62,8 +92,27 @@ jobs:
             -o /tmp/test_eps_output_policy
           /tmp/test_eps_output_policy
 
+      - name: EPS low-speed assist policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_assist_policy.c -lm \
+            -o /tmp/test_eps_assist_policy
+          /tmp/test_eps_assist_policy
+
       - name: Effective production EPS wrapper
         run: python3 scripts/check_effective_eps_wrapper.py
+
+      - name: Traction limit CAN frame contract
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_traction_limit_frame.c -lm \
+            -o /tmp/test_traction_limit_frame
+          /tmp/test_traction_limit_frame
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -ICore/Inc -Iesp32/src \
+            esp32/src/test_traction_limit_diag_decode.cpp -lm \
+            -o /tmp/test_traction_limit_diag_decode
+          /tmp/test_traction_limit_diag_decode
 
       - name: HMI degraded-level banner
         run: |
