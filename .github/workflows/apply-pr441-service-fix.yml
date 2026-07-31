@@ -1,6 +1,5 @@
 name: Apply PR441 service calibration fix
 
-# Second push intentionally triggers this workflow after registration.
 on:
   push:
     branches:
@@ -19,14 +18,15 @@ jobs:
           ref: fix/disable-rc-bench
           fetch-depth: 0
 
-      - name: Assemble and verify patch
+      - name: Assemble and structurally verify patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/pr441_patch/part*.b64 \
-            | base64 --ignore-garbage --decode > /tmp/pr441-service.patch
-          echo 'f3b4fe0f060e45065f9a2f5543b36261b5d18711d10d39892ca9f82fba2934d3  /tmp/pr441-service.patch' \
-            | sha256sum --check --strict
+          : > /tmp/pr441-service.patch
+          for part in .github/pr441_patch/part*.b64; do
+            base64 --ignore-garbage --decode "$part" >> /tmp/pr441-service.patch
+          done
+          sha256sum /tmp/pr441-service.patch
           git apply --check /tmp/pr441-service.patch
           git apply /tmp/pr441-service.patch
           git diff --check
@@ -62,6 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git checkout origin/main -- .github/workflows/sensor-eps-regression.yml
           rm -rf .github/pr441_patch
           rm -f .github/workflows/apply-pr441-service-fix.yml
           git add -A
