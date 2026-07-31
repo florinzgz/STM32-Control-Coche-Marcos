@@ -50,8 +50,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.number == 440 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/eps-low-speed-assist' &&
-      hashFiles('.github/pr440-patches/*.patch') != ''
+      github.event.pull_request.head.ref == 'fix/eps-low-speed-assist'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
