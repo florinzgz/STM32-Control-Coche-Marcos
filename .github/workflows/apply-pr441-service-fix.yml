@@ -1,5 +1,7 @@
 name: Apply PR441 service calibration fix
 
+# This workflow intentionally owns the latest PR synchronization event until
+# the productive commit has been created and all temporary inputs are removed.
 on:
   pull_request:
     branches: [ main ]
