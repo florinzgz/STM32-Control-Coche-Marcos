@@ -8,11 +8,13 @@ on:
       - 'Makefile'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
@@ -25,11 +27,13 @@ on:
       - 'Makefile'
       - 'Core/Inc/current_plausibility.h'
       - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/motor_control.c'
       - 'Core/Src/motor_control_patched.c'
       - 'Core/Src/test_current_plausibility.c'
       - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
@@ -61,6 +65,13 @@ jobs:
             Core/Src/test_eps_output_policy.c -lm \
             -o /tmp/test_eps_output_policy
           /tmp/test_eps_output_policy
+
+      - name: EPS low-speed assist policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_assist_policy.c -lm \
+            -o /tmp/test_eps_assist_policy
+          /tmp/test_eps_assist_policy
 
       - name: Effective production EPS wrapper
         run: python3 scripts/check_effective_eps_wrapper.py
