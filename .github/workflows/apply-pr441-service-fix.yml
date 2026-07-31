@@ -31,8 +31,8 @@ jobs:
             base64 --ignore-garbage --decode "$part" >> /tmp/pr441-service.patch
           done
           sha256sum /tmp/pr441-service.patch
-          git apply --check /tmp/pr441-service.patch
-          git apply /tmp/pr441-service.patch
+          git apply --3way --check /tmp/pr441-service.patch
+          git apply --3way /tmp/pr441-service.patch
           git diff --check
 
       - name: Run focused safety tests
