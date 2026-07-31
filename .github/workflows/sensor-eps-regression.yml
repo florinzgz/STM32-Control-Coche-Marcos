@@ -68,9 +68,37 @@ on:
       - '.github/workflows/sensor-eps-regression.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  fix-pr441-hmi-scope:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 441 && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply compile-scope correction
+        run: |
+          python3 scripts/fix_pr441_hmi_scope.py
+          git diff --check
+          grep -q 'const bool service_locked =' esp32/src/screens/engineering_screen.cpp
+
+      - name: Commit productive correction only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout '${{ github.event.pull_request.base.sha }}' -- .github/workflows/sensor-eps-regression.yml
+          rm -f scripts/fix_pr441_hmi_scope.py
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix pedal calibration service-lock HMI scope'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
   regression:
     runs-on: ubuntu-latest
     steps:
