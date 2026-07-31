@@ -59,10 +59,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Apply reviewed PR440 patches
+      - name: Apply reviewed PR440 source patches
         run: |
           set -euo pipefail
-          for patch in .github/pr440-patches/*.patch; do
+          for patch in \
+            .github/pr440-patches/01-eps.patch \
+            .github/pr440-patches/02-can-core.patch \
+            .github/pr440-patches/03-esp32.patch; do
             git apply --check "$patch"
             git apply --index "$patch"
           done
