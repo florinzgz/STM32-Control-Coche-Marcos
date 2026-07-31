@@ -1918,24 +1918,29 @@ static bool pedalcal_service_request_allowed(const PedalCalConds *c)
            !c->can_loss;
 }
 
-/* Enter the physical calibration lock.  The flag is raised before power-down
- * so the 10 ms relay/traction guards cannot race and re-energise the vehicle. */
+/* Enter the physical calibration lock.  Ownership is published only after
+ * both the BTS7960 output lock and the traction-relay OFF state are confirmed,
+ * so CAN_PedalCalServiceActive() can never report an unowned/pending lock. */
 static bool pedalcal_service_enter(void)
 {
     PedalCalConds c;
     pedalcal_build_conds(&c);
     if (!pedalcal_service_request_allowed(&c)) return false;
 
-    pedalcal_service_active = true;
     Traction_SetAxisRotation(false);
     Steering_Neutralize();
     Relay_PowerDown();
     const bool en_pwm_locked = Traction_CalibrationLock();
     const bool relay_off = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
     if (!en_pwm_locked || !relay_off) {
-        pedalcal_service_active = false;
         return false;
     }
+
+    pedalcal_service_active = true;
+    /* Re-assert after publication so the periodic guards and this synchronous
+     * entry path agree on the same already-confirmed physical state. */
+    Relay_PowerDown();
+    (void)Traction_CalibrationLock();
     return true;
 }
 

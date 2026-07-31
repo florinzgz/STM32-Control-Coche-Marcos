@@ -193,7 +193,8 @@ static ModeSync      g_modeSync(can::ACK_TIMEOUT_MS, MODE_SYNC_MAX_RETRIES);
 static unsigned long g_modeSendMs   = 0;     // millis() of last FSM-driven send
 static unsigned long g_lastModeAckTs = 0;    // last CMD_MODE ACK consumed by FSM
 static unsigned long g_lastModeEchoTs = 0;   // last heartbeat frame fed as mode echo
-static unsigned long g_lastModeFailureRearmMs = 0;
+static unsigned long g_modeFailureSinceMs = 0;
+static bool          g_modeFailureTimerArmed = false;
 static constexpr unsigned long MODE_SYNC_FAILURE_REARM_MS = 2000;
 
 // ---- Power/Audio state tracking ----
@@ -1158,8 +1159,8 @@ void setup() {
     shifter::init();
 
     // Initialize remote control parser (FlySky FS-iA6B iBUS, GPIO 16 RX).
-    // Enabled by default (REMOTE_CONTROL_ENABLED=1 in platformio.ini);
-    // compiles to an inline no-op when the flag is set to 0.  See
+    // Disabled in the current bench build (REMOTE_CONTROL_ENABLED=0);
+    // compiles to an inline no-op while the receiver is excluded.  See
     // docs/REMOTE_CONTROL_IMPLEMENTATION_PLAN.md Phase 2.
     remote_control::init();
 
@@ -1762,12 +1763,18 @@ void loop() {
                     g_modeSync.blocked() ? " (blocked/retry)" : "",
                     g_modeSync.failed() ? " -> FAILED" : "");
             }
-            if (g_modeSync.failed() && stm32IsAlive &&
-                !g_modeSync.inSync() &&
-                (now - g_lastModeFailureRearmMs) >= MODE_SYNC_FAILURE_REARM_MS) {
-                g_lastModeFailureRearmMs = now;
-                g_modeSync.rearmFailedAttempt();
-                Serial.println("[MODESYNC] no-response burst re-armed");
+            if (g_modeSync.rearmableFailure() && stm32IsAlive &&
+                !g_modeSync.inSync()) {
+                if (!g_modeFailureTimerArmed) {
+                    g_modeFailureSinceMs = now;
+                    g_modeFailureTimerArmed = true;
+                } else if ((now - g_modeFailureSinceMs) >= MODE_SYNC_FAILURE_REARM_MS) {
+                    g_modeSync.rearmFailedAttempt();
+                    g_modeFailureTimerArmed = false;
+                    Serial.println("[MODESYNC] no-response burst re-armed");
+                }
+            } else {
+                g_modeFailureTimerArmed = false;
             }
             if (g_modeSync.update(millis(), stm32IsAlive)
                     == ModeSync::Action::SEND) {

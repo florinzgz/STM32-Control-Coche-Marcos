@@ -34,6 +34,16 @@
 #include "stm32g4xx_hal.h"
 #include "safety_system.h"
 #include <string.h>
+
+/* Optional dependency for host fixtures; present in the productive image.
+ * The service flag is published only after the physical lock is confirmed. */
+extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+
+static bool pcal_service_lock_confirmed(void)
+{
+    return CAN_PedalCalServiceActive != 0 &&
+           CAN_PedalCalServiceActive();
+}
 #include <stddef.h>
 
 /* ---- Flash layout ----
@@ -171,14 +181,16 @@ void PedalCal_GetStored(uint16_t *adc_min, uint16_t *adc_max)
 
 bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
 {
-    /* Defense in depth: never persist while actuators may be live.
-     * The CAN dispatcher (pedalcal_safety_ok in can_handler.c) already
-     * blocks any caller path outside SYS_STATE_STANDBY, but the same
-     * gate is re-asserted at the persistence boundary so that any
-     * future caller (service-mode shortcut, host test fixture, etc.)
-     * cannot accidentally erase page 124 while the vehicle is in
-     * ACTIVE / DEGRADED / LIMP_HOME state.                            */
-    if (Safety_GetState() != SYS_STATE_STANDBY)
+    /* Defense in depth: persistence is permitted only in true STANDBY or
+     * while the confirmed pedal-calibration service lock owns a clean ACTIVE /
+     * DEGRADED recovery state.  SAFE, ERROR, LIMP_HOME and any active safety
+     * error remain hard blocks even if a stale caller attempts SAVE. */
+    const SystemState_t state = Safety_GetState();
+    const bool service_authorized =
+        pcal_service_lock_confirmed() &&
+        (state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED) &&
+        Safety_GetError() == SAFETY_ERROR_NONE;
+    if (state != SYS_STATE_STANDBY && !service_authorized)
         return false;
 
     /* Hard validation gate — never persist out-of-range endpoints. */
