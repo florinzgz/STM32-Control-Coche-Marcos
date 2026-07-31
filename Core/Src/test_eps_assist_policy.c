@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "eps_assist_policy.h"
+#include "eps_output_policy.h"
 
 static int failed;
 #define CHECK(expr) do { \
@@ -58,6 +59,13 @@ int main(void)
     CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, false), 8.0f));
     CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true), 1.5f));
     CHECK(NEAR(EpsAssist_EffectiveSlewRate(1.0f, true), 1.0f));
+
+    /* The complete driver-intent path resolves to a bounded 4 % breakaway,
+     * not the historical 8 % step and never to the opposite direction. */
+    EpsOutputDecision_t output = EpsOutput_Resolve(
+        1.25f, EpsAssist_EffectiveCoastBand(3.0f, true),
+        EpsAssist_EffectiveMinDrive(8.0f, true));
+    CHECK(!output.coast && NEAR(output.pwm_pct, 4.0f));
 
     d = EpsAssist_Resolve(&state, 600U, NAN, 0.0f,
                           0.0f, 0.0f, 3.0f);
