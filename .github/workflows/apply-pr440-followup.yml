@@ -1,0 +1,62 @@
+name: Apply PR440 Follow-up
+
+on:
+  pull_request:
+    branches: [main]
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-followup:
+    if: >-
+      github.event.pull_request.number == 440 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/eps-low-speed-assist'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify expected head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Apply reviewed follow-up patches
+        run: |
+          set -euo pipefail
+          for patch in .github/pr440-patches/*.patch; do
+            git apply --check "$patch"
+            git apply --index "$patch"
+          done
+
+      - name: Run focused host validation
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_assist_policy.c -lm \
+            -o /tmp/test_eps_assist_policy
+          /tmp/test_eps_assist_policy
+          python3 scripts/check_effective_eps_wrapper.py
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_traction_limit_frame.c -lm \
+            -o /tmp/test_traction_limit_frame
+          /tmp/test_traction_limit_frame
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -ICore/Inc -Iesp32/src \
+            esp32/src/test_traction_limit_diag_decode.cpp -lm \
+            -o /tmp/test_traction_limit_diag_decode
+          /tmp/test_traction_limit_diag_decode
+
+      - name: Commit reviewed corrections
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: harden EPS reversal and expose traction limits"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
