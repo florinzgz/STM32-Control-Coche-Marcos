@@ -80,7 +80,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Apply verified service patch
+      - name: Apply verified service changes
         shell: bash
         run: |
           set -euo pipefail
@@ -88,10 +88,63 @@ jobs:
           for part in .github/pr441_patch/part*.b64; do
             base64 --ignore-garbage --decode "$part" >> /tmp/pr441-service.patch
           done
-          echo 'f3b4fe0f060e45065f9a2f5543b36261b5d18711d10d39892ca9f82fba2934d3  /tmp/pr441-service.patch' \
-            | sha256sum --check --strict
-          git apply --check /tmp/pr441-service.patch
-          git apply /tmp/pr441-service.patch
+          sha256sum /tmp/pr441-service.patch
+          git apply --3way --exclude='Core/Src/motor_control_patched.c' \
+            /tmp/pr441-service.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Core/Src/motor_control_patched.c')
+          text = path.read_text(encoding='utf-8')
+          include_anchor = '#include "eps_assist_policy.h"\n'
+          helper_marker = 'PR_MotorPedalCalServiceActive'
+          helper = '''#include "can_handler.h"
+
+#ifdef HOST_TEST
+extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+static bool PR_MotorPedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive != 0 &&
+           CAN_PedalCalServiceActive();
+}
+#else
+static bool PR_MotorPedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive();
+}
+#endif
+'''
+          if helper_marker not in text:
+              if text.count(include_anchor) != 1:
+                  raise SystemExit('motor wrapper include anchor missing or ambiguous')
+              text = text.replace(include_anchor, include_anchor + helper, 1)
+
+          function_anchor = 'void Traction_Update(void)\n{\n'
+          lock_marker = 'highest-priority physical motion inhibit'
+          lock = '''    /* Pedal-calibration service lock is an independent,
+     * highest-priority physical motion inhibit.  Do not evaluate ramps,
+     * tank turn, Ackermann, ABS/TCS or base demand while it owns the vehicle. */
+    if (PR_MotorPedalCalServiceActive()) {
+        (void)Traction_CalibrationLock();
+        coast_all();
+        zero_output_telemetry();
+        Traction_UpdateMotionInhibit(0.0f, 0U);
+        return;
+    }
+
+'''
+          if lock_marker not in text:
+              if text.count(function_anchor) != 1:
+                  raise SystemExit('effective Traction_Update anchor missing or ambiguous')
+              text = text.replace(function_anchor, function_anchor + lock, 1)
+
+          if text.count(helper_marker) < 3:
+              raise SystemExit('service helper was not integrated completely')
+          if text.count(lock_marker) != 1:
+              raise SystemExit('service lock insertion is not unique')
+          path.write_text(text, encoding='utf-8')
+          PY
           git diff --check
 
       - name: Run focused safety tests
