@@ -293,7 +293,7 @@ public:
     /** Alias for invalidateConfirmed() used on a heartbeat/link-lost edge. */
     void onLinkLost() { invalidateConfirmed(); }
 
-    /* Re-arm a bounded no-response failure after an owner-controlled cooldown.
+    /** Re-arm a bounded no-response failure after an owner-controlled cooldown.
      * Temporary REJECTED/BLOCKED ACKs already retry internally; this method is
      * only for the case where every CMD_MODE frame or ACK in a burst was lost. */
     void rearmFailedAttempt() {

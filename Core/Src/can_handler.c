@@ -1794,8 +1794,16 @@ static bool            pedalcal_session_ready = false;
  * never masks SAFE/ERROR: it only forces relays OFF and traction COAST while
  * the guided session is active. */
 static bool            pedalcal_service_active = false;
+static bool            pedalcal_service_pending = false;
+static bool            pedalcal_service_hold = false;
 
 bool CAN_PedalCalServiceActive(void)
+{
+    return pedalcal_service_pending || pedalcal_service_active ||
+           pedalcal_service_hold;
+}
+
+bool CAN_PedalCalServiceConfirmed(void)
 {
     return pedalcal_service_active;
 }
@@ -1867,7 +1875,7 @@ static void pedalcal_build_conds(PedalCalConds *c)
      * global state remains observable as ACTIVE/DEGRADED, but movement and
      * power relays are physically inhibited by independent 10 ms guards. */
     c->in_standby           = (st == SYS_STATE_STANDBY) ||
-                              pedalcal_service_active;
+                              CAN_PedalCalServiceConfirmed();
     c->gear_park_or_neutral = (gear == GEAR_PARK || gear == GEAR_NEUTRAL);
     c->wheels_moving        = (Wheel_GetSpeed_FL() >= 0.3f ||
                                Wheel_GetSpeed_FR() >= 0.3f ||
@@ -1890,7 +1898,7 @@ static void pedalcal_build_conds(PedalCalConds *c)
      * inhibited precondition (motion-inhibit is only populated once ACTIVE). */
     c->traction_inhibited   = (Traction_GetMotionInhibit() != 0U) ||
                               (st == SYS_STATE_STANDBY) ||
-                              pedalcal_service_active;
+                              CAN_PedalCalServiceActive();
     /* audit P5.4: live, read-only verification that the real movement lock is
      * still holding — traction relay de-energised (0x… status bit1 = 0) and
      * the resolved traction PWM at 0.  CAN_PedalCalCaptureTick actively
@@ -1911,6 +1919,8 @@ static bool pedalcal_service_request_allowed(const PedalCalConds *c)
                           (st == SYS_STATE_ACTIVE) ||
                           (st == SYS_STATE_DEGRADED);
     return state_ok &&
+           !pedalcal_service_pending && !pedalcal_service_active &&
+           !pedalcal_service_hold &&
            Safety_GetError() == SAFETY_ERROR_NONE &&
            c->gear_park_or_neutral && !c->wheels_moving &&
            c->pedal_plausible && c->pedal_released &&
@@ -1918,35 +1928,67 @@ static bool pedalcal_service_request_allowed(const PedalCalConds *c)
            !c->can_loss;
 }
 
-/* Enter the physical calibration lock.  Ownership is published only after
- * both the BTS7960 output lock and the traction-relay OFF state are confirmed,
- * so CAN_PedalCalServiceActive() can never report an unowned/pending lock. */
+/* Enter through a PENDING guard so periodic relay/traction tasks cannot
+ * re-energise outputs while the synchronous physical checks are in progress.
+ * Only the confirmed ACTIVE phase authorizes persistence. */
 static bool pedalcal_service_enter(void)
 {
     PedalCalConds c;
     pedalcal_build_conds(&c);
     if (!pedalcal_service_request_allowed(&c)) return false;
 
+    pedalcal_service_pending = true;
     Traction_SetAxisRotation(false);
     Steering_Neutralize();
     Relay_PowerDown();
     const bool en_pwm_locked = Traction_CalibrationLock();
     const bool relay_off = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
     if (!en_pwm_locked || !relay_off) {
+        pedalcal_service_pending = false;
+        pedalcal_service_hold = true;
+        Relay_PowerDown();
+        (void)Traction_CalibrationLock();
         return false;
     }
 
     pedalcal_service_active = true;
-    /* Re-assert after publication so the periodic guards and this synchronous
-     * entry path agree on the same already-confirmed physical state. */
+    pedalcal_service_pending = false;
     Relay_PowerDown();
     (void)Traction_CalibrationLock();
     return true;
 }
 
+/* Never release directly back to a drive-capable state.  Terminal completion,
+ * operator abort, runtime abort and failed entry all transition to HOLD.  HOLD
+ * keeps relays OFF and all BTS7960 outputs in COAST until P/N, stopped wheels
+ * and a plausible released pedal are observed together. */
 static void pedalcal_service_exit(void)
 {
+    pedalcal_service_pending = false;
     pedalcal_service_active = false;
+    pedalcal_service_hold = true;
+    Relay_PowerDown();
+    (void)Traction_CalibrationLock();
+}
+
+static void pedalcal_service_hold_update(void)
+{
+    if (!pedalcal_service_hold) return;
+
+    Relay_PowerDown();
+    const bool output_locked = Traction_CalibrationLock();
+    const bool relay_off = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
+
+    PedalCalConds c;
+    pedalcal_build_conds(&c);
+    const bool safe_rearm = output_locked && relay_off &&
+                            c.gear_park_or_neutral && !c.wheels_moving &&
+                            c.pedal_plausible && c.pedal_released &&
+                            !c.critical_error && !c.safe_state &&
+                            !c.emergency && !c.can_loss;
+    if (safe_rearm) {
+        pedalcal_service_hold = false;
+    }
 }
 
 /* True when the current live entry guards would permit a session to start.
@@ -2184,6 +2226,13 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
 
     case PEDAL_CAL_OP_CAPTURE_MIN: {   /* BEGIN the guided session */
+        /* A repeated BEGIN must never tear down an already-owned lock. */
+        if (PedalCalSession_Active(&pedalcal_session)) {
+            pedalcal_start_burst();
+            pedalcal_send_session_status();
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
         /* Enter a physical service lock first.  This permits calibration from
          * ACTIVE or a clean DEGRADED recovery window without weakening the
          * global state graph or disabling any safety transition. */
@@ -2290,6 +2339,7 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 void CAN_PedalCalCaptureTick(void)
 {
     pedalcal_session_lazy_init();
+    pedalcal_service_hold_update();
     if (!PedalCalSession_Active(&pedalcal_session)) return;
 
     /* Enforce the REAL movement lock for the WHOLE session (audit P5.4):

@@ -35,16 +35,26 @@
 #include "safety_system.h"
 #include <string.h>
 
+#include <stddef.h>
+
 /* Optional dependency for host fixtures; present in the productive image.
- * The service flag is published only after the physical lock is confirmed. */
-extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+ * Only the confirmed ACTIVE phase can authorize persistence. */
+extern bool CAN_PedalCalServiceConfirmed(void) __attribute__((weak));
 
 static bool pcal_service_lock_confirmed(void)
 {
-    return CAN_PedalCalServiceActive != 0 &&
-           CAN_PedalCalServiceActive();
+    return CAN_PedalCalServiceConfirmed != 0 &&
+           CAN_PedalCalServiceConfirmed();
 }
-#include <stddef.h>
+
+static bool pcal_write_context_authorized(bool standby_context)
+{
+    const SystemState_t state = Safety_GetState();
+    if (standby_context) return state == SYS_STATE_STANDBY;
+    return pcal_service_lock_confirmed() &&
+           (state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED) &&
+           Safety_GetError() == SAFETY_ERROR_NONE;
+}
 
 /* ---- Flash layout ----
  * STM32G474RE: 512 KB flash, 128 pages of 4 KB each.
@@ -185,12 +195,8 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
      * while the confirmed pedal-calibration service lock owns a clean ACTIVE /
      * DEGRADED recovery state.  SAFE, ERROR, LIMP_HOME and any active safety
      * error remain hard blocks even if a stale caller attempts SAVE. */
-    const SystemState_t state = Safety_GetState();
-    const bool service_authorized =
-        pcal_service_lock_confirmed() &&
-        (state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED) &&
-        Safety_GetError() == SAFETY_ERROR_NONE;
-    if (state != SYS_STATE_STANDBY && !service_authorized)
+    const bool standby_context = (Safety_GetState() == SYS_STATE_STANDBY);
+    if (!pcal_write_context_authorized(standby_context))
         return false;
 
     /* Hard validation gate — never persist out-of-range endpoints. */
@@ -248,6 +254,10 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
     slot.checksum      = pcal_crc32(&slot,
                                     offsetof(pcal_flash_slot_t, checksum));
 
+    /* Revalidate immediately before entering the erase/program window. */
+    if (!pcal_write_context_authorized(standby_context))
+        return false;
+
     /* Unlock flash */
     HAL_StatusTypeDef status = HAL_FLASH_Unlock();
     if (status != HAL_OK)
@@ -266,6 +276,10 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
         HAL_FLASH_Lock();
         return false;
     }
+    if (!pcal_write_context_authorized(standby_context)) {
+        HAL_FLASH_Lock();
+        return false;
+    }
 
     /* Write the slot (double-word aligned).
      * STM32G4 flash requires 64-bit (double-word) writes.
@@ -275,6 +289,10 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
     const uint64_t *src  = (const uint64_t *)&slot;
 
     for (uint32_t i = 0; i < dword_count; i++) {
+        if (!pcal_write_context_authorized(standby_context)) {
+            HAL_FLASH_Lock();
+            return false;
+        }
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
                                    PCAL_FLASH_BASE + (i * 8U), src[i]);
         if (status != HAL_OK) {
@@ -284,6 +302,8 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
     }
 
     HAL_FLASH_Lock();
+    if (!pcal_write_context_authorized(standby_context))
+        return false;
 
     /* Update RAM state + rate-limit bookkeeping (matches the pattern
      * in sensor_map_store.c::SensorMapStore_Save).  Refresh the

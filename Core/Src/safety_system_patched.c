@@ -370,6 +370,8 @@ void Safety_CheckCANTimeout(void)
 
     if (PR_IsDriveState(system_state) || pr_can_holdover_active) {
         if (heartbeat_stale || bus_off) {
+            recovery_pending = 0U;
+            recovery_clean_since = 0U;
             PR_EnterCanHoldover();
             return;
         }
@@ -391,6 +393,11 @@ void Safety_CheckCANTimeout(void)
                 if (PR_IsCanOnlyError(safety_error)) {
                     Safety_ClearError(safety_error);
                 }
+            }
+            if (pr_can_holdover_active) {
+                recovery_pending = 0U;
+                recovery_clean_since = 0U;
+                return;
             }
         } else {
             ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
