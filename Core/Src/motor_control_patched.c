@@ -31,6 +31,7 @@
 #include "steering_centering.h"
 #include "traction_output_policy.h"
 #include "drive_dynamics_policy.h"
+#include "eps_assist_policy.h"
 
 #define Traction_Update          Traction_Update_Base
 #define Traction_SetAxisRotation Traction_SetAxisRotation_Base
@@ -57,6 +58,7 @@ _Static_assert((uint8_t)MOTOR_MODE_BRAKE == TRACTION_OUTPUT_MODE_BRAKE,
  * encoder.  No existing fault is cleared here. */
 static CenteringState_t s_encoder_health_centering_state = CENTERING_IDLE;
 static uint8_t s_encoder_frozen_confirm_cycles;
+static EpsAssistState_t s_eps_assist_state;
 
 #define PR_ENC_FROZEN_TIMEOUT_MS       500U
 #define PR_ENC_MOTOR_ACTIVE_PCT        20.0f
@@ -118,17 +120,34 @@ void Encoder_CheckHealth(void)
     enc_prev_count = count;
 }
 
+/* Normal COAST is not a safety reset.  Keep the angle/velocity observer alive
+ * across encoder quantisation gaps so slow manual steering remains continuous.
+ * Full Steering_Neutralize() is reserved for disabled, unpowered and faulted
+ * states where clearing estimator history is intentional. */
+static void Steering_CoastPreserveEstimator(void)
+{
+    Motor_SetSigned(&motor_steer, 0);
+    eps_prev_pwm_raw = 0;
+    eps_motor_effort = 0.0f;
+}
+
+static void Steering_FullNeutralize(void)
+{
+    EpsAssist_Reset(&s_eps_assist_state);
+    Steering_Neutralize();
+}
+
 /* EPS intent must be derived from the real road-wheel angle.  Applying the
  * mechanical deadband before differentiating erased the driver's initial
  * movement and generated a false velocity spike at the deadband edge. */
 void Steering_ControlLoop(void)
 {
     if (Steering_IsAssistLatchedOff()) {
-        Steering_Neutralize();
+        Steering_FullNeutralize();
         return;
     }
     if (!steering_calibrated) {
-        Steering_Neutralize();
+        Steering_FullNeutralize();
         return;
     }
 
@@ -137,20 +156,19 @@ void Steering_ControlLoop(void)
      * sequence and by the commanded state of the steering power relay. */
     if (!Safety_IsPowerReady() ||
         HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) != GPIO_PIN_SET) {
-        Steering_Neutralize();
+        Steering_FullNeutralize();
         return;
     }
 
     if (enc_fault) {
-        Motor_SetSigned(&motor_steer, 0);
-        eps_motor_effort = 0.0f;
+        Steering_FullNeutralize();
         return;
     }
 
     {
         const SystemState_t st = Safety_GetState();
         if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
-            Steering_Neutralize();
+            Steering_FullNeutralize();
             return;
         }
     }
@@ -163,6 +181,7 @@ void Steering_ControlLoop(void)
         last_time = now;
         eps_prev_angle_deg = sanitize_float(
             Steering_GetCurrentAngle() - p->center_offset_deg, 0.0f);
+        Steering_FullNeutralize();
         return;
     }
 
@@ -196,11 +215,17 @@ void Steering_ControlLoop(void)
         fric_sign = (eff_theta > 0.0f) ? -1.0f : 1.0f;
     }
 
-    float tau = 0.0f;
-    tau += lambda * p->assist_strength * g_v * eps_omega_filt;
-    tau -= (1.0f - lambda) * p->center_strength * h_v * eff_theta;
-    tau -= p->damping * eps_omega_filt;
-    tau += p->friction_comp * fric_sign;
+    const float assist_tau =
+        lambda * p->assist_strength * g_v * eps_omega_filt;
+    const float return_tau =
+        -(1.0f - lambda) * p->center_strength * h_v * eff_theta
+        - p->damping * eps_omega_filt
+        + p->friction_comp * fric_sign;
+
+    EpsAssistDecision_t assist = EpsAssist_Resolve(
+        &s_eps_assist_state, now, eps_omega_filt, v_kmh,
+        assist_tau, return_tau, p->coast_band_pct);
+    float tau = assist.pwm_pct;
 
     if (v_kmh > EPS_HS_FADE_START_KMH) {
         const float hs_range = EPS_HS_FADE_END_KMH - EPS_HS_FADE_START_KMH;
@@ -222,17 +247,28 @@ void Steering_ControlLoop(void)
     /* Resolve COAST before minimum-drive compensation.  A tiny control
      * residue must not be promoted to the configured breakaway PWM and keep
      * the BTS7960 fighting the driver near centre. */
+    if (assist.coast) {
+        Steering_CoastPreserveEstimator();
+        return;
+    }
+
+    const float effective_coast_band = EpsAssist_EffectiveCoastBand(
+        p->coast_band_pct, assist.driver_intent);
+    const float effective_min_drive = EpsAssist_EffectiveMinDrive(
+        p->min_drive_pct, assist.driver_intent);
     const EpsOutputDecision_t output = EpsOutput_Resolve(
-        pwm_pct, p->coast_band_pct, p->min_drive_pct);
+        pwm_pct, effective_coast_band, effective_min_drive);
     if (output.coast) {
-        Steering_Neutralize();
+        Steering_CoastPreserveEstimator();
         return;
     }
     pwm_pct = output.pwm_pct;
 
     int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
+    const float effective_slew_rate = EpsAssist_EffectiveSlewRate(
+        p->slew_rate_pct, assist.driver_intent);
     int16_t slew_counts =
-        (int16_t)(p->slew_rate_pct * (float)PWM_PERIOD / 100.0f);
+        (int16_t)(effective_slew_rate * (float)PWM_PERIOD / 100.0f);
     if (slew_counts < 1) slew_counts = 1;
 
     const int16_t delta_pwm = pwm_raw - eps_prev_pwm_raw;
