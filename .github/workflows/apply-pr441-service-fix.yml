@@ -1,5 +1,6 @@
 name: Apply PR441 service calibration fix
 
+# Second push intentionally triggers this workflow after registration.
 on:
   push:
     branches:
