@@ -1,7 +1,7 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN Bus ID and Protocol Definitions
 //
-// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.4
+// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.20
 // Status:          FROZEN — do not modify without a new contract revision
 //
 // These values are mirrored from the CAN contract document.
@@ -627,6 +627,7 @@ inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 m
 // The extended OPERATOR / LOCK_LOST abort causes live above bit 15 in the
 // firmware reason word and are surfaced ONLY via flag bits 6/7.
 inline constexpr uint32_t DIAG_PEDAL_CAL_SESSION = 0x319;
+inline constexpr uint32_t DIAG_TRACTION_LIMITS   = 0x31A;   // STM32→ESP32, DLC 4, 1000 ms — obstacle/cap/brake-release/FSM diagnostic
 
 // 0x319 byte-1 flag bits.
 inline constexpr uint8_t PEDCAL_SESS_FLAG_ACTIVE        = 0x01u;

@@ -91,6 +91,8 @@ full_neutral_body = function_body(
 )
 require(r'\bEpsAssist_Reset\s*\(', full_neutral_body,
         'full neutral intent reset')
+require(r'\bs_eps_raw_reversal_cycles\s*=\s*0U\s*;',
+        full_neutral_body, 'full neutral reversal reset')
 require(r'\bSteering_Neutralize\s*\(\s*\)\s*;', full_neutral_body,
         'full neutral estimator reset')
 
@@ -111,9 +113,26 @@ params = require(r'\bEPS_Params_Get\s*\(\s*\)', body, 'EPS parameters')
 assert power_gate.start() < params.start(), (
     'power/PC12 gate must execute before EPS calculations')
 
+raw_reversal = require(
+    r'\bEpsAssist_UpdateRawReversal\s*\(', body,
+    'two-cycle raw/EMA reversal confirmation',
+)
+damped_assist = require(
+    r'\bEpsAssist_ApplyDamping\s*\(', body,
+    'sign-preserving assist damping',
+)
 assist_policy = require(
-    r'\bEpsAssist_Resolve\s*\(', body,
-    'driver-intent assist policy',
+    r'\bEpsAssist_Resolve\s*\([^;]*\bdamped_assist_tau\b', body,
+    'driver-intent assist policy with damping',
+)
+direction_change = require(
+    r'\bEpsAssist_DirectionChanged\s*\(', body,
+    'latched intent direction change detector',
+)
+direction_coast = require(
+    r'\bif\s*\(\s*intent_direction_changed\s*\|\|\s*'
+    r'raw_reversal_confirmed\s*\)', body,
+    'zero-torque reversal transition',
 )
 preserve_coast = require(
     r'\bSteering_CoastPreserveEstimator\s*\(\s*\)\s*;', body,
@@ -143,6 +162,20 @@ pwm_conversion = require(
     r'\bint16_t\s+pwm_raw\s*=\s*\(int16_t\)', body,
     'PWM conversion',
 )
+direction_block_open = body.find('{', direction_coast.end())
+assert direction_block_open >= 0, 'direction coast block missing'
+direction_block = braced_block(body, direction_block_open,
+                               'direction coast block')
+require(r'\bSteering_CoastPreserveEstimator\s*\(\s*\)\s*;',
+        direction_block, 'direction-change physical coast')
+require(r'\breturn\s*;', direction_block, 'direction-change return')
+
+assert raw_reversal.start() < damped_assist.start() < assist_policy.start(), (
+    'raw reversal and damping must precede intent resolution')
+assert assist_policy.start() < direction_change.start() < direction_coast.start(), (
+    'intent direction change must be checked immediately after resolution')
+assert direction_coast.start() < effective_coast.start(), (
+    'direction uncertainty must coast before output-policy/PWM processing')
 assert assist_policy.start() < effective_coast.start() < effective_min.start() < policy.start(), (
     'driver intent must be resolved before coast/breakaway output policy')
 assert policy.start() < coast.start() < resolved_pwm.start() < pwm_conversion.start(), (
@@ -156,4 +189,4 @@ assert not re.search(
     r'pwm_pct\s*=\s*\([^;]*\?\s*p->min_drive_pct', body), (
     'effective wrapper still promotes PWM directly before the coast policy')
 
-print('Effective EPS wrapper: power gate, assist-only parking and observer-preserving coast OK')
+print('Effective EPS wrapper: power gate, reversal coast, damped assist and observer-preserving coast OK')

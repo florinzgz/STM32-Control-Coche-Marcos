@@ -60,6 +60,26 @@ int main(void)
     CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true), 1.5f));
     CHECK(NEAR(EpsAssist_EffectiveSlewRate(1.0f, true), 1.0f));
 
+    /* Damping may reduce assistance, but never reverse its sign. */
+    CHECK(NEAR(EpsAssist_ApplyDamping(4.5f, 0.1f, 10.0f), 3.5f));
+    CHECK(NEAR(EpsAssist_ApplyDamping(-4.5f, 0.1f, -10.0f), -3.5f));
+    CHECK(NEAR(EpsAssist_ApplyDamping(0.2f, 1.0f, 2.0f), 0.0f));
+
+    /* One opposite raw encoder tick is jitter, not a confirmed reversal. */
+    uint8_t reversal_cycles = 0U;
+    CHECK(!EpsAssist_UpdateRawReversal(&reversal_cycles, -20.0f, 2.0f));
+    CHECK(reversal_cycles == 1U);
+    CHECK(EpsAssist_UpdateRawReversal(&reversal_cycles, -20.0f, 1.0f));
+    CHECK(reversal_cycles == EPS_RAW_REVERSAL_CONFIRM_CYCLES);
+    CHECK(!EpsAssist_UpdateRawReversal(&reversal_cycles, 2.0f, 1.0f));
+    CHECK(reversal_cycles == 0U);
+
+    /* A real latch direction flip requires a zero-torque transition cycle. */
+    EpsAssistState_t flip_state = { true, -1, 100U };
+    CHECK(EpsAssist_DirectionChanged(1, &flip_state, true));
+    CHECK(!EpsAssist_DirectionChanged(-1, &flip_state, true));
+    CHECK(!EpsAssist_DirectionChanged(1, &flip_state, false));
+
     /* The complete driver-intent path resolves to a bounded 4 % breakaway,
      * not the historical 8 % step and never to the opposite direction. */
     EpsOutputDecision_t output = EpsOutput_Resolve(

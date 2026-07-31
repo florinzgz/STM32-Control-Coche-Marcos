@@ -18,6 +18,7 @@
 #define EPS_DRIVER_ASSIST_BREAKAWAY_MAX_PCT       4.0f
 #define EPS_DRIVER_ASSIST_SLEW_MAX_PCT            1.5f
 #define EPS_LOW_SPEED_ASSIST_MAX_PCT              20.0f
+#define EPS_RAW_REVERSAL_CONFIRM_CYCLES            2U
 
 typedef struct {
     bool     active;
@@ -42,6 +43,62 @@ static inline void EpsAssist_Reset(EpsAssistState_t *state)
 static inline bool EpsAssist_IsFiniteNonnegative(float value)
 {
     return isfinite(value) && value >= 0.0f;
+}
+
+
+/* Return true only after a raw/filtered sign disagreement persists for two
+ * consecutive control cycles.  A single encoder-quantisation or backlash tick
+ * must not create a random COAST pulse in the middle of a legitimate slow turn. */
+static inline bool EpsAssist_UpdateRawReversal(uint8_t *cycles,
+                                               float omega_raw_dps,
+                                               float omega_filt_dps)
+{
+    if (cycles == NULL || !isfinite(omega_raw_dps) ||
+        !isfinite(omega_filt_dps)) {
+        if (cycles != NULL) *cycles = 0U;
+        return false;
+    }
+
+    const bool mismatch =
+        fabsf(omega_raw_dps) >= EPS_DRIVER_INTENT_ENTER_DPS &&
+        fabsf(omega_filt_dps) >= EPS_DRIVER_INTENT_EXIT_DPS &&
+        omega_raw_dps * omega_filt_dps < 0.0f;
+
+    if (!mismatch) {
+        *cycles = 0U;
+        return false;
+    }
+
+    if (*cycles < EPS_RAW_REVERSAL_CONFIRM_CYCLES) {
+        ++(*cycles);
+    }
+    return *cycles >= EPS_RAW_REVERSAL_CONFIRM_CYCLES;
+}
+
+static inline bool EpsAssist_DirectionChanged(int8_t previous_direction,
+                                              const EpsAssistState_t *state,
+                                              bool driver_intent)
+{
+    return driver_intent && state != NULL && previous_direction != 0 &&
+           state->direction != 0 && previous_direction != state->direction;
+}
+
+/* Damping is allowed to reduce assist magnitude, but it can never reverse the
+ * command and fight the driver's current steering direction. */
+static inline float EpsAssist_ApplyDamping(float assist_component_pct,
+                                           float damping_gain,
+                                           float omega_dps)
+{
+    if (!isfinite(assist_component_pct) || !isfinite(damping_gain) ||
+        !isfinite(omega_dps) || damping_gain < 0.0f) {
+        return 0.0f;
+    }
+
+    float magnitude = fabsf(assist_component_pct);
+    const float damping_magnitude = damping_gain * fabsf(omega_dps);
+    magnitude = (magnitude > damping_magnitude)
+              ? (magnitude - damping_magnitude) : 0.0f;
+    return copysignf(magnitude, omega_dps);
 }
 
 static inline EpsAssistDecision_t EpsAssist_Resolve(

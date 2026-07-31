@@ -32,6 +32,7 @@
 #include "steering_centering_frame.h"
 #include "relay_health_frame.h"
 #include "ina226_ch5_frame.h"
+#include "traction_limit_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include <math.h>
@@ -785,6 +786,23 @@ void CAN_SendMotionInhibit(void) {
 
     TransmitFrame(CAN_ID_DIAG_MOTION_INHIBIT, data, 8);
 }
+
+/* 0x31A — post-demand traction-limit observability, 1 Hz.
+ * Complements 0x315: obstacle_forward_blocked only reports a hard forward
+ * block, whereas this frame exposes partial obstacle scaling, the degraded
+ * traction cap, and the brake-release ramp.  Instrumentation only. */
+void CAN_SendTractionLimitDiag(void)
+{
+    uint8_t data[TRACTION_LIMIT_FRAME_DLC] = {0};
+    TractionLimitFrame_Pack(Obstacle_GetScale(),
+                            Safety_GetTractionCapFactor(),
+                            Traction_GetBrakeReleasePct(),
+                            (uint8_t)Obstacle_GetState(),
+                            data);
+    TransmitFrame(CAN_ID_DIAG_TRACTION_LIMITS, data,
+                  TRACTION_LIMIT_FRAME_DLC);
+}
+
 
 /**
  * @brief  Send live Hall pedal position to ESP32 (telemetry only).

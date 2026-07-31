@@ -1,11 +1,11 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN RX Module (implementation)
 //
-// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.4.
+// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.20.
 // Pushes decoded values into the VehicleData store.
 // Unknown CAN IDs are silently ignored.
 //
-// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.4
+// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.20
 //            docs/SERVICE_MODE.md (0x301–0x303)
 // =============================================================================
 
@@ -472,6 +472,18 @@ static void decodeMotionInhibit(const CanFrame& f, vehicle::VehicleData& data) {
     data.setMotionInhibit(mi);
 }
 
+// 0x31A DIAG_TRACTION_LIMITS — slow post-demand limit factors (DLC 4).
+static void decodeTractionLimitDiag(const CanFrame& f,
+                                    vehicle::VehicleData& data) {
+    vehicle::TractionLimitDiagData d;
+    if (!traction_limit_diag_view::decode(f.data, f.data_length_code, d.view)) {
+        return;
+    }
+    d.valid = true;
+    d.timestampMs = millis();
+    data.setTractionLimitDiag(d);
+}
+
 // 0x316 DIAG_STEERING_CENTERING — steering homing telemetry (DLC 8).
 // Frame layout mirrors Core/Inc/steering_centering_frame.h; decoded by the
 // shared pure helper so the HMI and host test share one deserialiser.
@@ -793,6 +805,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
             case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
             case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
+            case can::DIAG_TRACTION_LIMITS: decodeTractionLimitDiag(frame, data); break;
             case can::DIAG_STEERING_CENTERING: decodeSteeringCenteringDiag(frame, data); break;
             case can::DIAG_RELAY_HEALTH: decodeRelayHealthDiag(frame, data); break;
             case can::DIAG_INA_CH5: decodeIna226Ch5Diag(frame, data); break;

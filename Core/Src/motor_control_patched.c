@@ -59,6 +59,7 @@ _Static_assert((uint8_t)MOTOR_MODE_BRAKE == TRACTION_OUTPUT_MODE_BRAKE,
 static CenteringState_t s_encoder_health_centering_state = CENTERING_IDLE;
 static uint8_t s_encoder_frozen_confirm_cycles;
 static EpsAssistState_t s_eps_assist_state;
+static uint8_t s_eps_raw_reversal_cycles;
 
 #define PR_ENC_FROZEN_TIMEOUT_MS       500U
 #define PR_ENC_MOTOR_ACTIVE_PCT        20.0f
@@ -134,6 +135,7 @@ static void Steering_CoastPreserveEstimator(void)
 static void Steering_FullNeutralize(void)
 {
     EpsAssist_Reset(&s_eps_assist_state);
+    s_eps_raw_reversal_cycles = 0U;
     Steering_Neutralize();
 }
 
@@ -196,6 +198,8 @@ void Steering_ControlLoop(void)
     omega_raw = sanitize_float(omega_raw, 0.0f);
     eps_prev_angle_deg = theta_real;
     eps_omega_filt += 0.3f * (omega_raw - eps_omega_filt);
+    const bool raw_reversal_confirmed = EpsAssist_UpdateRawReversal(
+        &s_eps_raw_reversal_cycles, omega_raw, eps_omega_filt);
 
     float eff_theta = theta_real;
     if (fabsf(eff_theta) < p->deadband_deg) eff_theta = 0.0f;
@@ -217,14 +221,30 @@ void Steering_ControlLoop(void)
 
     const float assist_tau =
         lambda * p->assist_strength * g_v * eps_omega_filt;
+    const float damped_assist_tau = EpsAssist_ApplyDamping(
+        assist_tau, p->damping, eps_omega_filt);
     const float return_tau =
         -(1.0f - lambda) * p->center_strength * h_v * eff_theta
         - p->damping * eps_omega_filt
         + p->friction_comp * fric_sign;
 
+    const int8_t previous_intent_direction = s_eps_assist_state.direction;
     EpsAssistDecision_t assist = EpsAssist_Resolve(
         &s_eps_assist_state, now, eps_omega_filt, v_kmh,
-        assist_tau, return_tau, p->coast_band_pct);
+        damped_assist_tau, return_tau, p->coast_band_pct);
+    const bool intent_direction_changed = EpsAssist_DirectionChanged(
+        previous_intent_direction, &s_eps_assist_state,
+        assist.driver_intent);
+
+    /* Never slew through zero while still applying the previous direction.
+     * A confirmed raw/EMA disagreement is also treated as direction
+     * uncertainty.  Both paths insert physical COAST, reset PWM history,
+     * and preserve the angle/velocity estimator. */
+    if (intent_direction_changed || raw_reversal_confirmed) {
+        Steering_CoastPreserveEstimator();
+        return;
+    }
+
     float tau = assist.pwm_pct;
 
     if (v_kmh > EPS_HS_FADE_START_KMH) {
