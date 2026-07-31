@@ -5,95 +5,123 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'Core/**'
-      - 'esp32/**'
-      - 'scripts/**'
-      - 'docs/**'
+      - 'Makefile'
+      - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/can_handler.c'
+      - 'Core/Src/main.c'
+      - 'esp32/include/can_ids.h'
+      - 'esp32/src/vehicle_data.h'
+      - 'esp32/src/can_rx.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.h'
+      - 'Core/Inc/current_plausibility.h'
+      - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
+      - 'Core/Inc/traction_limit_frame.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/motor_control.c'
+      - 'Core/Src/motor_control_patched.c'
+      - 'Core/Src/test_current_plausibility.c'
+      - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
+      - 'Core/Src/test_traction_limit_frame.c'
+      - 'scripts/check_effective_eps_wrapper.py'
+      - 'esp32/src/degraded_banner.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/host_tests/test_degraded_banner.cpp'
+      - 'esp32/src/traction_limit_diag_view.h'
+      - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'Core/**'
-      - 'esp32/**'
-      - 'scripts/**'
-      - 'docs/**'
+      - 'Makefile'
+      - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/motor_control.h'
+      - 'Core/Src/can_handler.c'
+      - 'Core/Src/main.c'
+      - 'esp32/include/can_ids.h'
+      - 'esp32/src/vehicle_data.h'
+      - 'esp32/src/can_rx.cpp'
+      - 'esp32/src/screens/engineering_screen.cpp'
+      - 'esp32/src/screens/engineering_screen.h'
+      - 'Core/Inc/current_plausibility.h'
+      - 'Core/Inc/eps_output_policy.h'
+      - 'Core/Inc/eps_assist_policy.h'
+      - 'Core/Inc/traction_limit_frame.h'
+      - 'Core/Src/safety_system.c'
+      - 'Core/Src/motor_control.c'
+      - 'Core/Src/motor_control_patched.c'
+      - 'Core/Src/test_current_plausibility.c'
+      - 'Core/Src/test_eps_output_policy.c'
+      - 'Core/Src/test_eps_assist_policy.c'
+      - 'Core/Src/test_traction_limit_frame.c'
+      - 'scripts/check_effective_eps_wrapper.py'
+      - 'esp32/src/degraded_banner.h'
+      - 'esp32/src/screens/drive_screen.cpp'
+      - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/host_tests/test_degraded_banner.cpp'
+      - 'esp32/src/traction_limit_diag_view.h'
+      - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-pr440-can-contract:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.number == 440 &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/eps-low-speed-assist'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Update CAN contract revision 1.20
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('docs/CAN_CONTRACT_FINAL.md')
-          text = path.read_text(encoding='utf-8')
-
-          replacements = {
-              '**Revision:** 1.17': '**Revision:** 1.20',
-              '**Status:** ACTIVE — Added MOTION_INHIBIT_REASON instrumentation diagnostic 0x315 (additive)':
-                  '**Status:** ACTIVE — Added DIAG_TRACTION_LIMITS 0x31A post-demand limiter observability (additive)',
-              '**Date:** 2026-07-11': '**Date:** 2026-07-31',
-              'This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged. The 3-bit `relay_status` layout is preserved: bit 0 is now reserved/0, but no frame size, ID, or bit positions changed.':
-                  'This document describes the CAN protocol as implemented in the current firmware. Revision 1.20 adds the diagnostic-only 0x31A frame while preserving every existing CAN ID and payload layout.',
-              '| Contract revision | 1.3 |': '| Contract revision | 1.20 |',
-              '| Previous revision | 1.2 |': '| Previous revision | 1.19 |',
-              '| Backward compatibility | Revision 1.4 is backward-compatible with 1.3, 1.2, 1.1, and 1.0. No existing CAN IDs, payload layouts, or timing changed. New `DIAG_DEBOUNCE` (0x306) and `DIAG_DEBOUNCE_STEER` (0x307) are diagnostic-only and additive — ESP32 firmware without DEBOUNCE_DIAG submenu silently ignores the new IDs (`default: break` in `can_rx.cpp`). The 2026-04-23 firmware hardening retains the 3-bit `relay_status` layout — rev 1.3+ consumers continue to decode byte 5 unchanged (the former MAIN bit is simply always 0 now). CMD_ACK (0x103) added in 1.3 is additive only — ESP32 firmware without ACK support will silently ignore the message. |':
-                  '| Backward compatibility | Revision 1.20 is additive and backward-compatible: legacy nodes silently ignore 0x31A; no existing frame ID, DLC, timing or payload changes. |',
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'missing CAN contract text: {old[:72]}')
-              text = text.replace(old, new, 1)
-
-          change = '- **1.20** (2026-07-31): Added `DIAG_TRACTION_LIMITS` (0x31A, DLC 4, 1000 ms): byte0 obstacle_scale %, byte1 degraded traction_cap %, byte2 brake-release ramp %, byte3 `ObstacleState_t`. ESP32 uses a 3000 ms slow-diagnostic stale timeout and shows O/T/B + obstacle FSM on MOTION INHIBIT DIAG. Purely additive, diagnostic-only; no control or safety path consumes it.'
-          if change not in text:
-              text = text.replace('**Change log:**\n', f'**Change log:**\n{change}\n', 1)
-
-          row = '| 0x31A | DIAG_TRACTION_LIMITS | 4 | 1000 ms | Post-demand traction limiter observability: byte0=`obstacle_scale` %, byte1=`Safety_GetTractionCapFactor()` %, byte2 brake-to-drive `brake_release_pct`, byte3 obstacle FSM state (0 NO_SENSOR, 1 NORMAL, 2 CONFIRMING, 3 ACTIVE, 4 CLEARING, 5 SENSOR_FAULT). ESP32 classifies stale after 3000 ms. Instrumentation-only; no control/safety path consumes it. | `can_handler.c`, `motor_control.c`, `safety_system.c` |'
-          if row not in text:
-              lines = text.splitlines()
-              index = next(i for i, line in enumerate(lines) if line.startswith('| 0x318 |'))
-              lines.insert(index + 1, row)
-              text = '\n'.join(lines) + '\n'
-
-          path.write_text(text, encoding='utf-8')
-          PY
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/CAN_CONTRACT_FINAL.md
-          git commit -m "docs: add CAN 0x31A traction-limit contract"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
   regression:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Focused EPS and traction-limit tests
+        with:
+          persist-credentials: false
+
+      - name: Current plausibility policy
         run: |
-          set -euo pipefail
-          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc Core/Src/test_eps_assist_policy.c -lm -o /tmp/test_eps_assist_policy
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_current_plausibility.c -lm \
+            -o /tmp/test_current_plausibility
+          /tmp/test_current_plausibility
+
+      - name: EPS coast and minimum-drive policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_output_policy.c -lm \
+            -o /tmp/test_eps_output_policy
+          /tmp/test_eps_output_policy
+
+      - name: EPS low-speed assist policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_eps_assist_policy.c -lm \
+            -o /tmp/test_eps_assist_policy
           /tmp/test_eps_assist_policy
-          python3 scripts/check_effective_eps_wrapper.py
-          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc Core/Src/test_traction_limit_frame.c -lm -o /tmp/test_traction_limit_frame
+
+      - name: Effective production EPS wrapper
+        run: python3 scripts/check_effective_eps_wrapper.py
+
+      - name: Traction limit CAN frame contract
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
+            Core/Src/test_traction_limit_frame.c -lm \
+            -o /tmp/test_traction_limit_frame
           /tmp/test_traction_limit_frame
-          g++ -std=c++17 -Wall -Wextra -Werror -ICore/Inc -Iesp32/src esp32/src/test_traction_limit_diag_decode.cpp -lm -o /tmp/test_traction_limit_diag_decode
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -ICore/Inc -Iesp32/src \
+            esp32/src/test_traction_limit_diag_decode.cpp -lm \
+            -o /tmp/test_traction_limit_diag_decode
           /tmp/test_traction_limit_diag_decode
+
+      - name: HMI degraded-level banner
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/host_tests/test_degraded_banner.cpp \
+            -o /tmp/test_degraded_banner
+          /tmp/test_degraded_banner
+
+      - name: Remaining production integration guards
+        run: |
+          grep -q 'CurrentPlausibility_IsFault' Core/Src/safety_system.c
+          grep -q 'curDegradedLevel_' esp32/src/screens/drive_screen.cpp
