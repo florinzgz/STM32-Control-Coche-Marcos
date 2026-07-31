@@ -80,17 +80,56 @@ power_gate = require(
 power_block_open = body.find('{', power_gate.end())
 assert power_block_open >= 0, 'effective EPS power gate block missing'
 power_block = braced_block(body, power_block_open, 'effective EPS power gate')
-require(r'\bSteering_Neutralize\s*\(\s*\)\s*;', power_block,
-        'power gate neutralization')
+require(r'\bSteering_FullNeutralize\s*\(\s*\)\s*;', power_block,
+        'power gate full neutralization')
 require(r'\breturn\s*;', power_block, 'power gate return')
+
+full_neutral_body = function_body(
+    wrapper,
+    r'\bstatic\s+void\s+Steering_FullNeutralize\s*\(\s*void\s*\)',
+    'Steering_FullNeutralize()',
+)
+require(r'\bEpsAssist_Reset\s*\(', full_neutral_body,
+        'full neutral intent reset')
+require(r'\bSteering_Neutralize\s*\(\s*\)\s*;', full_neutral_body,
+        'full neutral estimator reset')
+
+coast_helper_body = function_body(
+    wrapper,
+    r'\bstatic\s+void\s+Steering_CoastPreserveEstimator\s*'
+    r'\(\s*void\s*\)',
+    'Steering_CoastPreserveEstimator()',
+)
+require(r'\bMotor_SetSigned\s*\(\s*&motor_steer\s*,\s*0\s*\)\s*;',
+        coast_helper_body, 'normal coast physical output off')
+assert 'Steering_Neutralize' not in coast_helper_body, (
+    'normal coast must not reset the EPS estimator')
+assert 'eps_omega_filt' not in coast_helper_body, (
+    'normal coast must preserve filtered driver intent')
 
 params = require(r'\bEPS_Params_Get\s*\(\s*\)', body, 'EPS parameters')
 assert power_gate.start() < params.start(), (
     'power/PC12 gate must execute before EPS calculations')
 
+assist_policy = require(
+    r'\bEpsAssist_Resolve\s*\(', body,
+    'driver-intent assist policy',
+)
+preserve_coast = require(
+    r'\bSteering_CoastPreserveEstimator\s*\(\s*\)\s*;', body,
+    'observer-preserving normal coast',
+)
+effective_coast = require(
+    r'\bEpsAssist_EffectiveCoastBand\s*\(', body,
+    'bounded driver-assist coast threshold',
+)
+effective_min = require(
+    r'\bEpsAssist_EffectiveMinDrive\s*\(', body,
+    'bounded driver-assist breakaway',
+)
 policy = require(
     r'\bEpsOutput_Resolve\s*\(\s*pwm_pct\s*,\s*'
-    r'p->coast_band_pct\s*,\s*p->min_drive_pct\s*\)',
+    r'effective_coast_band\s*,\s*effective_min_drive\s*\)',
     body,
     'coast-first output policy',
 )
@@ -104,8 +143,12 @@ pwm_conversion = require(
     r'\bint16_t\s+pwm_raw\s*=\s*\(int16_t\)', body,
     'PWM conversion',
 )
+assert assist_policy.start() < effective_coast.start() < effective_min.start() < policy.start(), (
+    'driver intent must be resolved before coast/breakaway output policy')
 assert policy.start() < coast.start() < resolved_pwm.start() < pwm_conversion.start(), (
     'effective EPS order must be resolve -> coast -> resolved PWM -> counts')
+assert preserve_coast.start() < pwm_conversion.start(), (
+    'normal coast must preserve estimator before any PWM conversion')
 
 assert not re.search(r'abs_pct\s*>\s*0\.01f', body), (
     'legacy minimum-drive-before-coast block still exists in effective wrapper')
@@ -113,4 +156,4 @@ assert not re.search(
     r'pwm_pct\s*=\s*\([^;]*\?\s*p->min_drive_pct', body), (
     'effective wrapper still promotes PWM directly before the coast policy')
 
-print('Effective EPS wrapper: production source, power gate and coast-first order OK')
+print('Effective EPS wrapper: power gate, assist-only parking and observer-preserving coast OK')
