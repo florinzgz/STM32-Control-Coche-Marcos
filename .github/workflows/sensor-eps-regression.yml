@@ -36,6 +36,7 @@ on:
       - 'Core/Src/encoder_reader.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'scripts/apply_pr441_drive_completion.py'
+      - 'scripts/fix_pr441_4x2_test_calls.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
@@ -77,6 +78,7 @@ on:
       - 'Core/Src/encoder_reader.c'
       - 'scripts/check_effective_eps_wrapper.py'
       - 'scripts/apply_pr441_drive_completion.py'
+      - 'scripts/fix_pr441_4x2_test_calls.py'
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
@@ -102,6 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/apply_pr441_drive_completion.py
+          python3 scripts/fix_pr441_4x2_test_calls.py
           git diff --check
 
       - name: Run focused host regressions
@@ -140,7 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           git checkout '${{ github.event.pull_request.base.sha }}' -- .github/workflows/sensor-eps-regression.yml
-          rm -f scripts/apply_pr441_drive_completion.py
+          rm -f scripts/apply_pr441_drive_completion.py scripts/fix_pr441_4x2_test_calls.py
           git add -A
           git diff --cached --check
           git config user.name 'github-actions[bot]'
