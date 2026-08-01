@@ -8,6 +8,10 @@
 #define TRACTION_OUTPUT_WHEEL_COUNT 4U
 #define TRACTION_OUTPUT_UNITY_EPSILON 1.0e-6f
 
+/* Final PR441 validation anchor: both 4x4 and installed rear-drive 4x2 use
+ * this reduction-only policy, so the registered workflows compile the same
+ * path that reaches the physical BTS7960 outputs. */
+
 /* These values intentionally mirror motor_mode_t without including the
  * hardware-heavy motor_control.h.  motor_control_patched.c asserts the mapping
  * at compile time before applying a plan to real BTS7960 outputs. */
