@@ -8,7 +8,15 @@ on:
       - 'Makefile'
       - 'Core/Inc/can_handler.h'
       - 'Core/Inc/motor_control.h'
+      - 'Core/Inc/gear_limits_store.h'
+      - 'Core/Inc/traction_output_policy.h'
       - 'Core/Src/can_handler.c'
+      - 'Core/Src/gear_limits_store.c'
+      - 'Core/Src/test_gear_limits.c'
+      - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_steering_z.c'
+      - 'Core/Src/steering_z.c'
+      - 'Core/Src/encoder_reader.c'
       - 'Core/Src/main.c'
       - 'esp32/include/can_ids.h'
       - 'esp32/src/vehicle_data.h'
@@ -40,7 +48,15 @@ on:
       - 'Makefile'
       - 'Core/Inc/can_handler.h'
       - 'Core/Inc/motor_control.h'
+      - 'Core/Inc/gear_limits_store.h'
+      - 'Core/Inc/traction_output_policy.h'
       - 'Core/Src/can_handler.c'
+      - 'Core/Src/gear_limits_store.c'
+      - 'Core/Src/test_gear_limits.c'
+      - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_steering_z.c'
+      - 'Core/Src/steering_z.c'
+      - 'Core/Src/encoder_reader.c'
       - 'Core/Src/main.c'
       - 'esp32/include/can_ids.h'
       - 'esp32/src/vehicle_data.h'
@@ -102,6 +118,33 @@ jobs:
       - name: Effective production EPS wrapper
         run: python3 scripts/check_effective_eps_wrapper.py
 
+      - name: Gear-limit defaults and validation
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -ICore/Inc \
+            Core/Src/test_gear_limits.c -o /tmp/test_gear_limits
+          /tmp/test_gear_limits
+          grep -Eq '^#define GEAR_LIMIT_R_DEFAULT_PCT[[:space:]]+80U$' Core/Inc/gear_limits_store.h
+          grep -Eq '^#define GEAR_LIMIT_R_MAX_PCT[[:space:]]+80U$' Core/Inc/gear_limits_store.h
+          grep -q 'CAN_PedalCalServiceConfirmed' Core/Src/gear_limits_store.c
+
+      - name: Straight-line physical traction policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -ICore/Inc \
+            Core/Src/test_traction_output_policy.c -lm \
+            -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+          grep -q 'Steering_GetCurrentAngle()' Core/Src/motor_control_patched.c
+
+      - name: PB5 and encoder-Z policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_steering_z.c Core/Src/steering_z.c \
+            -o /tmp/test_steering_z
+          /tmp/test_steering_z
+          ! grep -q '__HAL_TIM_SET_COUNTER' Core/Src/encoder_reader.c
+          grep -q 'if (!pb5_confirmed)' Core/Src/steering_z.c
+
       - name: Traction limit CAN frame contract
         run: |
           gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
@@ -125,3 +168,4 @@ jobs:
         run: |
           grep -q 'CurrentPlausibility_IsFault' Core/Src/safety_system.c
           grep -q 'curDegradedLevel_' esp32/src/screens/drive_screen.cpp
+          grep -q 'if (!ok && service_ok) pedalcal_service_exit();' Core/Src/can_handler.c
