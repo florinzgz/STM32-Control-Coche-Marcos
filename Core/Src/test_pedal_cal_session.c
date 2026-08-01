@@ -375,6 +375,28 @@ static void test_runtime_aborts(void)
     }
 }
 
+
+/* The virtual-STANDBY service lock and P/N selection are runtime invariants.
+ * Losing either one must abort before any further capture or save step. */
+static void test_service_lock_or_gear_loss_aborts(void)
+{
+    for (int k = 0; k < 2; ++k) {
+        PedalCalSession s;
+        PedalCalSession_Init(&s, NULL, NULL);
+        PedalCalConds c = base_conds(0);
+        CHECK(PedalCalSession_Begin(&s, &c));
+        PedalCalSession_Update(&s, &c);
+        c.now_ms += 50;
+
+        if (k == 0) c.in_standby = false;
+        else        c.gear_park_or_neutral = false;
+
+        PedalCalSession_Update(&s, &c);
+        CHECK(s.state == PEDAL_CAL_ABORTED);
+        CHECK(s.reason & PEDAL_CAL_ABORT_LOCK_LOST);
+    }
+}
+
 static void test_timeout_abort(void)
 {
     PedalCalSession s;
@@ -481,6 +503,7 @@ int main(void)
     test_entry_blocks();
     test_begin_requires_lock_confirmed();
     test_begin_then_lock_loss_aborts();
+    test_service_lock_or_gear_loss_aborts();
     test_runtime_aborts();
     test_timeout_abort();
     test_unstable_capture();

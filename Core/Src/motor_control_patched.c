@@ -32,6 +32,21 @@
 #include "traction_output_policy.h"
 #include "drive_dynamics_policy.h"
 #include "eps_assist_policy.h"
+#include "can_handler.h"
+
+#ifdef HOST_TEST
+extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+static bool PR_MotorPedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive != 0 &&
+           CAN_PedalCalServiceActive();
+}
+#else
+static bool PR_MotorPedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive();
+}
+#endif
 
 #define Traction_Update          Traction_Update_Base
 #define Traction_SetAxisRotation Traction_SetAxisRotation_Base
@@ -464,6 +479,17 @@ static bool auto_release_tank(void)
 
 void Traction_Update(void)
 {
+    /* Pedal-calibration service lock is an independent,
+     * highest-priority physical motion inhibit.  Do not evaluate ramps,
+     * tank turn, Ackermann, ABS/TCS or base demand while it owns the vehicle. */
+    if (PR_MotorPedalCalServiceActive()) {
+        (void)Traction_CalibrationLock();
+        coast_all();
+        zero_output_telemetry();
+        Traction_UpdateMotionInhibit(0.0f, 0U);
+        return;
+    }
+
     if (auto_release_tank()) return;
 
     init_shadow();

@@ -22,6 +22,21 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "can_handler.h"
+
+#ifdef HOST_TEST
+extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+static bool PR_PedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive != 0 &&
+           CAN_PedalCalServiceActive();
+}
+#else
+static bool PR_PedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive();
+}
+#endif
 
 #ifdef HOST_TEST
 #include "standby_mode_sync_policy.c"
@@ -355,6 +370,8 @@ void Safety_CheckCANTimeout(void)
 
     if (PR_IsDriveState(system_state) || pr_can_holdover_active) {
         if (heartbeat_stale || bus_off) {
+            recovery_pending = 0U;
+            recovery_clean_since = 0U;
             PR_EnterCanHoldover();
             return;
         }
@@ -377,11 +394,38 @@ void Safety_CheckCANTimeout(void)
                     Safety_ClearError(safety_error);
                 }
             }
+            if (pr_can_holdover_active) {
+                recovery_pending = 0U;
+                recovery_clean_since = 0U;
+                return;
+            }
         } else {
             ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
             if (PR_IsCanOnlyError(safety_error)) {
                 Safety_ClearError(safety_error);
             }
+        }
+
+        /* The wrapper owns ACTIVE/DEGRADED CAN handling and therefore must
+         * preserve the legacy clean-fault recovery too.  Previously the early
+         * return skipped this block permanently, leaving DEGRADED L1 latched
+         * even after Fault Viewer reported no active fault. */
+        if (system_state == SYS_STATE_DEGRADED &&
+            safety_error == SAFETY_ERROR_NONE &&
+            !PR_PedalCalServiceActive()) {
+            if (!recovery_pending) {
+                recovery_pending = 1U;
+                recovery_clean_since = now;
+            } else if ((now - recovery_clean_since) >= RECOVERY_HOLD_MS) {
+                recovery_pending = 0U;
+                Safety_SetState(SYS_STATE_ACTIVE);
+            }
+        } else {
+            /* Any active error, calibration lock or non-DEGRADED state resets
+             * the clean recovery timer.  Never reuse stale clean time after a
+             * fault reappears. */
+            recovery_pending = 0U;
+            recovery_clean_since = 0U;
         }
         return;
     }
@@ -722,6 +766,14 @@ void Safety_CheckRelayHealth(void)
 
 void Relay_SequencerUpdate(void)
 {
+    /* Pedal-calibration service lock has priority over every drive-capable
+     * state.  Keep both power relays physically down; never let the normal
+     * ACTIVE/DEGRADED sequencer race the 50 ms calibration FSM. */
+    if (PR_PedalCalServiceActive()) {
+        Relay_PowerDown();
+        return;
+    }
+
     const bool drive_capable =
         (system_state == SYS_STATE_ACTIVE)   ||
         (system_state == SYS_STATE_DEGRADED) ||
@@ -752,6 +804,10 @@ void Relay_SequencerUpdate(void)
 
 void Safety_RelayOverrideUpdate(void)
 {
+    if (PR_PedalCalServiceActive()) {
+        Relay_PowerDown();
+        return;
+    }
     if (Steering_IsAssistLatchedOff()) {
         relay_override_mask &= (uint8_t)~0x04U;
     }

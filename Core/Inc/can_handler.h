@@ -503,6 +503,17 @@ void CAN_PedalCalBurstUpdate(void);
  * publishes the 0x319 session-status frame.  No-op while the session is IDLE. */
 void CAN_PedalCalCaptureTick(void);
 
+/* True while any pedal-calibration guard phase owns the powertrain:
+ * PENDING entry, confirmed ACTIVE session, or post-session HOLD.  While true,
+ * the relay sequencer and productive traction wrapper must keep all traction
+ * outputs in physical COAST and both power relays de-energised. */
+bool CAN_PedalCalServiceActive(void);
+
+/* True only after the physical lock was confirmed and while the guided session
+ * owns it.  Persistence uses this stricter predicate; PENDING/HOLD never
+ * authorize a flash erase/program operation. */
+bool CAN_PedalCalServiceConfirmed(void);
+
 /* Drives the on-demand 0x30D gear power-limit telemetry burst.
  * Call once per 100 ms tick — the function is a no-op while no burst
  * is in progress, so it is safe to call unconditionally and has zero

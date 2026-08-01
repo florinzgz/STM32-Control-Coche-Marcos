@@ -1493,8 +1493,15 @@ void EngineeringScreen::draw() {
 
         // Safety gate
         tft.fillRect(110, 155, 130, 16, ui::COL_BG);
-        tft.setTextColor(safety_ok ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
-        tft.drawString(safety_ok ? "OK" : "BLOCKED", 110, 155);
+        const bool service_locked =
+            pedalcal::sessionFreshness(pedalSessLastTs_, (unsigned long)millis())
+                == pedalcal::Freshness::FRESH &&
+            pedalcal::sessionActive(pedalSessState_);
+        tft.setTextColor((safety_ok || service_locked) ? ui::COL_GREEN : ui::COL_RED,
+                         ui::COL_BG);
+        tft.drawString(service_locked ? "SERVICE LOCK"
+                                      : (safety_ok ? "READY" : "BLOCKED"),
+                       110, 155);
 
         // ---- Right column (stored + pending + validation) ----
         // Stored MIN
