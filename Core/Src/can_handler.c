@@ -2242,7 +2242,11 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         c.traction_locked = service_ok && Traction_IsCalibrationLockConfirmed();
         const bool begin_ok = PedalCalSession_Begin(&pedalcal_session, &c);
         const bool ok = service_ok && begin_ok;
-        if (!ok) pedalcal_service_exit();
+        /* Only enter HOLD if service_enter() actually acquired (or attempted)
+         * the physical lock.  When preconditions failed the function returned
+         * without touching hardware, so calling service_exit() here would
+         * needlessly power-down an actively-driving vehicle. */
+        if (!ok && service_ok) pedalcal_service_exit();
         pedalcal_start_burst();
         pedalcal_send_session_status();
         if (ok) {
