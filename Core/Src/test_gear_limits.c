@@ -76,10 +76,10 @@ int main(void)
                               GEAR_LIMIT_D1_DEFAULT_PCT,
                               GEAR_LIMIT_R_DEFAULT_PCT));
 
-    /* Defaults match the historic compile-time behaviour (100/60/60). */
+    /* Defaults match the requested defaults (100/60/80). */
     ASSERT_TRUE(GEAR_LIMIT_D2_DEFAULT_PCT == 100U);
     ASSERT_TRUE(GEAR_LIMIT_D1_DEFAULT_PCT == 60U);
-    ASSERT_TRUE(GEAR_LIMIT_R_DEFAULT_PCT  == 60U);
+    ASSERT_TRUE(GEAR_LIMIT_R_DEFAULT_PCT  == 80U);
 
     /* Boundary acceptance — exact min/max of each gear are valid. */
     ASSERT_TRUE(test_validate(GEAR_LIMIT_D2_MIN_PCT,
@@ -101,16 +101,17 @@ int main(void)
                                GEAR_LIMIT_R_MIN_PCT - 1U));
 
     /* Above-max rejection: R must reject values that are valid for D1/D2.
-     * R max is 60 %, so 100 % (a legal D1/D2) must be rejected for R —
+     * R max is 80 %, so 100 % (a legal D1/D2) must be rejected for R —
      * this is the "no reverse too fast" safety guard.                   */
     ASSERT_FALSE(test_validate(GEAR_LIMIT_D2_DEFAULT_PCT,
                                GEAR_LIMIT_D1_DEFAULT_PCT,
                                GEAR_LIMIT_R_MAX_PCT + 1U));
     ASSERT_FALSE(test_validate(100U, 100U, 100U));   /* R=100 illegal */
-    ASSERT_FALSE(test_validate(101U, 60U, 60U));     /* D2>100 illegal */
+    ASSERT_FALSE(test_validate(101U, 60U, 80U));     /* D2>100 illegal */
     ASSERT_FALSE(test_validate(0U, 0U, 0U));         /* all zero illegal */
 
-    /* A realistic re-tune (D2 80, D1 40, R 30) must validate. */
+    /* Requested reverse power and a lower retune both validate. */
+    ASSERT_TRUE(test_validate(100U, 60U, 80U));
     ASSERT_TRUE(test_validate(80U, 40U, 30U));
 
     /* ============================================================

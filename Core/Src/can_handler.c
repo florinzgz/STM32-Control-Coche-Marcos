@@ -2242,7 +2242,10 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         c.traction_locked = service_ok && Traction_IsCalibrationLockConfirmed();
         const bool begin_ok = PedalCalSession_Begin(&pedalcal_session, &c);
         const bool ok = service_ok && begin_ok;
-        if (!ok) pedalcal_service_exit();
+        /* A rejected BEGIN whose preconditions were never met did not
+         * touch the powertrain.  Enter HOLD only after service_enter()
+         * actually acquired the physical lock. */
+        if (!ok && service_ok) pedalcal_service_exit();
         pedalcal_start_burst();
         pedalcal_send_session_status();
         if (ok) {
@@ -2383,7 +2386,7 @@ void CAN_PedalCalCaptureTick(void)
  *  Traction_*GearLimits() helpers and the flash store
  *  (gear_limits_store.c).
  *
- *  Safety invariant (gearlim_safety_ok()):
+ *  Safety invariant (gearlim_edit_allowed()):
  *    - Safety_GetState() == SYS_STATE_STANDBY
  *  Changing a traction power limit is only permitted while parked in
  *  STANDBY; QUERY is exempt (read-only telemetry request).
@@ -2413,9 +2416,55 @@ static uint8_t   gearlim_pending_r_resp  = 0;
 static uint8_t   gearlim_burst_left     = 0;
 static uint32_t  gearlim_next_tx_ms     = 0;
 
-static inline bool gearlim_safety_ok(void)
+/* Read-only eligibility for editing a pending gear profile.  Editing RAM is
+ * allowed in STANDBY or in a clean, stopped ACTIVE/DEGRADED state, but never
+ * while another service lock owns the powertrain.  Flash is gated separately. */
+static bool gearlim_edit_allowed(void)
 {
-    return (Safety_GetState() == SYS_STATE_STANDBY);
+    PedalCalConds c;
+    pedalcal_build_conds(&c);
+    const SystemState_t st = Safety_GetState();
+    const bool state_ok = (st == SYS_STATE_STANDBY) ||
+                          (st == SYS_STATE_ACTIVE) ||
+                          (st == SYS_STATE_DEGRADED);
+    return state_ok && !CAN_PedalCalServiceActive() &&
+           Safety_GetError() == SAFETY_ERROR_NONE &&
+           c.gear_park_or_neutral && !c.wheels_moving &&
+           c.pedal_plausible && c.pedal_released &&
+           !c.critical_error && !c.safe_state && !c.emergency &&
+           !c.can_loss;
+}
+
+/* Acquire a physically confirmed movement lock for flash persistence.  True
+ * STANDBY already owns the same safe output state; ACTIVE/DEGRADED must enter
+ * the confirmed service phase.  The caller must release an acquired lock. */
+static bool gearlim_acquire_save_lock(bool *service_owned)
+{
+    if (service_owned == NULL) return false;
+    *service_owned = false;
+    if (!gearlim_edit_allowed()) return false;
+
+    if (Safety_GetState() == SYS_STATE_STANDBY) {
+        return ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U) &&
+               (Traction_GetFinalPwmPct() == 0U);
+    }
+
+    if (!pedalcal_service_enter()) return false;
+    if (!CAN_PedalCalServiceConfirmed() ||
+        !Traction_IsCalibrationLockConfirmed() ||
+        ((Safety_GetRelayStatusByte() & (1U << 1)) != 0U) ||
+        Traction_GetFinalPwmPct() != 0U) {
+        pedalcal_service_exit();
+        return false;
+    }
+
+    *service_owned = true;
+    return true;
+}
+
+static void gearlim_release_save_lock(bool service_owned)
+{
+    if (service_owned) pedalcal_service_exit();
 }
 
 static void gearlim_seed_pending_if_needed(void)
@@ -2485,7 +2534,7 @@ static void gearlim_send_status_kind(bool response_frame)
     if (gearlim_pending_seeded &&
         (pend_d2 != act_d2 || pend_d1 != act_d1 || pend_r != act_r))
         flags |= 0x02U;
-    if (gearlim_safety_ok()) flags |= 0x04U;
+    if (gearlim_edit_allowed()) flags |= 0x04U;
     if (valid_ok) flags |= 0x08U;
     if (response_frame) flags |= 0x10U;
 
@@ -2540,7 +2589,7 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 
     /* All other sub-opcodes require STANDBY. */
-    if (!gearlim_safety_ok()) {
+    if (!gearlim_edit_allowed()) {
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
     }
@@ -2613,34 +2662,49 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
             CAN_SendCommandAck(0x10, ACK_INVALID);
             return;
         }
-        if (!GearLimitsStore_Save(gearlim_pending_d2,
-                                  gearlim_pending_d1,
-                                  gearlim_pending_r,
-                                  gearlim_pending_d2_resp,
-                                  gearlim_pending_d1_resp,
-                                  gearlim_pending_r_resp)) {
+
+        bool service_owned = false;
+        if (!gearlim_acquire_save_lock(&service_owned)) {
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
+        const bool saved = GearLimitsStore_Save(gearlim_pending_d2,
+                                                 gearlim_pending_d1,
+                                                 gearlim_pending_r,
+                                                 gearlim_pending_d2_resp,
+                                                 gearlim_pending_d1_resp,
+                                                 gearlim_pending_r_resp);
+        if (!saved) {
+            gearlim_release_save_lock(service_owned);
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
-        /* Apply so the next Traction_Update() cycle uses the new limits.
-         * Vehicle is in STANDBY (gated above) so there is no live demand. */
+        /* Apply only while the same physical lock still owns the vehicle. */
         (void)Traction_SetGearLimits(gearlim_pending_d2,
                                      gearlim_pending_d1,
                                      gearlim_pending_r);
         (void)Traction_SetGearResponse(gearlim_pending_d2_resp,
                                        gearlim_pending_d1_resp,
                                        gearlim_pending_r_resp);
-        gearlim_pending_seeded = false;   /* clear edit; reseed on next SET */
+        gearlim_pending_seeded = false;
+        gearlim_release_save_lock(service_owned);
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
     case GEAR_LIMIT_OP_RESET_DEFAULTS: {
-        if (!GearLimitsStore_Save(GEAR_LIMIT_D2_DEFAULT_PCT,
-                                  GEAR_LIMIT_D1_DEFAULT_PCT,
-                                  GEAR_LIMIT_R_DEFAULT_PCT,
-                                  GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                  GEAR_RESPONSE_R_DEFAULT_PCT)) {
+        bool service_owned = false;
+        if (!gearlim_acquire_save_lock(&service_owned)) {
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
+        const bool saved = GearLimitsStore_Save(GEAR_LIMIT_D2_DEFAULT_PCT,
+                                                 GEAR_LIMIT_D1_DEFAULT_PCT,
+                                                 GEAR_LIMIT_R_DEFAULT_PCT,
+                                                 GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                                 GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                 GEAR_RESPONSE_R_DEFAULT_PCT);
+        if (!saved) {
+            gearlim_release_save_lock(service_owned);
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -2651,6 +2715,7 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
                                        GEAR_RESPONSE_D1_DEFAULT_PCT,
                                        GEAR_RESPONSE_R_DEFAULT_PCT);
         gearlim_pending_seeded = false;
+        gearlim_release_save_lock(service_owned);
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }

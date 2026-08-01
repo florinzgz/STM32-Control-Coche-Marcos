@@ -7,7 +7,7 @@
   * from the ESP32-HMI Engineering menu without re-flashing firmware:
   *
   *   1. POWER LIMIT  — caps the max traction demand for each gear; applied
-  *      in motor_control.c::Traction_Update().  Defaults 100 / 60 / 60 %.
+  *      in motor_control.c::Traction_Update().  Defaults 100 / 60 / 80 %.
   *   2. ACCEL RESPONSE — softens (never amplifies) the demand signal per
   *      gear; applied in Traction_SetDemand() after EMA#2 and before the
   *      global ramp limiter.  Defaults 100 / 70 / 40 %.
@@ -68,18 +68,18 @@ extern "C" {
 #define GEAR_LIMIT_D1_MIN_PCT   20U
 #define GEAR_LIMIT_D1_MAX_PCT   100U
 #define GEAR_LIMIT_R_MIN_PCT    10U
-#define GEAR_LIMIT_R_MAX_PCT    60U
+#define GEAR_LIMIT_R_MAX_PCT    80U
 
 /* ---- Compile-time defaults (percent) -----------------------------
  * These MIRROR the historic compile-time behaviour of motor_control.c:
  *   GEAR_POWER_FORWARD_D2_PCT = 1.00f -> 100 %
  *   GEAR_POWER_FORWARD_PCT    = 0.60f ->  60 %
- *   GEAR_POWER_REVERSE_PCT    = 0.60f ->  60 %
+ *   GEAR_POWER_REVERSE_PCT    = 0.80f ->  80 %
  * Keeping the defaults identical to the original macros guarantees that
  * a unit with no/blank/corrupt flash slot behaves exactly as before.    */
 #define GEAR_LIMIT_D2_DEFAULT_PCT  100U
 #define GEAR_LIMIT_D1_DEFAULT_PCT  60U
-#define GEAR_LIMIT_R_DEFAULT_PCT   60U
+#define GEAR_LIMIT_R_DEFAULT_PCT   80U
 
 /* ---- Hard validation ranges — accel RESPONSE (percent) -----------
  * The acceleration response profile softens (never amplifies) the pedal
@@ -190,7 +190,7 @@ bool GearLimitsStore_ValidateResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_
  * @brief  Persist new gear power-limit + accel-response percentages to flash.
  *
  * Write conditions (caller is responsible for the safety gates):
- *   - Safety_GetState() == SYS_STATE_STANDBY
+ *   - SYS_STATE_STANDBY, or a physically confirmed service lock
  *
  * Range conditions (validated internally via GearLimitsStore_Validate() and
  * GearLimitsStore_ValidateResponse()).

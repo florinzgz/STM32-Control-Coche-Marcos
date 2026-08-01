@@ -17,7 +17,7 @@
   *     The limits only scale an already-validated traction demand.
   *   - On CRC / magic / range failure: silent fallback to defaults
   *     (GearLimitsStore_IsValid() returns false; caller keeps compile-time
-  *     100 / 60 / 60 limits).  Boot is never blocked.
+  *     100 / 60 / 80 limits).  Boot is never blocked.
   *
   * The flash write primitive set (HAL_FLASH_Unlock, HAL_FLASHEx_Erase,
   * HAL_FLASH_Program with FLASH_TYPEPROGRAM_DOUBLEWORD, HAL_FLASH_Lock)
@@ -31,6 +31,20 @@
 #include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
+
+/* Optional in host fixtures; productive firmware provides the confirmed
+ * service-lock predicate.  PENDING/HOLD never authorize flash writes. */
+extern bool CAN_PedalCalServiceConfirmed(void) __attribute__((weak));
+
+static bool glim_write_context_authorized(bool standby_context)
+{
+    const SystemState_t state = Safety_GetState();
+    if (standby_context) return state == SYS_STATE_STANDBY;
+    return CAN_PedalCalServiceConfirmed != 0 &&
+           CAN_PedalCalServiceConfirmed() &&
+           (state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED) &&
+           Safety_GetError() == SAFETY_ERROR_NONE;
+}
 
 /* ---- Flash layout ----
  * STM32G474RE: 512 KB flash, 128 pages of 4 KB each.
@@ -231,12 +245,10 @@ void GearLimitsStore_GetStoredResponse(uint8_t *d2_pct, uint8_t *d1_pct,
 bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
                           uint8_t d2_resp, uint8_t d1_resp, uint8_t r_resp)
 {
-    /* Defense in depth: never persist while actuators may be live.
-     * The CAN dispatcher already blocks any caller path outside
-     * SYS_STATE_STANDBY, but the same gate is re-asserted at the
-     * persistence boundary so no future caller can erase page 122
-     * while the vehicle is in ACTIVE / DEGRADED / LIMP_HOME state.     */
-    if (Safety_GetState() != SYS_STATE_STANDBY)
+    /* Defense in depth: persist only in true STANDBY or while the
+     * confirmed service lock owns a clean ACTIVE/DEGRADED vehicle. */
+    const bool standby_context = (Safety_GetState() == SYS_STATE_STANDBY);
+    if (!glim_write_context_authorized(standby_context))
         return false;
 
     /* Hard validation gate — never persist out-of-range limits. */
@@ -282,6 +294,8 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
     slot.checksum      = glim_crc32(&slot,
                                     offsetof(glim_flash_slot_t, checksum));
 
+    if (!glim_write_context_authorized(standby_context)) return false;
+
     /* Unlock flash */
     HAL_StatusTypeDef status = HAL_FLASH_Unlock();
     if (status != HAL_OK)
@@ -300,6 +314,10 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
         HAL_FLASH_Lock();
         return false;
     }
+    if (!glim_write_context_authorized(standby_context)) {
+        HAL_FLASH_Lock();
+        return false;
+    }
 
     /* Write the slot (double-word aligned). 16 bytes -> 2 doublewords. */
     uint32_t slot_size   = sizeof(glim_flash_slot_t);
@@ -307,6 +325,10 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
     const uint64_t *src  = (const uint64_t *)&slot;
 
     for (uint32_t i = 0; i < dword_count; i++) {
+        if (!glim_write_context_authorized(standby_context)) {
+            HAL_FLASH_Lock();
+            return false;
+        }
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
                                    GLIM_FLASH_BASE + (i * 8U), src[i]);
         if (status != HAL_OK) {
@@ -316,6 +338,7 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
     }
 
     HAL_FLASH_Lock();
+    if (!glim_write_context_authorized(standby_context)) return false;
 
     /* Update RAM state + rate-limit bookkeeping. */
     glim_flash_valid      = true;
