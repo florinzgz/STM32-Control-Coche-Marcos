@@ -571,6 +571,8 @@ void Traction_Update(void)
     } else {
         TractionOutputPlan plan;
         if (!TractionOutput_Resolve4x2Rear(policy_mode, direction, pwm,
+                                           Steering_GetCurrentAngle(),
+                                           (float)ACKERMANN_DEADBAND_DEG,
                                            safety_status.wheel_scale,
                                            PWM_PERIOD, &plan)) {
             coast_all();

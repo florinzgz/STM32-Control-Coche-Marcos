@@ -4,13 +4,13 @@
   * @brief   Host-compilable unit tests for gear power-limit validation.
   *
   *          Validates the range/boundary logic of GearLimitsStore_Validate()
-  *          and GearLimitsStore_ValidateResponse() by calling the REAL
-  *          production functions from gear_limits_store.c.
+  *          and the compile-time defaults without requiring flash or HAL.
   *
-  *          Compile with host GCC:
+  *          Compile with host GCC (include production source):
   *            gcc -std=c11 -DHOST_TEST -Ianalysis_artifacts/stubs \
-  *                -ICore/Inc -O2 -lm Core/Src/test_gear_limits.c \
-  *                Core/Src/gear_limits_store.c -o test_gear_limits
+  *                -ICore/Inc -O2 -lm \
+  *                Core/Src/test_gear_limits.c Core/Src/gear_limits_store.c \
+  *                -o test_gear_limits
   *
   *          This file defines main() and is intended ONLY for host-side unit
   *          testing.  It is excluded from the STM32 firmware build via the
@@ -25,16 +25,18 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Pull in the single source of truth for ranges + defaults. */
+/* Pull in the single source of truth for ranges + defaults.  The header
+ * is HAL-free (pure macros + _Static_assert), so it compiles standalone. */
 #include "gear_limits_store.h"
-#include "safety_system.h"
 
-/* ---- Minimal safety-system stub -----------------------------------
- * GearLimitsStore_Save() gates on Safety_GetState() == SYS_STATE_STANDBY.
- * The test only calls GearLimitsStore_Validate() and
- * GearLimitsStore_ValidateResponse(), which do NOT consult system state.
- * This stub satisfies the linker without pulling in safety_system.c.    */
+/* Safety_GetState() is called by GearLimitsStore_Save(); provide a stub
+ * that always returns STANDBY so the write-context guard passes in tests. */
+#ifndef SAFETY_SYSTEM_H
+typedef enum { SYS_STATE_STANDBY = 2 } SystemState_t;
+typedef enum { SAFETY_ERROR_NONE = 0 } Safety_Error_t;
 SystemState_t Safety_GetState(void) { return SYS_STATE_STANDBY; }
+Safety_Error_t Safety_GetError(void) { return SAFETY_ERROR_NONE; }
+#endif
 
 /* ---- Test harness ---- */
 static int tests_run    = 0;
@@ -63,10 +65,13 @@ int main(void)
                                          GEAR_LIMIT_D1_DEFAULT_PCT,
                                          GEAR_LIMIT_R_DEFAULT_PCT));
 
-    /* Defaults match the historic compile-time behaviour (100/60/60). */
+    /* Defaults match the required safe values (D2=100, D1=60, R=60). */
     ASSERT_TRUE(GEAR_LIMIT_D2_DEFAULT_PCT == 100U);
     ASSERT_TRUE(GEAR_LIMIT_D1_DEFAULT_PCT == 60U);
     ASSERT_TRUE(GEAR_LIMIT_R_DEFAULT_PCT  == 60U);
+
+    /* Maximum reverse must not exceed 60 % (safety cap). */
+    ASSERT_TRUE(GEAR_LIMIT_R_MAX_PCT <= 60U);
 
     /* Boundary acceptance — exact min/max of each gear are valid. */
     ASSERT_TRUE(GearLimitsStore_Validate(GEAR_LIMIT_D2_MIN_PCT,
@@ -87,9 +92,8 @@ int main(void)
                                           GEAR_LIMIT_D1_DEFAULT_PCT,
                                           GEAR_LIMIT_R_MIN_PCT - 1U));
 
-    /* Above-max rejection: R must reject values that are valid for D1/D2.
-     * R max is 60 %, so 100 % (a legal D1/D2) must be rejected for R —
-     * this is the "no reverse too fast" safety guard.                   */
+    /* Above-max rejection: R must reject values above 60 %.
+     * D1/D2 allow up to 100 %, but R is capped at 60 % for safety. */
     ASSERT_FALSE(GearLimitsStore_Validate(GEAR_LIMIT_D2_DEFAULT_PCT,
                                           GEAR_LIMIT_D1_DEFAULT_PCT,
                                           GEAR_LIMIT_R_MAX_PCT + 1U));
@@ -97,7 +101,8 @@ int main(void)
     ASSERT_FALSE(GearLimitsStore_Validate(101U, 60U, 60U));    /* D2>100 illegal */
     ASSERT_FALSE(GearLimitsStore_Validate(0U, 0U, 0U));        /* all zero illegal */
 
-    /* A realistic re-tune (D2 80, D1 40, R 30) must validate. */
+    /* Valid non-default combinations. */
+    ASSERT_TRUE(GearLimitsStore_Validate(100U, 60U, 60U));
     ASSERT_TRUE(GearLimitsStore_Validate(80U, 40U, 30U));
 
     /* ============================================================
@@ -106,8 +111,8 @@ int main(void)
 
     /* Response defaults must always validate. */
     ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                                 GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                                 GEAR_RESPONSE_R_DEFAULT_PCT));
+                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                  GEAR_RESPONSE_R_DEFAULT_PCT));
 
     /* Response defaults match the task spec (D2 100 / D1 70 / R 40). */
     ASSERT_TRUE(GEAR_RESPONSE_D2_DEFAULT_PCT == 100U);
@@ -126,31 +131,31 @@ int main(void)
 
     /* Boundary acceptance — exact min/max of each gear are valid. */
     ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MIN_PCT,
-                                                 GEAR_RESPONSE_D1_MIN_PCT,
-                                                 GEAR_RESPONSE_R_MIN_PCT));
+                                                  GEAR_RESPONSE_D1_MIN_PCT,
+                                                  GEAR_RESPONSE_R_MIN_PCT));
     ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MAX_PCT,
-                                                 GEAR_RESPONSE_D1_MAX_PCT,
-                                                 GEAR_RESPONSE_R_MAX_PCT));
+                                                  GEAR_RESPONSE_D1_MAX_PCT,
+                                                  GEAR_RESPONSE_R_MAX_PCT));
 
     /* Below-min rejection for each gear. */
     ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MIN_PCT - 1U,
-                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_R_DEFAULT_PCT));
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_DEFAULT_PCT));
     ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_D1_MIN_PCT - 1U,
-                                                  GEAR_RESPONSE_R_DEFAULT_PCT));
+                                                   GEAR_RESPONSE_D1_MIN_PCT - 1U,
+                                                   GEAR_RESPONSE_R_DEFAULT_PCT));
     ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_R_MIN_PCT - 1U));
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_MIN_PCT - 1U));
 
     /* Above-max rejection: R caps at 80 %, so 100 (legal for D1/D2) is
      * rejected for R — the "reverse must stay progressive" guard.       */
     ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                                  GEAR_RESPONSE_R_MAX_PCT + 1U));
-    ASSERT_FALSE(GearLimitsStore_ValidateResponse(100U, 100U, 100U)); /* R=100 illegal */
-    ASSERT_FALSE(GearLimitsStore_ValidateResponse(101U, 70U, 40U));   /* D2>100 illegal */
-    ASSERT_FALSE(GearLimitsStore_ValidateResponse(0U, 0U, 0U));       /* all zero illegal */
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_MAX_PCT + 1U));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(100U, 100U, 100U));  /* R=100 illegal */
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(101U, 70U, 40U));    /* D2>100 illegal */
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(0U, 0U, 0U));        /* all zero illegal */
 
     /* A legacy (power-only) slot reads response bytes as 0, which must be
      * detected as out-of-range so the migration path applies defaults.   */
