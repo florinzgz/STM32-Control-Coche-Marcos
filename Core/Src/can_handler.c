@@ -2295,7 +2295,17 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 
     case PEDAL_CAL_OP_ABORT:
         /* audit P5.3: the ABORT button is a normal operator cancellation, NOT
-         * an emergency — classify it as PEDAL_CAL_ABORT_OPERATOR. */
+         * an emergency — classify it as PEDAL_CAL_ABORT_OPERATOR.
+         *
+         * Guard: reject silently when there is no active service context
+         * (not pending, active or in HOLD).  Calling pedalcal_service_exit()
+         * without a prior enter() would power-down relays and lock traction
+         * on a vehicle that never entered a calibration service at all.    */
+        if (!pedalcal_service_pending && !pedalcal_service_active &&
+            !pedalcal_service_hold) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
         PedalCalSession_Abort(&pedalcal_session, PEDAL_CAL_ABORT_OPERATOR);
         pedalcal_start_burst();
         pedalcal_send_session_status();

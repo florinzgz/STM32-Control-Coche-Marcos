@@ -164,6 +164,14 @@ pwm_conversion = require(
 )
 direction_block_open = body.find('{', direction_coast.end())
 assert direction_block_open >= 0, 'direction coast block missing'
+# Verify the opening brace belongs immediately to the direction-coast if():
+# only whitespace (including newlines) is permitted between the closing
+# parenthesis of the condition and the opening brace.  A non-whitespace
+# character here would mean the brace opens a different block.
+direction_interstitial = body[direction_coast.end():direction_block_open]
+assert not re.search(r'\S', direction_interstitial), (
+    'direction coast opening { is not the immediate if-block; '
+    'a non-whitespace token was found between the condition and the brace')
 direction_block = braced_block(body, direction_block_open,
                                'direction coast block')
 require(r'\bSteering_CoastPreserveEstimator\s*\(\s*\)\s*;',
