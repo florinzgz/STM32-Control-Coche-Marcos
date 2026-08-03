@@ -332,6 +332,10 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
                                    GLIM_FLASH_BASE + (i * 8U), src[i]);
         if (status != HAL_OK) {
+            /* Page was erased but writing failed: the slot is incomplete.
+             * Mark the RAM cache invalid so callers see the true flash state
+             * and the next Save() attempt re-erases and rewrites from scratch.*/
+            glim_flash_valid = false;
             HAL_FLASH_Lock();
             return false;
         }

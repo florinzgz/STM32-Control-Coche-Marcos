@@ -6,9 +6,10 @@
   *          Validates the range/boundary logic of GearLimitsStore_Validate()
   *          and the compile-time defaults without requiring flash or HAL.
   *
-  *          Compile with host GCC:
+  *          Compile with host GCC (include production source):
   *            gcc -std=c11 -DHOST_TEST -Ianalysis_artifacts/stubs \
-  *                -ICore/Inc -O2 -lm Core/Src/test_gear_limits.c \
+  *                -ICore/Inc -O2 -lm \
+  *                Core/Src/test_gear_limits.c Core/Src/gear_limits_store.c \
   *                -o test_gear_limits
   *
   *          This file defines main() and is intended ONLY for host-side unit
@@ -27,6 +28,15 @@
 /* Pull in the single source of truth for ranges + defaults.  The header
  * is HAL-free (pure macros + _Static_assert), so it compiles standalone. */
 #include "gear_limits_store.h"
+
+/* Safety_GetState() is called by GearLimitsStore_Save(); provide a stub
+ * that always returns STANDBY so the write-context guard passes in tests. */
+#ifndef SAFETY_SYSTEM_H
+typedef enum { SYS_STATE_STANDBY = 2 } SystemState_t;
+typedef enum { SAFETY_ERROR_NONE = 0 } Safety_Error_t;
+SystemState_t Safety_GetState(void) { return SYS_STATE_STANDBY; }
+Safety_Error_t Safety_GetError(void) { return SAFETY_ERROR_NONE; }
+#endif
 
 /* ---- Test harness ---- */
 static int tests_run    = 0;
@@ -48,80 +58,61 @@ static int tests_failed = 0;
     }                                                                 \
 } while (0)
 
-/* Re-implement GearLimitsStore_Validate() with the SAME logic as
- * gear_limits_store.c, referencing the canonical range macros from the
- * header so any future range change is reflected here automatically.   */
-static bool test_validate(uint8_t d2, uint8_t d1, uint8_t r)
-{
-    if (d2 < GEAR_LIMIT_D2_MIN_PCT || d2 > GEAR_LIMIT_D2_MAX_PCT) return false;
-    if (d1 < GEAR_LIMIT_D1_MIN_PCT || d1 > GEAR_LIMIT_D1_MAX_PCT) return false;
-    if (r  < GEAR_LIMIT_R_MIN_PCT  || r  > GEAR_LIMIT_R_MAX_PCT)  return false;
-    return true;
-}
-
-/* Re-implement GearLimitsStore_ValidateResponse() with the SAME logic as
- * gear_limits_store.c, referencing the canonical response range macros.   */
-static bool test_validate_response(uint8_t d2, uint8_t d1, uint8_t r)
-{
-    if (d2 < GEAR_RESPONSE_D2_MIN_PCT || d2 > GEAR_RESPONSE_D2_MAX_PCT) return false;
-    if (d1 < GEAR_RESPONSE_D1_MIN_PCT || d1 > GEAR_RESPONSE_D1_MAX_PCT) return false;
-    if (r  < GEAR_RESPONSE_R_MIN_PCT  || r  > GEAR_RESPONSE_R_MAX_PCT)  return false;
-    return true;
-}
-
 int main(void)
 {
     /* Defaults must always validate (RESTORE DEFAULTS must never reject). */
-    ASSERT_TRUE(test_validate(GEAR_LIMIT_D2_DEFAULT_PCT,
-                              GEAR_LIMIT_D1_DEFAULT_PCT,
-                              GEAR_LIMIT_R_DEFAULT_PCT));
+    ASSERT_TRUE(GearLimitsStore_Validate(GEAR_LIMIT_D2_DEFAULT_PCT,
+                                         GEAR_LIMIT_D1_DEFAULT_PCT,
+                                         GEAR_LIMIT_R_DEFAULT_PCT));
 
-    /* Defaults match the requested defaults (100/60/80). */
+    /* Defaults match the required safe values (D2=100, D1=60, R=60). */
     ASSERT_TRUE(GEAR_LIMIT_D2_DEFAULT_PCT == 100U);
     ASSERT_TRUE(GEAR_LIMIT_D1_DEFAULT_PCT == 60U);
-    ASSERT_TRUE(GEAR_LIMIT_R_DEFAULT_PCT  == 80U);
+    ASSERT_TRUE(GEAR_LIMIT_R_DEFAULT_PCT  == 60U);
+
+    /* Maximum reverse must not exceed 60 % (safety cap). */
+    ASSERT_TRUE(GEAR_LIMIT_R_MAX_PCT <= 60U);
 
     /* Boundary acceptance — exact min/max of each gear are valid. */
-    ASSERT_TRUE(test_validate(GEAR_LIMIT_D2_MIN_PCT,
-                              GEAR_LIMIT_D1_MIN_PCT,
-                              GEAR_LIMIT_R_MIN_PCT));
-    ASSERT_TRUE(test_validate(GEAR_LIMIT_D2_MAX_PCT,
-                              GEAR_LIMIT_D1_MAX_PCT,
-                              GEAR_LIMIT_R_MAX_PCT));
+    ASSERT_TRUE(GearLimitsStore_Validate(GEAR_LIMIT_D2_MIN_PCT,
+                                         GEAR_LIMIT_D1_MIN_PCT,
+                                         GEAR_LIMIT_R_MIN_PCT));
+    ASSERT_TRUE(GearLimitsStore_Validate(GEAR_LIMIT_D2_MAX_PCT,
+                                         GEAR_LIMIT_D1_MAX_PCT,
+                                         GEAR_LIMIT_R_MAX_PCT));
 
     /* Below-min rejection for each gear (guard the off-by-one). */
-    ASSERT_FALSE(test_validate(GEAR_LIMIT_D2_MIN_PCT - 1U,
-                               GEAR_LIMIT_D1_DEFAULT_PCT,
-                               GEAR_LIMIT_R_DEFAULT_PCT));
-    ASSERT_FALSE(test_validate(GEAR_LIMIT_D2_DEFAULT_PCT,
-                               GEAR_LIMIT_D1_MIN_PCT - 1U,
-                               GEAR_LIMIT_R_DEFAULT_PCT));
-    ASSERT_FALSE(test_validate(GEAR_LIMIT_D2_DEFAULT_PCT,
-                               GEAR_LIMIT_D1_DEFAULT_PCT,
-                               GEAR_LIMIT_R_MIN_PCT - 1U));
+    ASSERT_FALSE(GearLimitsStore_Validate(GEAR_LIMIT_D2_MIN_PCT - 1U,
+                                          GEAR_LIMIT_D1_DEFAULT_PCT,
+                                          GEAR_LIMIT_R_DEFAULT_PCT));
+    ASSERT_FALSE(GearLimitsStore_Validate(GEAR_LIMIT_D2_DEFAULT_PCT,
+                                          GEAR_LIMIT_D1_MIN_PCT - 1U,
+                                          GEAR_LIMIT_R_DEFAULT_PCT));
+    ASSERT_FALSE(GearLimitsStore_Validate(GEAR_LIMIT_D2_DEFAULT_PCT,
+                                          GEAR_LIMIT_D1_DEFAULT_PCT,
+                                          GEAR_LIMIT_R_MIN_PCT - 1U));
 
-    /* Above-max rejection: R must reject values that are valid for D1/D2.
-     * R max is 80 %, so 100 % (a legal D1/D2) must be rejected for R —
-     * this is the "no reverse too fast" safety guard.                   */
-    ASSERT_FALSE(test_validate(GEAR_LIMIT_D2_DEFAULT_PCT,
-                               GEAR_LIMIT_D1_DEFAULT_PCT,
-                               GEAR_LIMIT_R_MAX_PCT + 1U));
-    ASSERT_FALSE(test_validate(100U, 100U, 100U));   /* R=100 illegal */
-    ASSERT_FALSE(test_validate(101U, 60U, 80U));     /* D2>100 illegal */
-    ASSERT_FALSE(test_validate(0U, 0U, 0U));         /* all zero illegal */
+    /* Above-max rejection: R must reject values above 60 %.
+     * D1/D2 allow up to 100 %, but R is capped at 60 % for safety. */
+    ASSERT_FALSE(GearLimitsStore_Validate(GEAR_LIMIT_D2_DEFAULT_PCT,
+                                          GEAR_LIMIT_D1_DEFAULT_PCT,
+                                          GEAR_LIMIT_R_MAX_PCT + 1U));
+    ASSERT_FALSE(GearLimitsStore_Validate(100U, 100U, 100U));  /* R=100 illegal */
+    ASSERT_FALSE(GearLimitsStore_Validate(101U, 60U, 60U));    /* D2>100 illegal */
+    ASSERT_FALSE(GearLimitsStore_Validate(0U, 0U, 0U));        /* all zero illegal */
 
-    /* Requested reverse power and a lower retune both validate. */
-    ASSERT_TRUE(test_validate(100U, 60U, 80U));
-    ASSERT_TRUE(test_validate(80U, 40U, 30U));
+    /* Valid non-default combinations. */
+    ASSERT_TRUE(GearLimitsStore_Validate(100U, 60U, 60U));
+    ASSERT_TRUE(GearLimitsStore_Validate(80U, 40U, 30U));
 
     /* ============================================================
      * Accel RESPONSE profile (v2) validation
      * ============================================================ */
 
     /* Response defaults must always validate. */
-    ASSERT_TRUE(test_validate_response(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                       GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                       GEAR_RESPONSE_R_DEFAULT_PCT));
+    ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                  GEAR_RESPONSE_R_DEFAULT_PCT));
 
     /* Response defaults match the task spec (D2 100 / D1 70 / R 40). */
     ASSERT_TRUE(GEAR_RESPONSE_D2_DEFAULT_PCT == 100U);
@@ -139,39 +130,39 @@ int main(void)
     ASSERT_TRUE(GEAR_RESPONSE_R_MAX_PCT  <= 100U);
 
     /* Boundary acceptance — exact min/max of each gear are valid. */
-    ASSERT_TRUE(test_validate_response(GEAR_RESPONSE_D2_MIN_PCT,
-                                       GEAR_RESPONSE_D1_MIN_PCT,
-                                       GEAR_RESPONSE_R_MIN_PCT));
-    ASSERT_TRUE(test_validate_response(GEAR_RESPONSE_D2_MAX_PCT,
-                                       GEAR_RESPONSE_D1_MAX_PCT,
-                                       GEAR_RESPONSE_R_MAX_PCT));
+    ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MIN_PCT,
+                                                  GEAR_RESPONSE_D1_MIN_PCT,
+                                                  GEAR_RESPONSE_R_MIN_PCT));
+    ASSERT_TRUE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MAX_PCT,
+                                                  GEAR_RESPONSE_D1_MAX_PCT,
+                                                  GEAR_RESPONSE_R_MAX_PCT));
 
     /* Below-min rejection for each gear. */
-    ASSERT_FALSE(test_validate_response(GEAR_RESPONSE_D2_MIN_PCT - 1U,
-                                        GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                        GEAR_RESPONSE_R_DEFAULT_PCT));
-    ASSERT_FALSE(test_validate_response(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                        GEAR_RESPONSE_D1_MIN_PCT - 1U,
-                                        GEAR_RESPONSE_R_DEFAULT_PCT));
-    ASSERT_FALSE(test_validate_response(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                        GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                        GEAR_RESPONSE_R_MIN_PCT - 1U));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_MIN_PCT - 1U,
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_DEFAULT_PCT));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_D1_MIN_PCT - 1U,
+                                                   GEAR_RESPONSE_R_DEFAULT_PCT));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_MIN_PCT - 1U));
 
     /* Above-max rejection: R caps at 80 %, so 100 (legal for D1/D2) is
      * rejected for R — the "reverse must stay progressive" guard.       */
-    ASSERT_FALSE(test_validate_response(GEAR_RESPONSE_D2_DEFAULT_PCT,
-                                        GEAR_RESPONSE_D1_DEFAULT_PCT,
-                                        GEAR_RESPONSE_R_MAX_PCT + 1U));
-    ASSERT_FALSE(test_validate_response(100U, 100U, 100U));  /* R=100 illegal */
-    ASSERT_FALSE(test_validate_response(101U, 70U, 40U));    /* D2>100 illegal */
-    ASSERT_FALSE(test_validate_response(0U, 0U, 0U));        /* all zero illegal */
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                                   GEAR_RESPONSE_R_MAX_PCT + 1U));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(100U, 100U, 100U));  /* R=100 illegal */
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(101U, 70U, 40U));    /* D2>100 illegal */
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(0U, 0U, 0U));        /* all zero illegal */
 
     /* A legacy (power-only) slot reads response bytes as 0, which must be
      * detected as out-of-range so the migration path applies defaults.   */
-    ASSERT_FALSE(test_validate_response(0U, 0U, 0U));
+    ASSERT_FALSE(GearLimitsStore_ValidateResponse(0U, 0U, 0U));
 
     /* A realistic response re-tune (D2 90, D1 60, R 50) must validate. */
-    ASSERT_TRUE(test_validate_response(90U, 60U, 50U));
+    ASSERT_TRUE(GearLimitsStore_ValidateResponse(90U, 60U, 50U));
 
     printf("test_gear_limits: %d run, %d failed\n", tests_run, tests_failed);
     return (tests_failed == 0) ? 0 : 1;

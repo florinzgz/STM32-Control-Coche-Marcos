@@ -2293,6 +2293,15 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 
     case PEDAL_CAL_OP_ABORT:
+        /* Reject silently when there is no active service context: no session
+         * was pending, active, or in HOLD, so there is nothing to abort.
+         * Calling service_exit() unconditionally would power down relays and
+         * enter HOLD even on an actively-driving vehicle.                    */
+        if (!pedalcal_service_pending && !pedalcal_service_active &&
+                !pedalcal_service_hold) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
         /* audit P5.3: the ABORT button is a normal operator cancellation, NOT
          * an emergency — classify it as PEDAL_CAL_ABORT_OPERATOR. */
         PedalCalSession_Abort(&pedalcal_session, PEDAL_CAL_ABORT_OPERATOR);

@@ -123,6 +123,7 @@ jobs:
                 Core/Src/test_relay_health_frame.c) extra="Core/Src/relay_health_diag.c" ;;
                 Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
                 Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_gear_limits.c) extra="Core/Src/gear_limits_store.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -309,6 +310,13 @@ jobs:
               -Iesp32/src -Iesp32/test_stubs \
               -o /tmp/test_remote_control
             /tmp/test_remote_control
+
+            echo "-- test_rc_disabled.cpp"
+            g++ -std=c++17 -DREMOTE_CONTROL_ENABLED=0 \
+              esp32/src/test_rc_disabled.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_rc_disabled
+            /tmp/test_rc_disabled
 
             echo "-- test_shifter_input.cpp"
             g++ -std=c++17 esp32/src/shifter_input.cpp esp32/src/test_shifter_input.cpp \

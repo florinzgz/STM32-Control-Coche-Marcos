@@ -68,7 +68,7 @@ extern "C" {
 #define GEAR_LIMIT_D1_MIN_PCT   20U
 #define GEAR_LIMIT_D1_MAX_PCT   100U
 #define GEAR_LIMIT_R_MIN_PCT    10U
-#define GEAR_LIMIT_R_MAX_PCT    80U
+#define GEAR_LIMIT_R_MAX_PCT    60U
 
 /* ---- Compile-time defaults (percent) -----------------------------
  * These MIRROR the historic compile-time behaviour of motor_control.c:
@@ -79,7 +79,7 @@ extern "C" {
  * a unit with no/blank/corrupt flash slot behaves exactly as before.    */
 #define GEAR_LIMIT_D2_DEFAULT_PCT  100U
 #define GEAR_LIMIT_D1_DEFAULT_PCT  60U
-#define GEAR_LIMIT_R_DEFAULT_PCT   80U
+#define GEAR_LIMIT_R_DEFAULT_PCT   60U
 
 /* ---- Hard validation ranges — accel RESPONSE (percent) -----------
  * The acceleration response profile softens (never amplifies) the pedal

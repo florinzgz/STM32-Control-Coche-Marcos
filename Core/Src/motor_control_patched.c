@@ -290,7 +290,7 @@ void Steering_ControlLoop(void)
     const float effective_coast_band = EpsAssist_EffectiveCoastBand(
         p->coast_band_pct, assist.driver_intent);
     const float effective_min_drive = EpsAssist_EffectiveMinDrive(
-        p->min_drive_pct, assist.driver_intent);
+        p->min_drive_pct, assist.driver_intent, v_kmh);
     const EpsOutputDecision_t output = EpsOutput_Resolve(
         pwm_pct, effective_coast_band, effective_min_drive);
     if (output.coast) {
@@ -301,7 +301,7 @@ void Steering_ControlLoop(void)
 
     int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
     const float effective_slew_rate = EpsAssist_EffectiveSlewRate(
-        p->slew_rate_pct, assist.driver_intent);
+        p->slew_rate_pct, assist.driver_intent, v_kmh);
     int16_t slew_counts =
         (int16_t)(effective_slew_rate * (float)PWM_PERIOD / 100.0f);
     if (slew_counts < 1) slew_counts = 1;

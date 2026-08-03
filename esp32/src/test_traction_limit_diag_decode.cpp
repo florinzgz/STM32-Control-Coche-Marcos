@@ -30,6 +30,10 @@ int main() {
           traction_limit_diag_view::Freshness::NEVER_RECEIVED);
     CHECK(traction_limit_diag_view::freshness(true, 3999U, 1000U) ==
           traction_limit_diag_view::Freshness::VALID);
+    /* Exactly 3000 ms elapsed (now=4000, last=1000): must be VALID, not STALE.
+     * The boundary is inclusive: elapsed <= STALE_TIMEOUT_MS is VALID.    */
+    CHECK(traction_limit_diag_view::freshness(true, 4000U, 1000U) ==
+          traction_limit_diag_view::Freshness::VALID);
     CHECK(traction_limit_diag_view::freshness(true, 4001U, 1000U) ==
           traction_limit_diag_view::Freshness::STALE);
 
