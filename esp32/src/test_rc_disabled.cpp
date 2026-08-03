@@ -12,8 +12,12 @@
  *                esp32/src/test_rc_disabled.cpp \
  *                -o /tmp/test_rc_disabled && /tmp/test_rc_disabled
  *
+ *          PlatformIO scans esp32/src automatically.  The ARDUINO guard keeps
+ *          this host-only main() out of the production firmware while the
+ *          standalone host command above continues to compile and execute it.
+ *
  *          Verified:
- *            1. remote_control::isActive()        == false
+ *            1. remote_control::isActive()          == false
  *            2. remote_control::isRemoteSelected() == false
  *            3. remote_control::getThrottlePct()   == 0.0f
  *            4. remote_control::getSteeringDeg()   == 0.0f
@@ -24,6 +28,8 @@
  *            9. remote_control::getState()         == State::IDLE
  ****************************************************************************
  */
+
+#if !defined(ARDUINO)
 
 #include <cstdio>
 #include <cmath>
@@ -61,7 +67,7 @@ int main()
     CHECK(remote_control::getDriveMode() == 0U);
 
     /* 5. Lights and audio volume must be off/zero. */
-    CHECK(remote_control::isLightsOn()    == false);
+    CHECK(remote_control::isLightsOn()     == false);
     CHECK(remote_control::getAudioVolume() == 0U);
 
     /* 6. Kill switch defaults to active (fail-safe: no receiver = no authority). */
@@ -74,3 +80,5 @@ int main()
     std::puts("RC disabled stubs: PASS");
     return 0;
 }
+
+#endif /* !defined(ARDUINO) */
