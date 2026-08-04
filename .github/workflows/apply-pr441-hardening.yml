@@ -1,0 +1,87 @@
+name: Apply PR441 hardening patch
+
+on:
+  push:
+    branches: [ fix/disable-rc-bench ]
+    paths:
+      - '.github/workflows/apply-pr441-hardening.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr441-hardening-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/disable-rc-bench
+          fetch-depth: 0
+
+      - name: Verify staging ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=027727b6b33f63de571d9a4623ea6cdd43bca022
+          git merge-base --is-ancestor "$base" HEAD
+          unexpected="$(git diff --name-only "$base"..HEAD | grep -Ev '^\.github/pr441_patch/chunk[0-9]+$|^\.github/workflows/apply-pr441-hardening\.yml$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files changed after audited base:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Apply verified hardening patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/pr441_patch/chunk* > /tmp/pr441-hardening.patch.b64
+          base64 -d /tmp/pr441-hardening.patch.b64 | gzip -d > /tmp/pr441-hardening.patch
+          echo "bd735d20f9e19defb231989eb6a099ead20a5fc9f1868dae2b0ea628107fc8f8  /tmp/pr441-hardening.patch" | sha256sum -c -
+          git apply --check /tmp/pr441-hardening.patch
+          git apply /tmp/pr441-hardening.patch
+          git rm -r .github/pr441_patch .github/workflows/apply-pr441-hardening.yml
+          git diff --check
+
+      - name: Run hardening policy tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_can_rx_policy.c -o /tmp/test_can_rx_policy
+          /tmp/test_can_rx_policy
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_holdover_service_policy.c \
+            -o /tmp/test_holdover_service_policy
+          /tmp/test_holdover_service_policy
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -DRC_OVERRIDE_ENABLED=0 -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+            -o /tmp/test_rc_arbiter_disabled
+          /tmp/test_rc_arbiter_disabled
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -DRC_OVERRIDE_ENABLED=1 -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+            -o /tmp/test_rc_arbiter_enabled
+          /tmp/test_rc_arbiter_enabled
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/src/test_hmi_steering_polarity.cpp \
+            -o /tmp/test_hmi_steering_polarity
+          /tmp/test_hmi_steering_polarity
+          python3 scripts/check_cubeide_source_exclusions.py
+
+      - name: Commit fast-forward changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "PR441 Hardening Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden local authority, CAN and NVM safety"
+          git push origin HEAD:fix/disable-rc-bench
