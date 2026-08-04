@@ -1,3 +1,4 @@
+# Registered before this PR synchronization event.
 name: Apply PR441 hardening from PR
 
 on:
