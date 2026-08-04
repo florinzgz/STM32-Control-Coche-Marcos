@@ -1,99 +1,601 @@
 name: Firmware Validation
 
 on:
-  pull_request:
-    branches: [ main ]
+  push:
+    branches: [ main, develop ]
     paths:
+      - 'Core/**'
+      - 'Drivers/**'
+      - 'esp32/**'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'docs/**'
+      - '.clang-tidy'
+      - '.cppcheck-suppressions.txt'
+      - '.github/workflows/firmware-validation.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'Core/**'
+      - 'Drivers/**'
+      - 'esp32/**'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'docs/**'
+      - '.clang-tidy'
+      - '.cppcheck-suppressions.txt'
       - '.github/workflows/firmware-validation.yml'
 
 permissions:
-  contents: write
-
-concurrency:
-  group: pr441-hardening-source-apply
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  apply-pr441-hardening-source:
-    if: github.event.pull_request.number == 441
+  static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck flawfinder clang-tools
+          python3 -m pip install --user lizard==1.17.10
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run static analysis
+        run: |
+          chmod +x scripts/run_cppcheck.sh scripts/run_clang_tidy.sh scripts/run_static_analysis.sh
+          ./scripts/run_static_analysis.sh
+
+      - name: Upload static-analysis artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          ref: fix/disable-rc-bench
+          name: static-analysis
+          path: artifacts/static-analysis/
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run STM32 host tests
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/tests
+          {
+            for src in \
+              Core/Src/test_motor_control.c \
+              Core/Src/test_math_safety.c \
+              Core/Src/test_error_log.c \
+              Core/Src/test_service_mode.c \
+              Core/Src/test_eps_params.c \
+              Core/Src/test_sensor_calibration.c \
+              Core/Src/test_wheel_speed.c \
+              Core/Src/test_wheel_fault_gate.c \
+              Core/Src/test_obstacle_fault_state.c \
+              Core/Src/test_wheel_diag_can.c \
+              Core/Src/test_gear_limits.c \
+              Core/Src/test_drive_tuning.c \
+              Core/Src/test_battery_limits.c \
+              Core/Src/test_steering_cal_store.c \
+              Core/Src/test_steering_z.c \
+              Core/Src/test_steering_eps.c \
+              Core/Src/test_steering_centering.c \
+              Core/Src/test_steering_centering_diag.c \
+              Core/Src/test_steering_centering_frame.c \
+              Core/Src/test_pedal_cal_limits.c \
+              Core/Src/test_pedal_cal_session.c \
+              Core/Src/test_pedalcal_can_frame.c \
+              Core/Src/test_pedalcal_query_readonly.c \
+              Core/Src/test_pedal_plausibility.c \
+              Core/Src/test_busoff_recovery.c \
+              Core/Src/test_motion_inhibit.c \
+              Core/Src/test_standby_mode_sync_gate.c \
+              Core/Src/test_wheel_effort.c \
+              Core/Src/test_relay_degraded.c \
+              Core/Src/test_relay_health_diag.c \
+              Core/Src/test_relay_health_frame.c \
+              Core/Src/test_ina226_channel_diag.c \
+              Core/Src/test_ina226_ch5_frame.c \
+              Core/Src/test_can_rx_policy.c \
+              Core/Src/test_holdover_service_policy.c \
+              Core/Src/test_loop_diag.c; do
+              exe="/tmp/$(basename "$src" .c)"
+              extra=""
+              case "$src" in
+                Core/Src/test_math_safety.c) extra="Core/Src/math_safety.c" ;;
+                Core/Src/test_error_log.c) extra="Core/Src/error_log.c" ;;
+                Core/Src/test_service_mode.c) extra="Core/Src/service_mode.c" ;;
+                Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
+                Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
+                Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
+                Core/Src/test_steering_eps.c) extra="Core/Src/steering_eps.c" ;;
+                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c Core/Src/steering_centering_diag.c Core/Src/steering_eps.c" ;;
+                Core/Src/test_steering_centering_diag.c) extra="Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_steering_centering_frame.c) extra="Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
+                Core/Src/test_pedal_cal_session.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_pedalcal_can_frame.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_pedalcal_query_readonly.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
+                Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
+                Core/Src/test_relay_degraded.c) extra="Core/Src/motion_inhibit.c" ;;
+                Core/Src/test_relay_health_diag.c) extra="Core/Src/relay_health_diag.c" ;;
+                Core/Src/test_relay_health_frame.c) extra="Core/Src/relay_health_diag.c" ;;
+                Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_gear_limits.c) extra="Core/Src/gear_limits_store.c" ;;
+              esac
+              echo "-- $(basename "$src")"
+              gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+                "$src" $extra -lm -o "$exe"
+              "$exe"
+            done
+
+            echo "-- test_rc_arbiter_policy.c (local-only bench build)"
+            gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -DRC_OVERRIDE_ENABLED=0 \
+              -Ianalysis_artifacts/stubs -ICore/Inc \
+              Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+              -o /tmp/test_rc_arbiter_disabled
+            /tmp/test_rc_arbiter_disabled
+
+            echo "-- test_rc_arbiter_policy.c (future RC-enabled contract)"
+            gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -DRC_OVERRIDE_ENABLED=1 \
+              -Ianalysis_artifacts/stubs -ICore/Inc \
+              Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+              -o /tmp/test_rc_arbiter_enabled
+            /tmp/test_rc_arbiter_enabled
+
+            # Section-L integration test: compiles the EFFECTIVE (patched)
+            # relay sequencer + real EPS authority and proves PC12 stays OFF
+            # after an EPS isolation while traction is preserved.  Needs the
+            # opt-in functional GPIO model (HOST_TEST_GPIO_MODEL).
+            echo "-- test_relay_seq_eps.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_relay_seq_eps.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_relay_seq_eps
+            /tmp/test_relay_seq_eps
+
+            # Section-M integration test: an isolable EPS fault at boot must
+            # NEVER immobilise the vehicle (STANDBY -> ACTIVE, PC11 ON, PC12
+            # OFF, power_ready) and the engineering relay override can never
+            # pulse the steering-motor relay (PC12).  Needs the write observer.
+            echo "-- test_eps_boot_traction.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_eps_boot_traction.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/boot_validation.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_eps_boot_traction
+            /tmp/test_eps_boot_traction
+
+            # Section-M output-production test: an EPS fault injected in the
+            # DETECTOR physically drives the real shared actuator registers to
+            # their safe state (CCR PA6=0, CCR PA7=0, PC4 LOW, PC12 OFF).
+            echo "-- test_steering_outputs.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_outputs.c \
+              Core/Src/steering_output.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_steering_outputs
+            /tmp/test_steering_outputs
+            # Section-M centering-boot test: the REAL homing FSM
+            # (SteeringCentering_Step) is driven to each of its four abort
+            # causes (timeout / range / stall / encoder fault) and must
+            # isolate the assist to MECHANICAL_ONLY while keeping traction
+            # (STANDBY -> ACTIVE, PC11 ON, PC12 OFF & never re-armed).
+            echo "-- test_centering_boot_traction.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_centering_boot_traction.c \
+              Core/Src/steering_centering.c \
+              Core/Src/steering_centering_diag.c \
+              Core/Src/steering_eps.c \
+              Core/Src/steering_output.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/boot_validation.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_centering_boot_traction
+            /tmp/test_centering_boot_traction
+
+            # Owner-aware PC12 gate: the REAL centering homing FSM is driven
+            # through the EXACT main-loop order (Relay_SequencerUpdate ->
+            # Safety_RelayOverrideUpdate -> Safety_SteerRelaySupervise ->
+            # SteeringCentering_DecideOwner -> SteeringCentering_Step ->
+            # SteeringSupervisor_Service).  Proves PC12 stays ON during homing
+            # (supervise no longer tears the rail down before calibration), the
+            # sweep PWM begins with PC12 ON, a healthy run completes, and any
+            # latched fault forces PC12 OFF with no reconnection.
+            echo "-- test_centering_pc12_gate.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_centering_pc12_gate.c \
+              Core/Src/steering_centering.c \
+              Core/Src/steering_centering_diag.c \
+              Core/Src/steering_eps.c \
+              Core/Src/steering_output.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/boot_validation.c \
+              Core/Src/ina226_channel_diag.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_centering_pc12_gate
+            /tmp/test_centering_pc12_gate
+
+            # Section-M EPS assist supervisor: faults are injected into the
+            # REAL detectors — the genuine Ina226_ClassifyChannel() plus the
+            # real parameter/calibration/Z policy inputs — and the supervisor
+            # is left to drive the real steering_eps.c isolation API (never
+            # calling Steering_DisableAssistFault directly).  Proves every
+            # isolable cause reaches EPS MECHANICAL_ONLY while a persistent
+            # overcurrent escalates to ELECTRICAL_HAZARD + SAFE.
+            echo "-- test_steering_supervisor.c"
+            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor
+            /tmp/test_steering_supervisor
+
+            # Encoder-Z MANDATORY policy: rebuild the supervisor with
+            # STEERING_Z_REQUIRED=1 so the same detector injection proves a
+            # missing/incoherent Z isolates the assist when Z is configured
+            # mandatory (the default optional build treats it as diagnostic).
+            echo "-- test_steering_supervisor.c (STEERING_Z_REQUIRED=1)"
+            gcc -std=c11 -DHOST_TEST -DSTEERING_Z_REQUIRED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_zreq
+            /tmp/test_steering_supervisor_zreq
+
+            # Production glue integration: exercise the REAL data-gathering path
+            # steering_supervisor_io.c:SteeringSupervisor_Service() through a
+            # controllable Sensor_GetChannel5Diag() seam.  Proves the real
+            # acquisition sequence is transported (100 Hz never reprocesses one
+            # 20 Hz sample), CH5 is pre-relay/always-powered, isolable CH5
+            # faults reach MECHANICAL_ONLY without a global SAFE, and a missing
+            # post-isolation sample stays ISOLATION UNCONFIRMED (never a false
+            # ELECTRICAL_HAZARD).  HOST_TEST_GPIO_MODEL gives a deterministic tick.
+            echo "-- test_steering_supervisor_io.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io
+            /tmp/test_steering_supervisor_io
+
+            # Same glue rebuilt with the isolation threshold CALIBRATED so the
+            # end-to-end ELECTRICAL_HAZARD + SAFE escalation path is covered too.
+            echo "-- test_steering_supervisor_io.c (CALIBRATED)"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DSTEERING_ISOLATION_THRESHOLD_CALIBRATED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io_cal
+            /tmp/test_steering_supervisor_io_cal
+          } | tee artifacts/tests/stm32-host-tests.txt
+
+      - name: Run ESP32 host tests
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/tests
+          {
+            echo "-- test_relay_audio.cpp"
+            g++ -std=c++17 esp32/src/relay_audio.cpp esp32/src/test_relay_audio.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_relay_audio
+            /tmp/test_relay_audio
+
+            echo "-- test_traction_switch.cpp"
+            g++ -std=c++17 esp32/src/traction_switch.cpp esp32/src/test_traction_switch.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_traction_switch
+            /tmp/test_traction_switch
+
+            echo "-- test_remote_control.cpp"
+            g++ -std=c++17 -DREMOTE_CONTROL_ENABLED=1 -DREMOTE_CONTROL_TEST_HOOKS \
+              esp32/src/remote_control.cpp esp32/src/test_remote_control.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_remote_control
+            /tmp/test_remote_control
+
+            echo "-- test_rc_disabled.cpp"
+            g++ -std=c++17 -DREMOTE_CONTROL_ENABLED=0 \
+              esp32/src/test_rc_disabled.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_rc_disabled
+            /tmp/test_rc_disabled
+
+            echo "-- test_cmd_mode_transaction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_cmd_mode_transaction.cpp \
+              -o /tmp/test_cmd_mode_transaction
+            /tmp/test_cmd_mode_transaction
+
+            echo "-- test_decor_modes.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror \
+              esp32/src/test_decor_modes.cpp -o /tmp/test_decor_modes
+            /tmp/test_decor_modes
+
+            echo "-- test_knight_rider.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror \
+              esp32/src/test_knight_rider.cpp -o /tmp/test_knight_rider
+            /tmp/test_knight_rider
+
+            echo "-- test_obstacle_sensor.cpp (TOFSense-M)"
+            g++ -std=c++17 -Wall -Wextra -Werror -Wno-unused-function \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=0 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tof
+            /tmp/test_obstacle_sensor_tof
+
+            echo "-- test_obstacle_sensor.cpp (TF-Mini Plus)"
+            g++ -std=c++17 -Wall -Wextra -Werror -Wno-unused-function \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=1 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tfmini
+            /tmp/test_obstacle_sensor_tfmini
+
+            echo "-- test_hmi_steering_polarity.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_hmi_steering_polarity.cpp \
+              -o /tmp/test_hmi_steering_polarity
+            /tmp/test_hmi_steering_polarity
+
+            echo "-- test_shifter_input.cpp"
+            g++ -std=c++17 esp32/src/shifter_input.cpp esp32/src/test_shifter_input.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_shifter_input
+            /tmp/test_shifter_input
+
+            echo "-- test_pedal_cal_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_cal_decode.cpp \
+              -o /tmp/test_pedal_cal_decode
+            /tmp/test_pedal_cal_decode
+
+            echo "-- test_pedal_cal_session_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_pedal_cal_session_view.cpp \
+              -o /tmp/test_pedal_cal_session_view
+            /tmp/test_pedal_cal_session_view
+
+            echo "-- test_pedal_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_decode.cpp \
+              -o /tmp/test_pedal_decode
+            /tmp/test_pedal_decode
+
+            echo "-- test_wheel_diag_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_wheel_diag_decode.cpp \
+              -o /tmp/test_wheel_diag_decode
+            /tmp/test_wheel_diag_decode
+
+            echo "-- test_wheel_diag_hint.cpp"
+            g++ -std=c++17 -DHOST_TEST -Iesp32/include -Iesp32/src/ui \
+              esp32/src/test_wheel_diag_hint.cpp \
+              -o /tmp/test_wheel_diag_hint
+            /tmp/test_wheel_diag_hint
+
+            echo "-- test_stm32_liveness.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_stm32_liveness.cpp \
+              -o /tmp/test_stm32_liveness
+            /tmp/test_stm32_liveness
+
+            echo "-- test_mode_sync.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
+              -o /tmp/test_mode_sync
+            /tmp/test_mode_sync
+
+            echo "-- test_mode_authority.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_mode_authority.cpp \
+              -o /tmp/test_mode_authority
+            /tmp/test_mode_authority
+
+            echo "-- test_motion_inhibit_decode.cpp"
+            g++ -std=c++17 -Wall -Wextra -DHOST_TEST \
+              esp32/src/test_motion_inhibit_decode.cpp \
+              -o /tmp/test_motion_inhibit_decode
+            /tmp/test_motion_inhibit_decode
+
+            echo "-- test_motion_inhibit_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/include \
+              esp32/src/test_motion_inhibit_view.cpp \
+              -o /tmp/test_motion_inhibit_view
+            /tmp/test_motion_inhibit_view
+
+            echo "-- test_boot_diag.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_boot_diag.cpp \
+              -o /tmp/test_boot_diag
+            /tmp/test_boot_diag
+
+            echo "-- test_rgb_diag_timing.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/include \
+              esp32/src/test_rgb_diag_timing.cpp \
+              -o /tmp/test_rgb_diag_timing
+            /tmp/test_rgb_diag_timing
+
+            echo "-- test_twai_recovery.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_twai_recovery.cpp \
+              -o /tmp/test_twai_recovery
+            /tmp/test_twai_recovery
+
+            echo "-- test_eps_limits_contract.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_eps_limits_contract.cpp \
+              -o /tmp/test_eps_limits_contract
+            /tmp/test_eps_limits_contract
+
+            echo "-- test_wheel_traction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_wheel_traction.cpp \
+              -o /tmp/test_wheel_traction
+            /tmp/test_wheel_traction
+
+            echo "-- test_display_supervisor.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_supervisor.cpp \
+              -o /tmp/test_display_supervisor
+            /tmp/test_display_supervisor
+
+            echo "-- test_steering_diag_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_steering_diag_view.cpp \
+              -o /tmp/test_steering_diag_view
+            /tmp/test_steering_diag_view
+
+            echo "-- test_relay_health_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include -ICore/Inc \
+              esp32/src/test_relay_health_view.cpp Core/Src/relay_health_diag.c \
+              -o /tmp/test_relay_health_view
+            /tmp/test_relay_health_view
+
+            echo "-- test_ina226_ch5_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include -ICore/Inc \
+              esp32/src/test_ina226_ch5_view.cpp Core/Src/ina226_channel_diag.c \
+              -o /tmp/test_ina226_ch5_view
+            /tmp/test_ina226_ch5_view
+
+            echo "-- test_frame_parity_cross.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -DHOST_TEST \
+              -ICore/Inc -Iesp32/src -Iesp32/include \
+              esp32/src/test_frame_parity_cross.cpp \
+              -o /tmp/test_frame_parity_cross
+            /tmp/test_frame_parity_cross
+
+            echo "-- test_display_recovery.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_recovery.cpp \
+              -o /tmp/test_display_recovery
+            /tmp/test_display_recovery
+
+            echo "-- test_ack_tracker.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_ack_tracker.cpp \
+              -o /tmp/test_ack_tracker
+            /tmp/test_ack_tracker
+
+            echo "-- test_ack_fifo.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_ack_fifo.cpp \
+              -o /tmp/test_ack_fifo
+            /tmp/test_ack_fifo
+          } | tee artifacts/tests/esp32-host-tests.txt
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-tests
+          path: artifacts/tests/
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install ARM GCC toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Build STM32 firmware
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/build
+          make clean
+          make -j2 2>&1 | tee artifacts/build/stm32-make.txt
+
+      - name: Build ESP32 firmware (PlatformIO)
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/build
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --user platformio
+          export PATH="$HOME/.local/bin:$PATH"
+          (
+            cd esp32
+            pio run -e esp32s3
+          ) 2>&1 | tee artifacts/build/esp32-platformio.txt
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: artifacts/build/
+
+  integrity-check:
+    runs-on: ubuntu-latest
+    needs: [tests, build]
+    env:
+      EXPECTED_HAL_VERSION: "V1.2.2"
+    steps:
+      - uses: actions/checkout@v6
+        with:
           fetch-depth: 0
 
-      - name: Verify and apply audited source patch
-        shell: bash
+      - name: Run integrity checks
+        run: ./scripts/check_integrity.sh
+
+  optional-codeql:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install ARM GCC toolchain
         run: |
-          set -euo pipefail
-          base=027727b6b33f63de571d9a4623ea6cdd43bca022
-          git merge-base --is-ancestor "$base" HEAD
-          unexpected="$(git diff --name-only "$base"..HEAD | grep -Ev '^\.github/pr441_patch/chunk[0-9]+$|^\.github/workflows/(firmware-validation|apply-pr441-hardening|apply-pr441-hardening-pr)\.yml$' || true)"
-          if [ -n "$unexpected" ]; then
-            echo "Unexpected files changed after audited base:"
-            echo "$unexpected"
-            exit 1
-          fi
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
 
-          cat .github/pr441_patch/chunk* > /tmp/pr441-hardening.patch.b64
-          base64 -d /tmp/pr441-hardening.patch.b64 | gzip -d > /tmp/pr441-hardening.patch
-          echo "bd735d20f9e19defb231989eb6a099ead20a5fc9f1868dae2b0ea628107fc8f8  /tmp/pr441-hardening.patch" | sha256sum -c -
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: cpp
+          build-mode: manual
 
-          # Apply the exact audited patch except workflow files. GitHub Actions'
-          # token cannot update workflows; those are finalized separately via
-          # the GitHub connector after this source commit is published.
-          git apply --check --exclude='.github/workflows/*' /tmp/pr441-hardening.patch
-          git apply --exclude='.github/workflows/*' /tmp/pr441-hardening.patch
-          git diff --check -- Core Makefile STM32G474RETX_FLASH.ld esp32
-
-      - name: Run critical safety policy tests
-        shell: bash
+      - name: Build STM32 firmware for CodeQL
         run: |
-          set -euo pipefail
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
-            -Ianalysis_artifacts/stubs -ICore/Inc \
-            Core/Src/test_can_rx_policy.c -o /tmp/test_can_rx_policy
-          /tmp/test_can_rx_policy
+          make clean
+          make -j2
 
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
-            -Ianalysis_artifacts/stubs -ICore/Inc \
-            Core/Src/test_holdover_service_policy.c \
-            -o /tmp/test_holdover_service_policy
-          /tmp/test_holdover_service_policy
-
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
-            -DRC_OVERRIDE_ENABLED=0 -Ianalysis_artifacts/stubs -ICore/Inc \
-            Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
-            -o /tmp/test_rc_arbiter_disabled
-          /tmp/test_rc_arbiter_disabled
-
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
-            -DRC_OVERRIDE_ENABLED=1 -Ianalysis_artifacts/stubs -ICore/Inc \
-            Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
-            -o /tmp/test_rc_arbiter_enabled
-          /tmp/test_rc_arbiter_enabled
-
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
-            -Ianalysis_artifacts/stubs -ICore/Inc \
-            Core/Src/test_gear_limits.c Core/Src/gear_limits_store.c -lm \
-            -o /tmp/test_gear_limits
-          /tmp/test_gear_limits
-
-          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
-            esp32/src/test_hmi_steering_polarity.cpp \
-            -o /tmp/test_hmi_steering_polarity
-          /tmp/test_hmi_steering_polarity
-
-          python3 scripts/check_cubeide_source_exclusions.py
-
-      - name: Publish source-only fast-forward commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "PR441 Hardening Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add Core Makefile STM32G474RETX_FLASH.ld esp32
-          git diff --cached --check
-          git commit -m "fix: harden local authority, CAN and NVM safety"
-          git push origin HEAD:fix/disable-rc-bench
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
