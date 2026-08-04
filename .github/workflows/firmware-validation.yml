@@ -40,13 +40,11 @@ jobs:
           base64 -d /tmp/pr441-hardening.patch.b64 | gzip -d > /tmp/pr441-hardening.patch
           echo "bd735d20f9e19defb231989eb6a099ead20a5fc9f1868dae2b0ea628107fc8f8  /tmp/pr441-hardening.patch" | sha256sum -c -
 
-          git apply --check /tmp/pr441-hardening.patch
-          git apply /tmp/pr441-hardening.patch
-
-          # GitHub Actions' token cannot update workflow files. Keep the current
-          # workflow/staging files untouched here; they are finalized through
-          # the GitHub connector after the audited source commit is published.
-          git restore --source=HEAD -- .github/workflows
+          # Apply the exact audited patch except workflow files. GitHub Actions'
+          # token cannot update workflows; those are finalized separately via
+          # the GitHub connector after this source commit is published.
+          git apply --check --exclude='.github/workflows/*' /tmp/pr441-hardening.patch
+          git apply --exclude='.github/workflows/*' /tmp/pr441-hardening.patch
           git diff --check -- Core Makefile STM32G474RETX_FLASH.ld esp32
 
       - name: Run critical safety policy tests
