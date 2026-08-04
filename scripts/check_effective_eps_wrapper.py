@@ -167,8 +167,7 @@ assert direction_block_open >= 0, 'direction coast block missing'
 # The opening brace must belong to the direction-coast if() — verify that only
 # whitespace (no other token) sits between the condition end and the brace.
 direction_interstitial = body[direction_coast.end():direction_block_open]
-import re as _re
-assert not _re.search(r'\S', direction_interstitial), (
+assert not re.search(r'\S', direction_interstitial), (
     'direction-coast opening brace must immediately follow the if() condition, '
     f'not be separated by non-whitespace: {direction_interstitial!r}'
 )

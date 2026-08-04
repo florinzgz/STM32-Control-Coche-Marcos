@@ -32,7 +32,7 @@
 /* Safety_GetState() is called by GearLimitsStore_Save(); provide a stub
  * that always returns STANDBY so the write-context guard passes in tests. */
 #ifndef SAFETY_SYSTEM_H
-typedef enum { SYS_STATE_STANDBY = 2 } SystemState_t;
+typedef enum { SYS_STATE_STANDBY = 1 } SystemState_t;
 typedef enum { SAFETY_ERROR_NONE = 0 } Safety_Error_t;
 SystemState_t Safety_GetState(void) { return SYS_STATE_STANDBY; }
 Safety_Error_t Safety_GetError(void) { return SAFETY_ERROR_NONE; }
