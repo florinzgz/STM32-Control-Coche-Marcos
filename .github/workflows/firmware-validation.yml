@@ -10,11 +10,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr441-hardening-apply
+  group: pr441-hardening-source-apply
   cancel-in-progress: false
 
 jobs:
-  apply-pr441-hardening:
+  apply-pr441-hardening-source:
     if: github.event.pull_request.number == 441
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +23,7 @@ jobs:
           ref: fix/disable-rc-bench
           fetch-depth: 0
 
-      - name: Verify and apply audited patch
+      - name: Verify and apply audited source patch
         shell: bash
         run: |
           set -euo pipefail
@@ -40,13 +40,14 @@ jobs:
           base64 -d /tmp/pr441-hardening.patch.b64 | gzip -d > /tmp/pr441-hardening.patch
           echo "bd735d20f9e19defb231989eb6a099ead20a5fc9f1868dae2b0ea628107fc8f8  /tmp/pr441-hardening.patch" | sha256sum -c -
 
-          git show "$base":.github/workflows/firmware-validation.yml > .github/workflows/firmware-validation.yml
           git apply --check /tmp/pr441-hardening.patch
           git apply /tmp/pr441-hardening.patch
-          git rm -r .github/pr441_patch \
-            .github/workflows/apply-pr441-hardening.yml \
-            .github/workflows/apply-pr441-hardening-pr.yml
-          git diff --check
+
+          # GitHub Actions' token cannot update workflow files. Keep the current
+          # workflow/staging files untouched here; they are finalized through
+          # the GitHub connector after the audited source commit is published.
+          git restore --source=HEAD -- .github/workflows
+          git diff --check -- Core Makefile STM32G474RETX_FLASH.ld esp32
 
       - name: Run critical safety policy tests
         shell: bash
@@ -88,12 +89,13 @@ jobs:
 
           python3 scripts/check_cubeide_source_exclusions.py
 
-      - name: Publish final fast-forward commit
+      - name: Publish source-only fast-forward commit
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "PR441 Hardening Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add -A
+          git add Core Makefile STM32G474RETX_FLASH.ld esp32
+          git diff --cached --check
           git commit -m "fix: harden local authority, CAN and NVM safety"
           git push origin HEAD:fix/disable-rc-bench
