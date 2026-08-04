@@ -62,7 +62,9 @@ public:
     /// Only repaints if the angle changed.
     static void drawSteering(TFT_eSPI& tft,
                              int16_t angleRaw,
-                             int16_t prevAngleRaw);
+                             int16_t prevAngleRaw,
+                             bool valid,
+                             bool prevValid);
 
 private:
     /// Static premium body silhouette (gradient shoulders, soft shadow, hint

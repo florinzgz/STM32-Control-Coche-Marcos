@@ -33,8 +33,10 @@ _Min_Stack_Size = 0x400;     /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 480K
-  /* Pages 120-127 reserved for NVM data — not part of FLASH region.
+  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 472K
+  /* Pages 118-127 reserved for NVM data — not part of FLASH region.
+   * Page 118 (0x08076000): gear_limits_store.c redundant journal page
+   * Page 119 (0x08077000): pedal_cal_store.c redundant journal page
    * Page 120 (0x08078000): battery_limits_store.c battery V thresholds
    * Page 121 (0x08079000): drive_tuning_store.c   ramp/creep tuning
    * Page 122 (0x0807A000): gear_limits_store.c   gear power limits (D2/D1/R)
@@ -194,5 +196,5 @@ SECTIONS
  * tweak silently widens the FLASH region.  Standard GNU ld syntax,
  * no impact on the existing toolchain.
  * --------------------------------------------------------------------*/
-ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x0807A000,
-       "Code overlaps NVM page 122 (gear_limits). Reduce code size or revisit FLASH=488K reservation.")
+ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x08076000,
+       "Code overlaps NVM page 118. Reduce code size or revisit FLASH=472K reservation.")

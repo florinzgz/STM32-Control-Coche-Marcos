@@ -35,6 +35,8 @@
 #include "traction_limit_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
+#include "can_rx_policy.h"
+#include "service_hold_policy.h"
 #include <math.h>
 #include <string.h>
 
@@ -325,46 +327,52 @@ static void CAN_ConfigureFilters(void)
     FDCAN_FilterTypeDef filter = {0};
 
 #if defined(CAN_LOOPBACK_TEST) && CAN_LOOPBACK_TEST
-    /* ---- Accept ALL standard IDs (0x000–0x7FF) for loopback/test ---- */
     filter.IdType       = FDCAN_STANDARD_ID;
-    filter.FilterIndex  = 0;
+    filter.FilterIndex  = 0U;
     filter.FilterType   = FDCAN_FILTER_RANGE;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = 0x000;
-    filter.FilterID2    = 0x7FF;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-#else
-    /* Filter 0: Accept ALL standard IDs via mask filter.
-     * FDCAN_FILTER_MASK with FilterID2 (mask) = 0x000 means every bit
-     * is don't-care, so all 11-bit IDs are accepted into RXFIFO0.
-     * CAN_ProcessMessages() only acts on known IDs (switch/case);
-     * unrecognised IDs are silently discarded.
-     *
-     * Using a single mask-based accept-all filter guarantees the
-     * FDCAN message-RAM filter element is valid and the peripheral
-     * can leave INIT mode cleanly after HAL_FDCAN_Start().          */
-    filter.IdType       = FDCAN_STANDARD_ID;
-    filter.FilterIndex  = 0;
-    filter.FilterType   = FDCAN_FILTER_MASK;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = 0x000;
-    filter.FilterID2    = 0x000;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-#endif
-
-    /* Accept all non-matching IDs (standard and extended) into FIFO0.
-     * Together with the mask-based accept-all filter at index 0, this
-     * provides a belt-and-suspenders acceptance path that guarantees
-     * FDCAN receives frames from the ESP32 regardless of ID.
-     * Safety: CAN_ProcessMessages() only acts on known message IDs
-     * (via its switch/case); any unexpected ID is silently discarded.
-     * Remote frames remain rejected.                                  */
+    filter.FilterID1    = 0x000U;
+    filter.FilterID2    = 0x7FFU;
+    (void)HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
     can_init_diag.filter_global = (uint8_t)HAL_FDCAN_ConfigGlobalFilter(
-        &hfdcan1,
-        FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching std */
-        FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching ext */
-        FDCAN_REJECT_REMOTE,
-        FDCAN_REJECT_REMOTE);
+        &hfdcan1, FDCAN_REJECT, FDCAN_REJECT,
+        FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+#else
+    static const uint16_t accepted_ids[] = {
+        CAN_ID_HEARTBEAT_ESP32,
+        CAN_ID_CMD_THROTTLE,
+        CAN_ID_CMD_STEERING,
+        CAN_ID_CMD_MODE,
+#if RC_OVERRIDE_ENABLED
+        CAN_ID_CMD_RC_OVERRIDE,
+#endif
+        CAN_ID_SERVICE_CMD,
+        CAN_ID_OBSTACLE_DISTANCE,
+        CAN_ID_OBSTACLE_SAFETY,
+        CAN_ID_CMD_LED,
+        CAN_ID_CMD_SYSTEM_SHUTDOWN,
+        CAN_ID_CMD_SENSOR_MAP_TEMP
+    };
+    const uint8_t count = (uint8_t)(sizeof(accepted_ids) / sizeof(accepted_ids[0]));
+    for (uint8_t i = 0U, fi = 0U; i < count; i = (uint8_t)(i + 2U), ++fi) {
+        filter.IdType       = FDCAN_STANDARD_ID;
+        filter.FilterIndex  = fi;
+        filter.FilterType   = FDCAN_FILTER_DUAL;
+        filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+        filter.FilterID1    = accepted_ids[i];
+        filter.FilterID2    = (i + 1U < count) ? accepted_ids[i + 1U]
+                                               : accepted_ids[i];
+        if (HAL_FDCAN_ConfigFilter(&hfdcan1, &filter) != HAL_OK) {
+            can_init_diag.filter_global = (uint8_t)HAL_ERROR;
+            return;
+        }
+    }
+
+    /* Reject every non-whitelisted standard ID and every extended ID. */
+    can_init_diag.filter_global = (uint8_t)HAL_FDCAN_ConfigGlobalFilter(
+        &hfdcan1, FDCAN_REJECT, FDCAN_REJECT,
+        FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+#endif
 }
 
 /* ================================================================== */
@@ -1796,6 +1804,7 @@ static bool            pedalcal_session_ready = false;
 static bool            pedalcal_service_active = false;
 static bool            pedalcal_service_pending = false;
 static bool            pedalcal_service_hold = false;
+static ServiceHoldPolicy pedalcal_hold_policy = {0};
 
 bool CAN_PedalCalServiceActive(void)
 {
@@ -1946,6 +1955,7 @@ static bool pedalcal_service_enter(void)
     if (!en_pwm_locked || !relay_off) {
         pedalcal_service_pending = false;
         pedalcal_service_hold = true;
+        ServiceHoldPolicy_Reset(&pedalcal_hold_policy);
         Relay_PowerDown();
         (void)Traction_CalibrationLock();
         return false;
@@ -1967,6 +1977,7 @@ static void pedalcal_service_exit(void)
     pedalcal_service_pending = false;
     pedalcal_service_active = false;
     pedalcal_service_hold = true;
+    ServiceHoldPolicy_Reset(&pedalcal_hold_policy);
     Relay_PowerDown();
     (void)Traction_CalibrationLock();
 }
@@ -1986,7 +1997,8 @@ static void pedalcal_service_hold_update(void)
                             c.pedal_plausible && c.pedal_released &&
                             !c.critical_error && !c.safe_state &&
                             !c.emergency && !c.can_loss;
-    if (safe_rearm) {
+    if (ServiceHoldPolicy_Update(&pedalcal_hold_policy, safe_rearm,
+                                 HAL_GetTick())) {
         pedalcal_service_hold = false;
     }
 }
@@ -2425,55 +2437,21 @@ static uint8_t   gearlim_pending_r_resp  = 0;
 static uint8_t   gearlim_burst_left     = 0;
 static uint32_t  gearlim_next_tx_ms     = 0;
 
-/* Read-only eligibility for editing a pending gear profile.  Editing RAM is
- * allowed in STANDBY or in a clean, stopped ACTIVE/DEGRADED state, but never
- * while another service lock owns the powertrain.  Flash is gated separately. */
+/* Gear-profile mutations are deliberately STANDBY-only.  QUERY remains
+ * read-only and exempt, but SET/SAVE/RESET must never stage or persist values
+ * from ACTIVE/DEGRADED even when the vehicle happens to be stopped. */
 static bool gearlim_edit_allowed(void)
 {
-    PedalCalConds c;
-    pedalcal_build_conds(&c);
-    const SystemState_t st = Safety_GetState();
-    const bool state_ok = (st == SYS_STATE_STANDBY) ||
-                          (st == SYS_STATE_ACTIVE) ||
-                          (st == SYS_STATE_DEGRADED);
-    return state_ok && !CAN_PedalCalServiceActive() &&
+    return Safety_GetState() == SYS_STATE_STANDBY &&
            Safety_GetError() == SAFETY_ERROR_NONE &&
-           c.gear_park_or_neutral && !c.wheels_moving &&
-           c.pedal_plausible && c.pedal_released &&
-           !c.critical_error && !c.safe_state && !c.emergency &&
-           !c.can_loss;
+           !CAN_PedalCalServiceActive();
 }
 
-/* Acquire a physically confirmed movement lock for flash persistence.  True
- * STANDBY already owns the same safe output state; ACTIVE/DEGRADED must enter
- * the confirmed service phase.  The caller must release an acquired lock. */
-static bool gearlim_acquire_save_lock(bool *service_owned)
+static bool gearlim_save_context_confirmed(void)
 {
-    if (service_owned == NULL) return false;
-    *service_owned = false;
-    if (!gearlim_edit_allowed()) return false;
-
-    if (Safety_GetState() == SYS_STATE_STANDBY) {
-        return ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U) &&
-               (Traction_GetFinalPwmPct() == 0U);
-    }
-
-    if (!pedalcal_service_enter()) return false;
-    if (!CAN_PedalCalServiceConfirmed() ||
-        !Traction_IsCalibrationLockConfirmed() ||
-        ((Safety_GetRelayStatusByte() & (1U << 1)) != 0U) ||
-        Traction_GetFinalPwmPct() != 0U) {
-        pedalcal_service_exit();
-        return false;
-    }
-
-    *service_owned = true;
-    return true;
-}
-
-static void gearlim_release_save_lock(bool service_owned)
-{
-    if (service_owned) pedalcal_service_exit();
+    return gearlim_edit_allowed() &&
+           ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U) &&
+           Traction_GetFinalPwmPct() == 0U;
 }
 
 static void gearlim_seed_pending_if_needed(void)
@@ -2672,8 +2650,7 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
             return;
         }
 
-        bool service_owned = false;
-        if (!gearlim_acquire_save_lock(&service_owned)) {
+        if (!gearlim_save_context_confirmed()) {
             CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
             return;
         }
@@ -2684,7 +2661,6 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
                                                  gearlim_pending_d1_resp,
                                                  gearlim_pending_r_resp);
         if (!saved) {
-            gearlim_release_save_lock(service_owned);
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -2696,13 +2672,11 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
                                        gearlim_pending_d1_resp,
                                        gearlim_pending_r_resp);
         gearlim_pending_seeded = false;
-        gearlim_release_save_lock(service_owned);
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
     case GEAR_LIMIT_OP_RESET_DEFAULTS: {
-        bool service_owned = false;
-        if (!gearlim_acquire_save_lock(&service_owned)) {
+        if (!gearlim_save_context_confirmed()) {
             CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
             return;
         }
@@ -2713,7 +2687,6 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
                                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
                                                  GEAR_RESPONSE_R_DEFAULT_PCT);
         if (!saved) {
-            gearlim_release_save_lock(service_owned);
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -2724,7 +2697,6 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
                                        GEAR_RESPONSE_D1_DEFAULT_PCT,
                                        GEAR_RESPONSE_R_DEFAULT_PCT);
         gearlim_pending_seeded = false;
-        gearlim_release_save_lock(service_owned);
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
@@ -3581,10 +3553,16 @@ void CAN_ProcessMessages(void) {
         for (uint8_t i = 0; i < 8; i++)
             ((volatile uint8_t *)g_CAN_RxData)[i] = rx_payload[i];
         
-        sat_inc_u32(&can_stats.rx_count);
-        last_any_rx_tick = HAL_GetTick();  /* Global CAN watchdog refresh */
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
-        
+        if (!CanRxPolicy_Accept(rx_hdr.Identifier, rx_hdr.IdType,
+                                rx_hdr.RxFrameType, msg_len)) {
+            sat_inc_u32(&can_stats.rx_errors);
+            continue;
+        }
+
+        sat_inc_u32(&can_stats.rx_count);
+        last_any_rx_tick = HAL_GetTick();  /* Valid protocol traffic only. */
+
         /* Parse received messages based on ID.
          *
          * All actuator commands are validated through the safety layer
@@ -3687,16 +3665,10 @@ void CAN_ProcessMessages(void) {
                 break;
 
             case CAN_ID_CMD_RC_OVERRIDE:
-                /* RC override demand from ESP32 / FlySky iBUS bridge.
-                 * The handler ONLY updates the arbiter's internal state
-                 * + watchdog timestamp.  It never calls Traction_SetDemand
-                 * or Steering_SetAngle directly: the 50 ms main scheduler
-                 * (throttle) and the 0x101 handler above (steering) apply
-                 * the value through Safety_Validate* downstream.
-                 *
-                 * Failsafe: if frames stop arriving, RcArbiter_IsActive()
-                 * returns false within RC_OVERRIDE_TIMEOUT_MS (200 ms)
-                 * and local control resumes automatically.                */
+                /* Bench/local-only images compile the STM32 authority path
+                 * out as well as the ESP32 iBUS parser.  RcArbiter_OnFrame()
+                 * records the injection as rejected and never refreshes an
+                 * authority watchdog when RC_OVERRIDE_ENABLED == 0. */
                 RcArbiter_OnFrame(rx_payload, msg_len, HAL_GetTick());
                 break;
                 
@@ -4364,6 +4336,9 @@ void CAN_CheckBusOff(void)
         }
 
         CAN_ConfigureFilters();
+        if (can_init_diag.filter_global != HAL_OK) {
+            return;  /* Filter/firewall setup failed — retry next interval. */
+        }
 
         if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
             return;  /* Notification setup failed — retry next interval */

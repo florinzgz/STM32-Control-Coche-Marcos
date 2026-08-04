@@ -6277,7 +6277,7 @@ void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
 
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
-    char b[24];
+    char b[32];
 
     auto putVal = [&](int16_t x, int16_t y, const char* s, uint16_t col) {
         tft.setTextColor(col, ui::COL_BG);   // opaque bg overwrites in place

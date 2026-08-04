@@ -11,6 +11,7 @@
 
 #include "gear_display.h"
 #include "render_trace.h"
+#include <cstdio>
 
 namespace ui {
 
@@ -71,23 +72,39 @@ void GearDisplay::drawStatic(TFT_eSPI& tft) {
 }
 
 // -------------------------------------------------------------------------
-// Update highlighted gear — only the two changed pills are repainted.
+// Update applied/requested state.  The whole compact row is repainted because
+// a mismatch is safety-significant and must never be hidden by differential
+// pill updates.
 // -------------------------------------------------------------------------
-void GearDisplay::draw(TFT_eSPI& tft, Gear current, Gear previous) {
-    if (current == previous) return;
-
-    uint8_t prevIdx = static_cast<uint8_t>(previous);
-    if (prevIdx < NUM_GEARS) {
-        drawGearPill(tft, prevIdx, false);
+void GearDisplay::draw(TFT_eSPI& tft,
+                       Gear applied, Gear previousApplied,
+                       bool appliedValid, bool previousAppliedValid,
+                       Gear requested, Gear previousRequested) {
+    if (applied == previousApplied &&
+        appliedValid == previousAppliedValid &&
+        requested == previousRequested) {
+        return;
     }
 
-    uint8_t curIdx = static_cast<uint8_t>(current);
-    if (curIdx < NUM_GEARS) {
-        drawGearPill(tft, curIdx, true);
+    const uint8_t appliedIdx = static_cast<uint8_t>(applied);
+    for (uint8_t i = 0; i < NUM_GEARS; ++i) {
+        drawGearPill(tft, i, appliedValid && i == appliedIdx);
     }
 
-    tft.setTextDatum(TL_DATUM);
+    char status[40];
+    const uint8_t reqIdx = static_cast<uint8_t>(requested);
+    const char* reqText = reqIdx < NUM_GEARS ? PILL_LABELS[reqIdx] : "?";
+    const char* appText = appliedValid && appliedIdx < NUM_GEARS
+                            ? PILL_LABELS[appliedIdx] : "--";
+    snprintf(status, sizeof(status), "LEVER %s  APPLIED %s", reqText, appText);
+    const bool mismatch = !appliedValid || requested != applied;
+    tft.fillRect(CLUSTER_X, DGEAR_Y + DGEAR_H + 1, CLUSTER_W, 9, COL_BG);
+    tft.setTextDatum(TC_DATUM);
     tft.setTextSize(1);
+    tft.setTextColor(!appliedValid ? COL_AMBER :
+                     (mismatch ? COL_RED : COL_GREEN), COL_BG);
+    tft.drawString(status, CLUSTER_X + CLUSTER_W / 2, DGEAR_Y + DGEAR_H + 1);
+    tft.setTextDatum(TL_DATUM);
 }
 
 } // namespace ui

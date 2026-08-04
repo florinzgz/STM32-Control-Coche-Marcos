@@ -39,6 +39,14 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Build-time authority gate.  Bench/local-only images keep the entire STM32
+ * override path disabled even if a valid-looking 0x10A frame is injected.
+ * A future RC-enabled image must opt in explicitly with
+ * -DRC_OVERRIDE_ENABLED=1 and pass the dedicated enabled-path tests. */
+#ifndef RC_OVERRIDE_ENABLED
+#define RC_OVERRIDE_ENABLED 0
+#endif
+
 /* Strict failsafe window.  If no valid 0x10A is parsed within this many
  * milliseconds, the arbiter falls back to local sources unconditionally.
  * 200 ms = 4× nominal 50 ms cadence → tolerates a 3-frame burst loss
@@ -51,7 +59,7 @@ extern "C" {
  *   byte1: throttle_pct   0..100  (>100 → frame rejected)
  *   byte2: steer_lo       int16 LE, signed 1/10 degree
  *   byte3: steer_hi
- *   byte4: seq            rolling counter (informational; freeze tolerated)
+ *   byte4: seq            rolling counter (must advance while override is active)
  */
 #define RC_OVERRIDE_DLC          5U
 

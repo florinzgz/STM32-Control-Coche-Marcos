@@ -39,10 +39,12 @@ void PedalBar::drawStatic(TFT_eSPI& tft) {
 // so the filled span is rebuilt as a single clean pass (no overlapping
 // partial fills → no flicker).  Only repaints when the value changes.
 // -------------------------------------------------------------------------
-void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
-    if (pedalPct == prevPct) return;
+void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct,
+                    bool stale, bool prevStale) {
+    if (pedalPct == prevPct && stale == prevStale) return;
 
     uint8_t pct = (pedalPct > 100) ? 100 : pedalPct;
+    if (stale) pct = 0U;
 
     int16_t x0     = DTHR_X + 2;
     int16_t y      = DTHR_Y + 2;
@@ -67,8 +69,9 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
 
     // Live percentage (right-aligned, on the caption row).
     char buf[FMT_BUF_SMALL];
-    snprintf(buf, sizeof(buf), "%u%%", pct);
-    uint16_t valCol = throttleGradColor(pct);
+    if (stale) snprintf(buf, sizeof(buf), "--");
+    else       snprintf(buf, sizeof(buf), "%u%%", pct);
+    uint16_t valCol = stale ? COL_GRAY : throttleGradColor(pct);
     tft.setTextDatum(TR_DATUM);
     tft.setTextSize(2);
     tft.setTextColor(valCol, COL_BG);

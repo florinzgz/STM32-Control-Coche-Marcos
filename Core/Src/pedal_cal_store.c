@@ -1,44 +1,21 @@
 /**
   ****************************************************************************
   * @file    pedal_cal_store.c
-  * @brief   Persistent pedal calibration storage — flash persistence
+  * @brief   Power-loss-tolerant pedal calibration persistence
   *
-  * Stores the calibrated pedal ADC endpoints (min / max) in flash page
-  * 124 (0x0807C000, 4 KB) of the STM32G474RE.  A 32-bit CRC32 checksum
-  * plus a 32-bit magic word provide integrity, identical to the
-  * proven steering_cal_store.c implementation.
-  *
-  * Page 124 is reserved for pedal calibration only and is separate
-  * from page 123 (sensor map), 125 (error log), 126 (steering
-  * calibration), and 127 (EPS parameters), so each NVM slot can be
-  * erased independently.
-  *
-  * Safety invariants:
-  *   - Flash data alone NEVER authorises ACTIVE or clears
-  *     startup_inhibit.  Calibration only changes the raw→% mapping.
-  *   - On CRC / magic / range failure: silent fallback to defaults
-  *     (PedalCal_IsValid() returns false; caller keeps compile-time
-  *     50 / 4000 endpoints).  Boot is never blocked.
-  *   - Plausibility, FAULT_LO/HI thresholds, EMA, rate-of-change,
-  *     and dual-sample consistency checks in Pedal_Update() are
-  *     unchanged and apply equally to default and calibrated maps.
-  *
-  * The flash write primitive set (HAL_FLASH_Unlock, HAL_FLASHEx_Erase,
-  * HAL_FLASH_Program with FLASH_TYPEPROGRAM_DOUBLEWORD, HAL_FLASH_Lock)
-  * is modelled 1:1 on steering_cal_store.c — no IRQ disables, no RTOS
-  * primitives, no watchdog interaction.
+  * Two independent flash pages are alternated.  The previously committed page
+  * is never erased until the replacement record has been fully programmed,
+  * committed, locked and read back.  A reset during erase/program therefore
+  * leaves at least one valid calibration record available at the next boot.
   ****************************************************************************
   */
 
 #include "pedal_cal_store.h"
 #include "stm32g4xx_hal.h"
 #include "safety_system.h"
+#include <stddef.h>
 #include <string.h>
 
-#include <stddef.h>
-
-/* Optional dependency for host fixtures; present in the productive image.
- * Only the confirmed ACTIVE phase can authorize persistence. */
 extern bool CAN_PedalCalServiceConfirmed(void) __attribute__((weak));
 
 static bool pcal_service_lock_confirmed(void)
@@ -50,92 +27,124 @@ static bool pcal_service_lock_confirmed(void)
 static bool pcal_write_context_authorized(bool standby_context)
 {
     const SystemState_t state = Safety_GetState();
-    if (standby_context) return state == SYS_STATE_STANDBY;
+    if (standby_context) {
+        return state == SYS_STATE_STANDBY &&
+               Safety_GetError() == SAFETY_ERROR_NONE;
+    }
     return pcal_service_lock_confirmed() &&
            (state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED) &&
            Safety_GetError() == SAFETY_ERROR_NONE;
 }
 
-/* ---- Flash layout ----
- * STM32G474RE: 512 KB flash, 128 pages of 4 KB each.
- * Page 124 starts at 0x0807C000 (bank 1).
- * Single slot at the beginning of the page.                       */
-#define PCAL_FLASH_PAGE        124U
-#define PCAL_FLASH_BASE        0x0807C000U
+#define PCAL_PRIMARY_PAGE       124U
+#define PCAL_PRIMARY_BASE       0x0807C000U
+#define PCAL_BACKUP_PAGE        119U
+#define PCAL_BACKUP_BASE        0x08077000U
+#define PCAL_LEGACY_MAGIC       0x50434C31U  /* PCL1 */
+#define PCAL_JOURNAL_MAGIC      0x50434C32U  /* PCL2 */
+#define PCAL_VALID_FLAG         0xA5U
+#define PCAL_COMMIT_MARKER      0xC04D17EDU
+#define PCAL_WRITE_MIN_INTERVAL_MS 1000U
 
-#define PCAL_MAGIC             0x50434C31U   /* "PCL1" */
-#define PCAL_VALID_FLAG        0xA5U
-
-/* ---- Flash-wear rate limit ---------------------------------------
- * Minimum interval between consecutive successful flash writes on
- * page 124.  Protects the page from wear caused by a CAN-frame
- * storm or a buggy/malicious caller spamming PEDAL_CAL_OP_SAVE /
- * PEDAL_CAL_OP_RESET_DEFAULTS.  Mirrors the SMAP_WRITE_MIN_INTERVAL_MS
- * guard in sensor_map_store.c (single source of truth pattern).
- * 1 s is far slower than any human-driven calibration cadence yet
- * still permits the legitimate SAVE-then-RESET test flow.          */
-#define PCAL_WRITE_MIN_INTERVAL_MS  1000U
-
-/* ---- On-flash slot format ----
- * Exactly 16 bytes, double-word aligned, identical structure pattern
- * to stcal_flash_slot_t.                                              */
 typedef struct {
-    uint32_t magic;          /* Must equal PCAL_MAGIC                   */
-    uint16_t adc_min;        /* Calibrated ADC count at pedal released  */
-    uint16_t adc_max;        /* Calibrated ADC count at pedal pressed   */
-    uint8_t  validity_flag;  /* PCAL_VALID_FLAG when slot is committed  */
-    uint8_t  reserved[3];    /* Padding / future use                    */
-    uint32_t checksum;       /* CRC32 of all fields before this field   */
-} pcal_flash_slot_t;
+    uint32_t magic;
+    uint16_t adc_min;
+    uint16_t adc_max;
+    uint8_t  validity_flag;
+    uint8_t  reserved[3];
+    uint32_t checksum;
+} pcal_legacy_slot_t;
 
-/* Compile-time guarantee that the on-flash layout is exactly 16 bytes
- * — the struct is double-word aligned so HAL_FLASH_Program can
- * write it in two 8-byte doublewords.                                  */
-typedef char pcal_size_check_[(sizeof(pcal_flash_slot_t) == 16) ? 1 : -1];
+typedef struct {
+    uint32_t magic;
+    uint32_t generation;
+    uint16_t adc_min;
+    uint16_t adc_max;
+    uint32_t reserved;
+    uint32_t checksum;
+    uint32_t commit_marker;
+} pcal_journal_slot_t;
 
-/* ---- RAM state ---- */
-static bool     pcal_flash_valid   = false;   /* Flash slot passed CRC + range */
-static uint16_t pcal_stored_min    = 0;
-static uint16_t pcal_stored_max    = 0;
+typedef char pcal_legacy_size_check_[(sizeof(pcal_legacy_slot_t) == 16U) ? 1 : -1];
+typedef char pcal_journal_size_check_[(sizeof(pcal_journal_slot_t) == 24U) ? 1 : -1];
 
-/* ---- Flash-wear rate-limit bookkeeping ----
- * pcal_has_written_once stays false until the first successful flash
- * write, so the very first PedalCal_Save() call after boot is never
- * gated by the timestamp (matches sensor_map_store.c semantics).
- * pcal_last_write_tick uses HAL_GetTick() and is compared with
- * unsigned modular subtraction so wrap-around at ~49.7 days is safe. */
-static bool     pcal_has_written_once = false;
-static uint32_t pcal_last_write_tick  = 0U;
+static bool     pcal_flash_valid;
+static uint16_t pcal_stored_min;
+static uint16_t pcal_stored_max;
+static uint32_t pcal_generation;
+static uint32_t pcal_active_base;
+static bool     pcal_has_written_once;
+static uint32_t pcal_last_write_tick;
 
-/* ---- CRC32 (same polynomial as steering_cal_store / eps_params) ---- */
 static uint32_t pcal_crc32(const void *data, uint32_t len)
 {
     const uint8_t *p = (const uint8_t *)data;
     uint32_t crc = 0xFFFFFFFFU;
-    for (uint32_t i = 0; i < len; i++) {
+    for (uint32_t i = 0U; i < len; ++i) {
         crc ^= p[i];
-        for (int b = 0; b < 8; b++) {
-            if (crc & 1U)
-                crc = (crc >> 1) ^ 0xEDB88320U;
-            else
-                crc >>= 1;
+        for (uint8_t bit = 0U; bit < 8U; ++bit) {
+            crc = (crc & 1U) ? ((crc >> 1) ^ 0xEDB88320U) : (crc >> 1);
         }
     }
     return crc ^ 0xFFFFFFFFU;
 }
 
-/* ---- Validate a flash slot (integrity only) ---- */
-static bool pcal_slot_integrity_ok(const pcal_flash_slot_t *slot)
+static bool pcal_generation_newer(uint32_t a, uint32_t b)
 {
-    if (slot->magic != PCAL_MAGIC) return false;
-    if (slot->validity_flag != PCAL_VALID_FLAG) return false;
-    uint32_t crc = pcal_crc32(slot, offsetof(pcal_flash_slot_t, checksum));
-    return (crc == slot->checksum);
+    return (int32_t)(a - b) > 0;
 }
 
-/* ==================================================================
- *  Public API
- * ================================================================== */
+static bool pcal_legacy_ok(const pcal_legacy_slot_t *slot)
+{
+    return slot != NULL && slot->magic == PCAL_LEGACY_MAGIC &&
+           slot->validity_flag == PCAL_VALID_FLAG &&
+           pcal_crc32(slot, offsetof(pcal_legacy_slot_t, checksum)) ==
+               slot->checksum &&
+           PedalCal_Validate(slot->adc_min, slot->adc_max);
+}
+
+static bool pcal_journal_ok(const pcal_journal_slot_t *slot)
+{
+    return slot != NULL && slot->magic == PCAL_JOURNAL_MAGIC &&
+           slot->commit_marker == PCAL_COMMIT_MARKER &&
+           pcal_crc32(slot, offsetof(pcal_journal_slot_t, checksum)) ==
+               slot->checksum &&
+           PedalCal_Validate(slot->adc_min, slot->adc_max);
+}
+
+typedef struct {
+    bool valid;
+    uint16_t adc_min;
+    uint16_t adc_max;
+    uint32_t generation;
+    uint32_t base;
+} pcal_candidate_t;
+
+static pcal_candidate_t pcal_read_candidate(uint32_t base)
+{
+    pcal_candidate_t out = {0};
+    const pcal_journal_slot_t *journal =
+        (const pcal_journal_slot_t *)(uintptr_t)base;
+    if (pcal_journal_ok(journal)) {
+        out.valid = true;
+        out.adc_min = journal->adc_min;
+        out.adc_max = journal->adc_max;
+        out.generation = journal->generation;
+        out.base = base;
+        return out;
+    }
+
+    const pcal_legacy_slot_t *legacy =
+        (const pcal_legacy_slot_t *)(uintptr_t)base;
+    if (pcal_legacy_ok(legacy)) {
+        out.valid = true;
+        out.adc_min = legacy->adc_min;
+        out.adc_max = legacy->adc_max;
+        out.generation = 0U;
+        out.base = base;
+    }
+    return out;
+}
 
 bool PedalCal_Validate(uint16_t adc_min, uint16_t adc_max)
 {
@@ -143,39 +152,36 @@ bool PedalCal_Validate(uint16_t adc_min, uint16_t adc_max)
     if (adc_min < PEDAL_CAL_MIN_LIMIT) return false;
 #endif
     if (adc_max > PEDAL_CAL_MAX_LIMIT) return false;
-    if (adc_max <= adc_min)            return false;
-    if ((uint32_t)(adc_max - adc_min) < PEDAL_CAL_RANGE_MIN) return false;
-    return true;
+    if (adc_max <= adc_min) return false;
+    return (uint32_t)(adc_max - adc_min) >= PEDAL_CAL_RANGE_MIN;
 }
 
 void PedalCal_Init(void)
 {
     pcal_flash_valid = false;
-    pcal_stored_min  = 0;
-    pcal_stored_max  = 0;
-
-    /* Reset the rate-limit bookkeeping on every init so a re-init
-     * never starts inside a cool-down window collapsed across reboot
-     * — the first PedalCal_Save() call will always be allowed.
-     * Matches sensor_map_store.c semantics.                          */
+    pcal_stored_min = 0U;
+    pcal_stored_max = 0U;
+    pcal_generation = 0U;
+    pcal_active_base = 0U;
     pcal_has_written_once = false;
-    pcal_last_write_tick  = 0U;
+    pcal_last_write_tick = 0U;
 
-    const pcal_flash_slot_t *slot =
-        (const pcal_flash_slot_t *)PCAL_FLASH_BASE;
-
-    if (!pcal_slot_integrity_ok(slot))
-        return;  /* silent fallback to defaults */
-
-    /* Range validation — even an integrity-good slot must satisfy
-     * the hard limits before we trust it.  Out-of-range values are
-     * treated identically to a corrupt slot: silent fallback.        */
-    if (!PedalCal_Validate(slot->adc_min, slot->adc_max))
-        return;
+    const pcal_candidate_t primary = pcal_read_candidate(PCAL_PRIMARY_BASE);
+    const pcal_candidate_t backup = pcal_read_candidate(PCAL_BACKUP_BASE);
+    const pcal_candidate_t *best = NULL;
+    if (primary.valid) best = &primary;
+    if (backup.valid &&
+        (best == NULL || pcal_generation_newer(backup.generation,
+                                                best->generation))) {
+        best = &backup;
+    }
+    if (best == NULL) return;
 
     pcal_flash_valid = true;
-    pcal_stored_min  = slot->adc_min;
-    pcal_stored_max  = slot->adc_max;
+    pcal_stored_min = best->adc_min;
+    pcal_stored_max = best->adc_max;
+    pcal_generation = best->generation;
+    pcal_active_base = best->base;
 }
 
 bool PedalCal_IsValid(void)
@@ -185,135 +191,96 @@ bool PedalCal_IsValid(void)
 
 void PedalCal_GetStored(uint16_t *adc_min, uint16_t *adc_max)
 {
-    if (adc_min) *adc_min = pcal_stored_min;
-    if (adc_max) *adc_max = pcal_stored_max;
+    if (adc_min != NULL) *adc_min = pcal_stored_min;
+    if (adc_max != NULL) *adc_max = pcal_stored_max;
+}
+
+static bool pcal_program_page(uint32_t page, uint32_t base,
+                              const pcal_journal_slot_t *slot)
+{
+    if (HAL_FLASH_Unlock() != HAL_OK) return false;
+
+    FLASH_EraseInitTypeDef erase = {0};
+    erase.TypeErase = FLASH_TYPEERASE_PAGES;
+    erase.Banks = FLASH_BANK_1;
+    erase.Page = page;
+    erase.NbPages = 1U;
+
+    uint32_t page_error = 0U;
+    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &page_error);
+    if (status != HAL_OK || page_error != 0xFFFFFFFFU) {
+        (void)HAL_FLASH_Lock();
+        return false;
+    }
+
+    const uint64_t *src = (const uint64_t *)slot;
+    for (uint32_t i = 0U; i < 3U; ++i) {
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                                   base + (i * 8U), src[i]);
+        if (status != HAL_OK) {
+            (void)HAL_FLASH_Lock();
+            return false;
+        }
+    }
+
+    if (HAL_FLASH_Lock() != HAL_OK) return false;
+
+    const pcal_journal_slot_t *readback =
+        (const pcal_journal_slot_t *)(uintptr_t)base;
+    return memcmp(readback, slot, sizeof(*slot)) == 0 &&
+           pcal_journal_ok(readback);
 }
 
 bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
 {
-    /* Defense in depth: persistence is permitted only in true STANDBY or
-     * while the confirmed pedal-calibration service lock owns a clean ACTIVE /
-     * DEGRADED recovery state.  SAFE, ERROR, LIMP_HOME and any active safety
-     * error remain hard blocks even if a stale caller attempts SAVE. */
-    const bool standby_context = (Safety_GetState() == SYS_STATE_STANDBY);
-    if (!pcal_write_context_authorized(standby_context))
+    const bool standby_context = Safety_GetState() == SYS_STATE_STANDBY;
+    if (!pcal_write_context_authorized(standby_context) ||
+        !PedalCal_Validate(adc_min, adc_max)) {
         return false;
+    }
 
-    /* Hard validation gate — never persist out-of-range endpoints. */
-    if (!PedalCal_Validate(adc_min, adc_max))
-        return false;
-
-    /* ----------------------------------------------------------------------
-     * Flash-wear guard #1 — no-op elision.
-     *
-     * If the requested endpoints exactly match the slot currently held in
-     * flash (validated at boot or by the last successful Save), the caller's
-     * desired state is already persisted.  Return success without erasing
-     * the page.  This is what makes PEDAL_CAL_OP_RESET_DEFAULTS idempotent:
-     * after the first RESET_DEFAULTS, subsequent RESET_DEFAULTS frames
-     * cannot wear page 124 because the slot already contains the defaults.
-     *
-     * Consistent with sensor_map_store.c::SensorMapStore_Save.
-     * --------------------------------------------------------------------*/
-    if (pcal_flash_valid &&
-        pcal_stored_min == adc_min &&
+    if (pcal_flash_valid && pcal_stored_min == adc_min &&
         pcal_stored_max == adc_max) {
         return true;
     }
 
-    /* ----------------------------------------------------------------------
-     * Flash-wear guard #2 — minimum write interval.
-     *
-     * Reject successive writes that arrive closer together than
-     * PCAL_WRITE_MIN_INTERVAL_MS (1 s).  Pedal calibration is strictly
-     * user-driven (UI button press); writes faster than 1 Hz can only
-     * come from a bug, replay, or injected traffic.  The first call
-     * (pcal_has_written_once == false) is exempt so a freshly booted
-     * unit can always persist its first calibration.
-     * HAL_GetTick() is monotonic and wraps every ~49.7 days; the
-     * unsigned modular subtraction below is correct across the wrap.
-     * --------------------------------------------------------------------*/
-    uint32_t now = HAL_GetTick();
+    const uint32_t now = HAL_GetTick();
     if (pcal_has_written_once &&
-        (uint32_t)(now - pcal_last_write_tick) < PCAL_WRITE_MIN_INTERVAL_MS) {
+        (uint32_t)(now - pcal_last_write_tick) <
+            PCAL_WRITE_MIN_INTERVAL_MS) {
         return false;
     }
 
-    /* Build the slot in RAM.
-     * Aligned to 8 bytes so the (uint64_t *)&slot cast below performs
-     * naturally-aligned doubleword loads (required by ARMv7-M LDRD and
-     * safe for HAL_FLASH_Program's FLASH_TYPEPROGRAM_DOUBLEWORD).
-     * _Alignas is the C11 standard keyword (same as _Static_assert
-     * used elsewhere in this project) — no compiler-specific syntax. */
-    _Alignas(8) pcal_flash_slot_t slot;
+    _Alignas(8) pcal_journal_slot_t slot;
     memset(&slot, 0, sizeof(slot));
-    slot.magic         = PCAL_MAGIC;
-    slot.adc_min       = adc_min;
-    slot.adc_max       = adc_max;
-    slot.validity_flag = PCAL_VALID_FLAG;
-    slot.checksum      = pcal_crc32(&slot,
-                                    offsetof(pcal_flash_slot_t, checksum));
+    slot.magic = PCAL_JOURNAL_MAGIC;
+    slot.generation = pcal_flash_valid ? pcal_generation + 1U : 1U;
+    slot.adc_min = adc_min;
+    slot.adc_max = adc_max;
+    slot.checksum = pcal_crc32(&slot,
+                               offsetof(pcal_journal_slot_t, checksum));
+    slot.commit_marker = PCAL_COMMIT_MARKER;
 
-    /* Revalidate immediately before entering the erase/program window. */
-    if (!pcal_write_context_authorized(standby_context))
-        return false;
+    /* Last cancelable gate.  Once the inactive page is erased the old active
+     * page remains valid, and this transaction is completed without further
+     * authorization exits. */
+    if (!pcal_write_context_authorized(standby_context)) return false;
 
-    /* Unlock flash */
-    HAL_StatusTypeDef status = HAL_FLASH_Unlock();
-    if (status != HAL_OK)
-        return false;
+    const bool target_backup = pcal_active_base == PCAL_PRIMARY_BASE;
+    const uint32_t target_page = target_backup ? PCAL_BACKUP_PAGE
+                                                : PCAL_PRIMARY_PAGE;
+    const uint32_t target_base = target_backup ? PCAL_BACKUP_BASE
+                                                : PCAL_PRIMARY_BASE;
+    if (!pcal_program_page(target_page, target_base, &slot)) return false;
 
-    /* Erase page 124 */
-    FLASH_EraseInitTypeDef erase;
-    erase.TypeErase = FLASH_TYPEERASE_PAGES;
-    erase.Banks     = FLASH_BANK_1;
-    erase.Page      = PCAL_FLASH_PAGE;
-    erase.NbPages   = 1;
-
-    uint32_t page_err = 0;
-    status = HAL_FLASHEx_Erase(&erase, &page_err);
-    if (status != HAL_OK || page_err != 0xFFFFFFFFU) {
-        HAL_FLASH_Lock();
-        return false;
-    }
-    if (!pcal_write_context_authorized(standby_context)) {
-        HAL_FLASH_Lock();
-        return false;
-    }
-
-    /* Write the slot (double-word aligned).
-     * STM32G4 flash requires 64-bit (double-word) writes.
-     * Slot is exactly 16 bytes → 2 doublewords.                      */
-    uint32_t slot_size   = sizeof(pcal_flash_slot_t);
-    uint32_t dword_count = (slot_size + 7U) / 8U;
-    const uint64_t *src  = (const uint64_t *)&slot;
-
-    for (uint32_t i = 0; i < dword_count; i++) {
-        if (!pcal_write_context_authorized(standby_context)) {
-            HAL_FLASH_Lock();
-            return false;
-        }
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                   PCAL_FLASH_BASE + (i * 8U), src[i]);
-        if (status != HAL_OK) {
-            HAL_FLASH_Lock();
-            return false;
-        }
-    }
-
-    HAL_FLASH_Lock();
-    if (!pcal_write_context_authorized(standby_context))
-        return false;
-
-    /* Update RAM state + rate-limit bookkeeping (matches the pattern
-     * in sensor_map_store.c::SensorMapStore_Save).  Refresh the
-     * timestamp to HAL_GetTick() at completion rather than reusing
-     * `now`, so the cool-down window starts from the moment the page
-     * is actually committed (page erase + program ≈ 25 ms).         */
-    pcal_flash_valid      = true;
-    pcal_stored_min       = adc_min;
-    pcal_stored_max       = adc_max;
+    const pcal_journal_slot_t *readback =
+        (const pcal_journal_slot_t *)(uintptr_t)target_base;
+    pcal_flash_valid = true;
+    pcal_stored_min = readback->adc_min;
+    pcal_stored_max = readback->adc_max;
+    pcal_generation = readback->generation;
+    pcal_active_base = target_base;
     pcal_has_written_once = true;
-    pcal_last_write_tick  = HAL_GetTick();
+    pcal_last_write_tick = HAL_GetTick();
     return true;
 }
