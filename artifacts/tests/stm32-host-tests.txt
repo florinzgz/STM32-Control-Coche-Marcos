@@ -115,11 +115,11 @@
   ok:   steer: module on -> OK
 === 43 run, 0 failed ===
 -- test_gear_limits.c
-test_gear_limits: 35 run, 0 failed
+test_gear_limits: 37 run, 0 failed
 -- test_drive_tuning.c
 test_drive_tuning: 25 run, 0 failed
 -- test_battery_limits.c
-test_battery_limits: 23 run, 0 failed
+test_battery_limits: 42 run, 0 failed
 -- test_steering_cal_store.c
 
 32 tests run, 0 failed
@@ -139,7 +139,7 @@ steering_centering_frame: 136 run, 0 failed
 -- test_pedal_cal_limits.c
 === pedal_cal_limits: 6 run, 0 failed ===
 -- test_pedal_cal_session.c
-pedal_cal_session: 102 run, 0 failed
+pedal_cal_session: 108 run, 0 failed
 -- test_pedalcal_can_frame.c
 pedalcal_can_frame: 59 run, 0 failed
 -- test_pedalcal_query_readonly.c
@@ -177,6 +177,9 @@ TC26: release 53 -> 0 output not frozen
 --- busoff_recovery tests: 174 run, 0 failed ---
 -- test_motion_inhibit.c
 --- motion_inhibit tests: 43 run, 0 failed ---
+-- test_standby_mode_sync_gate.c
+
+--- standby_mode_sync_gate: 40 run, 0 failed ---
 -- test_wheel_effort.c
 wheel_effort: 145 run, 0 failed
 -- test_relay_degraded.c
@@ -207,7 +210,8 @@ RESULT: PASS
 -- test_centering_boot_traction.c
 ==== test_centering_boot_traction: 94 run, 0 failed ====
 -- test_centering_pc12_gate.c
-==== test_centering_pc12_gate: 90 run, 0 failed ====
+SKIP wrapper-specific PB5/CH5 cases (base FSM linkage)
+==== test_centering_pc12_gate: 91 run, 0 failed ====
 -- test_steering_supervisor.c
 ==== test_steering_supervisor: 178 run, 0 failed ====
 -- test_steering_supervisor.c (STEERING_Z_REQUIRED=1)

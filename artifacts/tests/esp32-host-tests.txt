@@ -1,0 +1,504 @@
+-- test_relay_audio.cpp
+Running relay_audio unit tests...
+
+
+--- relay_audio tests: 71 run, 0 failed ---
+-- test_traction_switch.cpp
+Running traction_switch unit tests...
+
+
+--- traction_switch tests: 31 run, 0 failed ---
+-- test_remote_control.cpp
+
+----------------------------------------
+test_remote_control: 40 run, 0 failed
+----------------------------------------
+-- test_rc_disabled.cpp
+RC disabled stubs: PASS
+-- test_shifter_input.cpp
+Running shifter_input unit tests...
+
+  test_init_success...
+  test_init_failure...
+  test_read_park...
+  test_read_reverse...
+  test_read_neutral_implicit...
+  test_error_backoff...
+  test_recovery...
+  test_neutral_on_error...
+  test_connected_reflects_init...
+  test_init_failure_backoff...
+  test_diag_valid_counters...
+  test_diag_reject_addr_nack...
+  test_diag_reject_no_data...
+
+--- shifter_input tests: 39 run, 0 failed ---
+-- test_pedal_cal_decode.cpp
+=== test_pedal_cal_decode ===
+  ok:   pending frame decodes
+  ok:   pending frame rawAdc
+  ok:   pending frame min accepts 0
+  ok:   pending frame max decoded
+  ok:   pending frame pedal percent
+  ok:   stored frame decodes
+  ok:   stored frame min decoded
+  ok:   stored frame max decoded
+  ok:   stored frame preserves pending min
+  ok:   diag frame decodes
+  ok:   diag frame rawAdc2
+  ok:   diag frame diffRaw
+  ok:   diag frame rejectReason
+  ok:   diag frame preserves last rawAdc
+  ok:   short frame rejected
+=== 15 run, 0 failed ===
+-- test_pedal_cal_session_view.cpp
+pedal_cal_session_view: 43 run, 0 failed
+-- test_pedal_decode.cpp
+=== test_pedal_decode ===
+  ok:   DLC1: decodes
+  ok:   DLC1: percent decoded
+  ok:   DLC1: fault defaults ok
+  ok:   DLC1: not extended
+  ok:   percent clamps to 100
+  ok:   DLC4: percent decoded
+  ok:   DLC4: plausible set
+  ok:   DLC4: not contradictory
+  ok:   DLC4: raw ADC LE decoded
+  ok:   DLC4: extended flag set
+  ok:   DLC4 fault: not plausible
+  ok:   DLC4 fault: contradictory
+  ok:   DLC4 fault: raw ADC decoded
+  ok:   DLC0: rejected
+=== 14 run, 0 failed ===
+-- test_wheel_diag_decode.cpp
+=== test_wheel_diag_decode ===
+  ok:   DLC8: decodes valid
+  ok:   DLC8: FL/FR/RL/RR reasons decoded
+  ok:   DLC8: gpio mask decoded
+  ok:   DLC8: fault mask decoded (RR)
+  ok:   DLC8: manual flag decoded
+  ok:   DLC8: sequence decoded
+  ok:   DLC7: decodes valid
+  ok:   DLC7: FL reason NO_PULSE
+  ok:   DLC7: fault mask decoded
+  ok:   DLC7: flags default 0 (byte7 absent)
+  ok:   shortDLC: not decoded
+  ok:   shortDLC: drop counter incremented
+  ok:   shortDLC: last DLC recorded
+  ok:   label OK
+  ok:   label NO_PULSE=SIN PULSO
+  ok:   label MANUAL_MOVEMENT=MANUAL
+  ok:   label MISMATCH=DISCREPA
+  ok:   label DISABLED_STATE=DESHAB.
+  ok:   label UNKNOWN=?
+  ok:   label out-of-range clamps to ?
+=== 20 run, 0 failed ===
+-- test_wheel_diag_hint.cpp
+=== test_wheel_diag_hint ===
+  ok:   faultMask FR MISMATCH -> contains 'FR MIS'
+  ok:   faultMask FR -> FAULT (red)
+  ok:   FAULT colour is red
+  ok:   faultMask RL NO_PULSE -> contains 'RL NP'
+  ok:   faultMask RL -> FAULT
+  ok:   two faults -> contains both 'FR MIS' and 'RL NP'
+  ok:   two faults -> FAULT
+  ok:   manual movement -> contains 'MAN'
+  ok:   manual movement -> INFO (not FAULT)
+  ok:   INFO colour is cyan
+  ok:   all OK/DIS -> 'WD: OK'
+  ok:   all OK/DIS -> OK (green)
+  ok:   OK colour is green
+  ok:   invalid -> 'WD: NO DATA'
+  ok:   invalid -> NODATA
+  ok:   age>2s -> 'WD: STALE'
+  ok:   age>2s -> STALE
+  ok:   latched DTC + no live fault -> 'CLR DTC'
+  ok:   CLR DTC -> WARN (amber)
+  ok:   WARN colour is amber
+  ok:   tiny buffer stays NUL-terminated (no overflow)
+  ok:   tiny buffer still classified FAULT
+  ok:   faultMask beats manual -> 'FR S-LO'
+  ok:   faultMask beats manual -> FAULT
+  ok:   small buffer stays NUL-terminated
+  ok:   NUL is within bounds
+  ok:   small buffer keeps clean prefix 'WD: FL MIS'
+  ok:   small buffer still classified FAULT
+  ok:   short OK
+  ok:   short NP
+  ok:   short S-HI
+  ok:   short S-LO
+  ok:   short MIS
+  ok:   short RATE
+  ok:   short MAN
+  ok:   short DIS
+  ok:   short UNK
+  ok:   out-of-range -> UNK
+=== 38 run, 0 failed ===
+-- test_stm32_liveness.cpp
+
+15 tests run, 0 failed
+-- test_mode_sync.cpp
+
+--- mode_sync tests: 160 run, 0 failed ---
+-- test_mode_authority.cpp
+
+--- mode_authority tests: 81 run, 0 failed ---
+-- test_motion_inhibit_decode.cpp
+=== test_motion_inhibit_decode ===
+  ok:   DLC8: decodes valid
+  ok:   DLC8: reason bitfield decoded
+  ok:   DLC8: PWM_ZERO bit set
+  ok:   DLC8: TORQUE_LIMITED bit set
+  ok:   DLC8: system state decoded
+  ok:   DLC8: gear decoded
+  ok:   DLC8: operator demand decoded
+  ok:   DLC8: effective demand decoded
+  ok:   DLC8: final PWM decoded
+  ok:   DLC8: power_ready flag decoded
+  ok:   DLC8: obstacle flag clear
+  ok:   DLC8: degraded level decoded
+  ok:   signed: decoded
+  ok:   signed: negative demand
+  ok:   signed: negative effective
+  ok:   signed: obstacle flag decoded
+  ok:   signed: power_ready clear
+  ok:   shortDLC: not decoded
+  ok:   relaySeq: decoded
+  ok:   relaySeq: in-progress decoded
+  ok:   relaySeq: power_ready still decoded
+  ok:   relaySeq: degraded level still decoded
+  ok:   relaySeq: complete decoded
+  ok:   relaySeq: complete value
+  ok:   relaySeq: idle decoded
+  ok:   relaySeq: idle value
+  ok:   extReason: decoded
+  ok:   extReason: startup bit
+  ok:   extReason: battery bit
+  ok:   extReason: service bit
+=== 30 run, 0 failed ===
+-- test_motion_inhibit_view.cpp
+=== test_motion_inhibit_view ===
+  ok:   never: valid=false -> NEVER
+  ok:   never: text
+  ok:   never: invalid ignores age
+  ok:   valid: 50ms old -> VALID
+  ok:   valid: text
+  ok:   valid: exactly at timeout boundary is VALID
+  ok:   valid: ageMs == 50
+  ok:   stale: 301ms old -> STALE
+  ok:   stale: text
+  ok:   stale: 10s old -> STALE
+  ok:   wrap: now numerically less than stamp
+  ok:   wrap: ageMs still 40ms
+  ok:   wrap: 40ms across wrap -> VALID
+  ok:   wrap: ageMs 400ms across wrap
+  ok:   wrap: 400ms across wrap -> STALE
+  ok:   single: one label
+  ok:   single: correct label
+  ok:   single: buffer count 1
+  ok:   single: buffer text
+  ok:   multi: three labels
+  ok:   multi: order[0]
+  ok:   multi: order[1]
+  ok:   multi: order[2]
+  ok:   multi: buffer count 3
+  ok:   multi: joined buffer
+  ok:   zero: no labels
+  ok:   zero: buffer count 0
+  ok:   zero: buffer says NONE
+  ok:   all: 16 labels
+  ok:   relay: IDLE
+  ok:   relay: IN PROGRESS
+  ok:   relay: COMPLETE
+  ok:   relay: reserved 3 -> UNKNOWN
+  ok:   state: BOOT
+  ok:   state: STANDBY
+  ok:   state: ACTIVE
+  ok:   state: DEGRADED
+  ok:   state: SAFE
+  ok:   state: ERROR
+  ok:   state: LIMP HOME
+  ok:   state: unknown -> UNKNOWN
+  ok:   motion: BOOT no-motion
+  ok:   motion: STANDBY no-motion
+  ok:   motion: SAFE no-motion
+  ok:   motion: ERROR no-motion
+  ok:   motion: unknown no-motion
+  ok:   motion: ACTIVE permits
+  ok:   motion: DEGRADED permits
+  ok:   motion: LIMP_HOME permits
+  ok:   gear: PARK
+  ok:   gear: D2
+  ok:   gear: unknown
+  ok:   overflow: reports all 16 active
+  ok:   overflow: last byte NUL-terminated
+  ok:   overflow: length within bounds
+  ok:   overflow: 1-byte buffer -> empty NUL
+  ok:   overflow: null buffer safe
+=== 57 run, 0 failed ===
+-- test_boot_diag.cpp
+=== boot_diag tests ===
+  ok:   name PowerOn
+  ok:   name Software
+  ok:   name Panic
+  ok:   name Watchdog
+  ok:   name Brownout
+  ok:   name DeepSleep
+  ok:   name External
+  ok:   name Unknown
+  ok:   PowerOn is normal
+  ok:   Software is normal
+  ok:   DeepSleep is normal
+  ok:   External is normal
+  ok:   Unknown is normal
+  ok:   Panic is abnormal
+  ok:   Watchdog is abnormal
+  ok:   Brownout is abnormal
+  ok:   format returns positive length
+  ok:   returned length matches strlen
+  ok:   contains reset=PowerOn
+  ok:   power-on abnormal=0
+  ok:   contains heap_free
+  ok:   contains heap_min
+  ok:   contains heap_size
+  ok:   contains heap_maxblk
+  ok:   contains stack_loop
+  ok:   contains stack_render
+  ok:   brownout name in output
+  ok:   brownout abnormal=1
+  ok:   render stack 0 sentinel
+  ok:   null buf -> 0
+  ok:   zero len -> 0
+  ok:   truncated length < buffer size
+  ok:   truncated string fits buffer
+=== 33 run, 0 failed ===
+-- test_rgb_diag_timing.cpp
+PASS: NORMAL uses the default 10 s test window
+PASS: non-RGB_DIAG modes use the default 10 s test window
+PASS: RGB_DIAG uses the extended test window
+PASS: full RGB_DIAG sequence is 10 x 2500 ms = 25 s
+PASS: RGB_DIAG window covers the complete 25 s sequence
+PASS: RGB_DIAG window is in the requested 27-30 s band
+PASS: 10 s window CANNOT reach phase 4 (front OFF)
+PASS: 10 s window CANNOT reach phase 5 (rear RED)
+PASS: 10 s window CANNOT reach phase 9 (rear OFF)
+PASS: 10 s window leaves part of the sequence undiagnosed
+PASS: RGB_DIAG window reaches phase 4 (front OFF)
+PASS: RGB_DIAG window reaches phase 5 (rear RED)
+PASS: RGB_DIAG window reaches phase 8 (rear WHITE)
+PASS: RGB_DIAG window reaches phase 9 (rear OFF)
+PASS: RGB_DIAG window reaches ALL 10 phases before auto-restore
+--- rgb_diag_timing tests: 15 run, 0 failed ---
+-- test_twai_recovery.cpp
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: healthy RUNNING is idle
+PASS: no bus-off counted while healthy
+PASS: no episode active while healthy
+PASS: first BUS_OFF tick initiates recovery
+PASS: lifetime bus-off counted once
+PASS: staying BUS_OFF does not re-count event
+PASS: attempt 1 immediate
+PASS: no retry before fast interval elapses
+PASS: no retry before fast interval elapses
+PASS: no retry before fast interval elapses
+PASS: no retry before fast interval elapses
+PASS: reached the fast-retry budget
+PASS: slow backoff ignores a fast-sized gap
+PASS: slow backoff retries after the slow interval
+PASS: STOPPED during episode requests twai_start()
+PASS: RUNNING alone does not confirm recovery
+PASS: RUNNING after episode is probation
+PASS: episode still active during probation
+PASS: attempt counter NOT reset merely on RUNNING
+PASS: recovery confirmed after stable window
+PASS: episode cleared after confirmation
+PASS: attempts reset after confirmation
+PASS: one confirmed recovery recorded
+PASS: idle after confirmation
+PASS: heartbeat gap prevents confirmation
+PASS: still unconfirmed after gap
+PASS: partial window after gap does not confirm
+PASS: full window after gap confirms
+PASS: oscillation never falsely confirms
+PASS: still trying to recover under oscillation
+PASS: each bus-off event counted
+PASS: keeps retrying (unbounded) during long disconnection
+PASS: auto-recovers after reconnection
+PASS: lifetime count survives recovery
+PASS: new bus-off increments lifetime count
+PASS: confirmation works across millis() wrap
+--- twai_recovery tests: 55 run, 0 failed ---
+-- test_eps_limits_contract.cpp
+
+--- eps_limits_contract tests: 63 run, 0 failed ---
+-- test_wheel_traction.cpp
+=== test_wheel_traction ===
+  ok:   all-zero currents -> all 0%
+  ok:   balanced currents -> all 100%
+  ok:   dominant wheel -> 100%
+  ok:   half current -> 50%
+  ok:   quarter current -> 25%
+  ok:   zero current -> 0%
+  ok:   max -> 100%
+  ok:   100/300 rounds to 33%
+  ok:   large equal maxima clamp to 100%
+  ok:   outputs bounded 0..100
+
+10 checks, 0 failed
+-- test_display_supervisor.cpp
+display_supervisor: 66 run, 0 failed
+-- test_steering_diag_view.cpp
+steering_diag_view: 42 run, 0 failed
+-- test_relay_health_view.cpp
+=== test_relay_health_view ===
+Scenario: STM32 pack -> ESP32 decode
+Scenario: MOTIVO / SOLUCIÓN / confidence text
+Scenario: freshness
+Checks: 53, Failures: 0
+RESULT: PASS
+-- test_ina226_ch5_view.cpp
+Scenario: STM32 pack -> ESP32 decode (OK)
+Scenario: powered but idle zero current stays OK
+Scenario: reversed current stays signed
+Scenario: MISSING (no ack) is not n/d (no frame)
+Scenario: stale + never-sampled
+Scenario: present but no shunt drop under demand
+Scenario: text maps non-empty + freshness
+ina226_ch5_view: 63 run, 0 failed
+RESULT: PASS
+-- test_frame_parity_cross.cpp
+frame_parity_cross: 87 run, 0 failed
+-- test_display_recovery.cpp
+display_recovery: 179 run, 0 failed
+-- test_ack_tracker.cpp
+ack_tracker: 59 checks, 0 failed
+-- test_ack_fifo.cpp
+ack_fifo: 72 checks, 0 failed
+-- test_cmd_mode_transaction.cpp
+
+--- cmd_mode_transaction tests: 84 run, 0 failed ---
+-- test_knight_rider.cpp
+== KNIGHT_RIDER (KITT) scanner tests ==
+  count=70: travel 0..69, rebound OK
+  count=72: travel 0..71, rebound OK
+  count=50: travel 0..49, rebound OK
+  count=2: travel 0..1, rebound OK
+ALL TESTS PASSED
+-- test_decor_modes.cpp
+== Decorative LED mode tests ==
+  count=1: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK
+  count=2: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK
+  count=70: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK
+  count=72: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK
+  count=1: RGB_DIAG per-strip R/G/B/W/OFF isolation OK
+  count=2: RGB_DIAG per-strip R/G/B/W/OFF isolation OK
+  count=70: RGB_DIAG per-strip R/G/B/W/OFF isolation OK
+  count=72: RGB_DIAG per-strip R/G/B/W/OFF isolation OK
+ALL TESTS PASSED
+-- test_obstacle_sensor.cpp (TOFSense-M 8x8)
+=== test_obstacle_sensor (TOFSense-M 8x8 multi-pixel only) ===
+  test_frame_constants...
+  test_checksum_computation...
+  test_frame_header_bytes...
+  test_config_defaults...
+  test_init_resets_state...
+  test_uniform_distance...
+  test_minimum_distance_used...
+  test_invalid_pixels_skipped...
+  test_all_invalid_no_target...
+  test_all_zero_distance_no_target...
+  test_bad_checksum_rejected...
+  test_emergency_zone...
+  test_zone_boundaries...
+  test_zone_boundaries_exhaustive...
+  test_above_max_range_clamped...
+  test_below_min_range_clamped...
+  test_small_distance_um_to_mm...
+  test_warmup_period...
+  test_frame_timeout...
+  test_no_frame_ever_received_timeout...
+  test_single_point_rejected...
+  test_update_count_increments...
+  test_mixed_validity...
+  test_dispersion_calculation...
+  test_too_few_pixels...
+  test_exactly_min_valid_pixels...
+  test_high_dispersion...
+  test_unknown_function_mark_rejected...
+  test_wrong_pixel_count_rejected...
+  test_build_command_range_mode...
+  test_build_command_save_config...
+  test_build_command_buffer_too_small...
+  test_build_command_null_payload_rejected...
+  test_build_command_null_payload_zero_len_ok...
+  test_send_command_fails_without_tx_pin...
+  test_configure_long_range_fails_without_tx...
+  test_configure_long_range_succeeds_with_tx...
+  test_set_frame_rate_zero_rejected...
+  test_real_world_packet...
+  test_resync_after_corrupt...
+  test_rxbuf_overflow_protection...
+  test_avg_distance...
+  test_stuck_detection...
+  test_stuck_clears...
+  test_stuck_not_at_low_speed...
+  test_multiple_frames_last_wins...
+  test_custom_config_range...
+  test_4000mm_max_range...
+  test_20mm_min_range...
+  test_pixel_various_distances...
+  test_resync_skips_false_header...
+  test_resync_finds_valid_pair...
+
+165 tests run, 0 failed
+-- test_obstacle_sensor.cpp (TF-Mini Plus)
+=== test_obstacle_sensor (TF-Mini Plus 9-byte frames) ===
+  test_tfmini_config_defaults
+  test_tfmini_valid_frame
+  test_tfmini_cm_to_mm_conversion
+  test_tfmini_zero_distance_rejected
+  test_tfmini_max_distance_rejected
+  test_tfmini_low_strength_rejected
+  test_tfmini_bad_checksum_rejected
+  test_tfmini_range_clamping
+  test_tfmini_zone_emergency
+  test_tfmini_zone_boundaries_exhaustive
+  test_tfmini_non_blocking_cap
+  test_tfmini_resync_on_bad_header
+  test_tfmini_stuck_detection
+  test_tfmini_partial_frame_across_calls
+  test_tfmini_timeout_after_valid
+  test_tfmini_timeout_no_frame_ever
+  test_tfmini_header_byte_in_distance
+  test_tfmini_resync_with_header_in_payload
+  test_tfmini_mid_stream_start
+  test_tfmini_multiple_corrupt_recovery
+  test_tfmini_strength_at_threshold
+  test_tfmini_min_range_clamping
+  test_tfmini_overflow_large_distance
+  test_tfmini_timeout_clears_distance
+  test_build_command_range_mode...
+  test_build_command_save_config...
+  test_build_command_buffer_too_small...
+  test_build_command_null_payload_rejected...
+  test_build_command_null_payload_zero_len_ok...
+
+102 tests run, 0 failed
