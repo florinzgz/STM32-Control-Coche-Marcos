@@ -1,6 +1,7 @@
 name: PR436 Field Fixes
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
