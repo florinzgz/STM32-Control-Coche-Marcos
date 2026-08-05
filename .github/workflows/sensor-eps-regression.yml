@@ -124,8 +124,10 @@ jobs:
 
       - name: Gear-limit defaults and validation
         run: |
-          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -ICore/Inc \
-            Core/Src/test_gear_limits.c -o /tmp/test_gear_limits
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_gear_limits.c Core/Src/gear_limits_store.c \
+            -o /tmp/test_gear_limits
           /tmp/test_gear_limits
           grep -Eq '^#define GEAR_LIMIT_R_DEFAULT_PCT[[:space:]]+80U$' Core/Inc/gear_limits_store.h
           grep -Eq '^#define GEAR_LIMIT_R_MAX_PCT[[:space:]]+80U$' Core/Inc/gear_limits_store.h
