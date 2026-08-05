@@ -459,6 +459,49 @@ jobs:
               esp32/src/test_ack_fifo.cpp \
               -o /tmp/test_ack_fifo
             /tmp/test_ack_fifo
+
+            # PR441 audit: these four host suites existed in the tree but were
+            # never executed by any workflow, so regressions in the 0x102
+            # transaction owner, the decorative/KITT LED contracts and the
+            # obstacle-sensor frame parser could land undetected.
+            echo "-- test_cmd_mode_transaction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_cmd_mode_transaction.cpp \
+              -o /tmp/test_cmd_mode_transaction
+            /tmp/test_cmd_mode_transaction
+
+            echo "-- test_knight_rider.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_knight_rider.cpp \
+              -o /tmp/test_knight_rider
+            /tmp/test_knight_rider
+
+            echo "-- test_decor_modes.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_decor_modes.cpp \
+              -o /tmp/test_decor_modes
+            /tmp/test_decor_modes
+
+            echo "-- test_obstacle_sensor.cpp (TOFSense-M 8x8)"
+            g++ -std=c++17 -Wall -Wextra -Werror \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=0 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp \
+              esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tof
+            /tmp/test_obstacle_sensor_tof
+
+            echo "-- test_obstacle_sensor.cpp (TF-Mini Plus)"
+            # SENSOR_TYPE=1 selects the TF-Mini test list; the TOFSense-M
+            # 8x8-only cases stay compiled but uninvoked by design, so the
+            # unused-function diagnostic is suppressed for this variant only.
+            g++ -std=c++17 -Wall -Wextra -Werror -Wno-unused-function \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=1 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp \
+              esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tfmini
+            /tmp/test_obstacle_sensor_tfmini
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
