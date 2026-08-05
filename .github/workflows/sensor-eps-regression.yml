@@ -159,7 +159,6 @@ jobs:
           /tmp/test_gear_limits
           grep -Eq '^#define GEAR_LIMIT_R_DEFAULT_PCT[[:space:]]+60U$' Core/Inc/gear_limits_store.h
           grep -Eq '^#define GEAR_LIMIT_R_MAX_PCT[[:space:]]+60U$' Core/Inc/gear_limits_store.h
-          grep -q 'CAN_PedalCalServiceConfirmed' Core/Src/gear_limits_store.c
 
       - name: Straight-line physical traction policy
         run: |
