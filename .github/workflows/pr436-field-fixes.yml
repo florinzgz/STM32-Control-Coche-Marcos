@@ -1,6 +1,7 @@
 name: PR436 Field Fixes
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -40,7 +41,6 @@ on:
       - 'esp32/src/ui/ui_config.h'
       - 'analysis_artifacts/stubs/**'
       - '.github/workflows/pr436-field-fixes.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read

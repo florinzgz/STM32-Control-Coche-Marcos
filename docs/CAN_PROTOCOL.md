@@ -419,15 +419,20 @@ ID: 0x202  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 | 0 | `abs_active` | uint8_t | 0/1 | 1 = ABS interviniendo |
 | 1 | `tcs_active` | uint8_t | 0/1 | 1 = TCS interviniendo |
 | 2 | `error_code` | uint8_t | 0-13 | Safety_Error_t (mismo que heartbeat byte 3) |
+| 3 | `state` | uint8_t | - | Estado del sistema (`SYS_STATE_*`) |
+| 4 | `rx_errors` | uint8_t | 0-255 | Contador de errores RX FDCAN (saturado) |
+| 5 | `loop_peak_100us` | uint8_t | 0-255 | Pico de la tarea de 100 Hz, ×100 µs (255 = 25.5 ms) |
 
-**DLC:** 3
+**DLC:** 6 (transmitido). Los receptores DEBEN aceptar DLC ≥ 5; el byte 5 se
+añadió en la revisión 1.4 del contrato y un emisor anterior reporta 0 ("n/d").
+Definición única: `Core/Inc/status_safety_frame.h`.
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Ejemplo:**
 ```
-ID: 0x203  DLC: 3  Data: [0x01, 0x00, 0x02]
-// ABS activo, TCS inactivo, error=OVERTEMP(2)
+ID: 0x203  DLC: 6  Data: [0x01, 0x00, 0x02, 0x03, 0x00, 0x5F]
+// ABS activo, TCS inactivo, error=OVERTEMP(2), estado=3, 0 errores RX, pico 9.5 ms
 ```
 
 ---

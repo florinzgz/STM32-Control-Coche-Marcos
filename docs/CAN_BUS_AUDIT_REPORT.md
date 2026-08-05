@@ -98,7 +98,7 @@ Both sides are configured for:
 | 0x200 | STATUS_SPEED | 8 | 8 | — | — | ✅ |
 | 0x201 | STATUS_CURRENT | 8 | 8 | — | — | ✅ |
 | 0x202 | STATUS_TEMP | 5 | 5 | — | — | ✅ |
-| 0x203 | STATUS_SAFETY | 5 | 5 | — | — | ✅ |
+| 0x203 | STATUS_SAFETY | 6 | 6 | — | — | ✅ |
 | 0x204 | STATUS_STEERING | 3 | 3 | — | — | ✅ |
 | 0x205 | STATUS_TRACTION | 4 | 4 | — | — | ✅ |
 | 0x206 | STATUS_TEMP_MAP | 5 | 5 | — | — | ✅ |

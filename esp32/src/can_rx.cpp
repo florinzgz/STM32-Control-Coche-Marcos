@@ -91,7 +91,7 @@ static void decodeTemp(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 static void decodeSafety(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 5) return;
+    if (f.data_length_code < can::STATUS_SAFETY_DLC_RX_MIN) return;
     vehicle::SafetyData sd;
     sd.absActive  = f.data[0];
     sd.tcsActive  = f.data[1];
@@ -103,7 +103,7 @@ static void decodeSafety(const CanFrame& f, vehicle::VehicleData& data) {
     // Byte 5 (peak 100 Hz task duration ×100 µs): forward-compatible — only
     // populated when DLC ≥ 6.  Pre-extension STM32 firmware (DLC 5) leaves
     // peakLoop100us at zero, which the HMI renders as "n/a".
-    if (f.data_length_code >= 6) {
+    if (f.data_length_code >= can::STATUS_SAFETY_DLC_TX) {
         sd.peakLoop100us = f.data[5];
     }
     sd.timestampMs = millis();

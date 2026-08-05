@@ -55,6 +55,13 @@ inline constexpr uint32_t STATUS_SPEED          = 0x200;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_CURRENT        = 0x201;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_TEMP           = 0x202;    // DLC 5, 1000 ms
 inline constexpr uint32_t STATUS_SAFETY         = 0x203;    // DLC 6, 100 ms  (ABS,TCS,error_code,state,rx_err,loop_peak_100us)
+// 0x203 wire contract (rev 1.4).  Authoritative definition, mirrored from
+// Core/Inc/status_safety_frame.h and asserted by test_frame_parity_cross.cpp:
+//   b0 abs, b1 tcs, b2 error_code, b3 state, b4 rx_errors, b5 loop_peak_100us.
+// Byte 5 is forward-compatible: a DLC-5 sender is still accepted and reports
+// loop_peak_100us = 0 ("n/a").
+inline constexpr uint8_t STATUS_SAFETY_DLC_TX     = 6;
+inline constexpr uint8_t STATUS_SAFETY_DLC_RX_MIN = 5;
 inline constexpr uint32_t STATUS_STEERING       = 0x204;    // DLC 3, 100 ms
 inline constexpr uint32_t STATUS_TRACTION       = 0x205;    // DLC 4, 100 ms
 inline constexpr uint32_t STATUS_TEMP_MAP       = 0x206;    // DLC 5, 1000 ms
