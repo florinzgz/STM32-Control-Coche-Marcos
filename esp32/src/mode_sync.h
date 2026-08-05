@@ -104,6 +104,7 @@ public:
         if (modeFlags != desired_) {
             desired_ = modeFlags;
             failed_  = false;   // new intent — allow a fresh sync attempt
+            rearmableFailure_ = false;
             blocked_ = false;   // and retry immediately, not after the cooldown
             episodeArmed_ = false;  // §4: a new intent starts a fresh age timer
         }
@@ -128,6 +129,7 @@ public:
         if (!heartbeatConfirmed) {
             pending_        = false;
             failed_         = false;
+            rearmableFailure_ = false;
             blocked_        = false;
             blockedArmed_   = false;
             confirmedValid_ = false;
@@ -139,6 +141,8 @@ public:
         // link loss) forces a resend even when desired_ == confirmed_.
         if (confirmedValid_ && desired_ == confirmed_) {
             pending_      = false;
+            failed_       = false;
+            rearmableFailure_ = false;
             blocked_      = false;
             blockedArmed_ = false;
             episodeArmed_ = false;   // §4: in sync — next miss restarts the timer
@@ -155,6 +159,7 @@ public:
                 // Exhausted the retry budget — latch FAILED, stop transmitting.
                 pending_ = false;
                 failed_  = true;
+                rearmableFailure_ = true;  // only this failure class may re-arm
                 return Action::NONE;
             }
             beginAttempt(nowMs, /*firstAttempt=*/false);
@@ -212,11 +217,13 @@ public:
                 confirmed_      = pendingMode_;
                 confirmedValid_ = true;
                 failed_         = false;
+                rearmableFailure_ = false;
                 blocked_        = false;
                 blockedArmed_   = false;
                 break;
             case AckResult::INVALID:
                 failed_       = true;    // hard error — do not spam the bus
+                rearmableFailure_ = false;
                 blocked_      = false;
                 blockedArmed_ = false;
                 break;
@@ -232,6 +239,7 @@ public:
                 blocked_      = true;
                 blockedArmed_ = false;
                 failed_       = false;
+                rearmableFailure_ = false;
                 blockReason_  = result;
                 if (blockCount_ != 0xFFFFu) ++blockCount_;
                 break;
@@ -255,12 +263,15 @@ public:
             // The STM32 clearly applied our command — the ACK was just lost.
             pending_ = false;
             failed_  = false;
+            rearmableFailure_ = false;
         }
         if (echoModeFlags == desired_) {
             // The STM32 is now in the requested mode — cancel any pending
             // temporary-block cooldown.
             blocked_      = false;
             blockedArmed_ = false;
+            failed_       = false;
+            rearmableFailure_ = false;
         }
     }
 
@@ -274,12 +285,26 @@ public:
         confirmedValid_ = false;
         pending_        = false;
         failed_         = false;
+        rearmableFailure_ = false;
         blocked_        = false;
         blockedArmed_   = false;
     }
 
     /** Alias for invalidateConfirmed() used on a heartbeat/link-lost edge. */
     void onLinkLost() { invalidateConfirmed(); }
+
+    /** Re-arm a bounded no-response failure after an owner-controlled cooldown.
+     * Temporary REJECTED/BLOCKED ACKs already retry internally; this method is
+     * only for the case where every CMD_MODE frame or ACK in a burst was lost. */
+    void rearmFailedAttempt() {
+        if (!failed_ || !rearmableFailure_) return;
+        failed_       = false;
+        rearmableFailure_ = false;
+        pending_      = false;
+        blocked_      = false;
+        blockedArmed_ = false;
+        retries_      = 0;
+    }
 
     /** Payload to transmit when update() returns SEND. */
     uint8_t sendMode()  const { return pendingMode_; }
@@ -291,6 +316,8 @@ public:
     bool    inSync()         const { return confirmedValid_ && desired_ == confirmed_; }
     bool    pending()        const { return pending_; }
     bool    failed()         const { return failed_; }
+    /** True only for a bounded no-response failure that the owner may re-arm. */
+    bool    rearmableFailure() const { return failed_ && rearmableFailure_; }
     /** True while a temporary ACK (REJECTED/BLOCKED) is pending its retry. */
     bool    blocked()        const { return blocked_; }
     uint8_t retries()        const { return retries_; }
@@ -341,6 +368,7 @@ private:
     uint8_t  retries_     = 0;   ///< Retransmissions used in this episode.
     bool     pending_     = false;
     bool     failed_      = false;
+    bool     rearmableFailure_ = false; ///< Exhausted no-response burst only.
     bool     blocked_     = false;  ///< A temporary ACK is awaiting its retry.
     bool     blockedArmed_ = false; ///< Cooldown timer has been started.
     // confirmed_ is only trusted while confirmedValid_ is true.  It starts

@@ -22,7 +22,8 @@ public:
     static void drawStatic(TFT_eSPI& tft);
 
     /// Update pedal fill and text. Only redraws if value changed.
-    static void draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct);
+    static void draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct,
+                     bool stale, bool prevStale);
 };
 
 } // namespace ui

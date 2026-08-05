@@ -22,6 +22,22 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "can_handler.h"
+#include "can_holdover_policy.h"
+
+#ifdef HOST_TEST
+extern bool CAN_PedalCalServiceActive(void) __attribute__((weak));
+static bool PR_PedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive != 0 &&
+           CAN_PedalCalServiceActive();
+}
+#else
+static bool PR_PedalCalServiceActive(void)
+{
+    return CAN_PedalCalServiceActive();
+}
+#endif
 
 #ifdef HOST_TEST
 #include "standby_mode_sync_policy.c"
@@ -138,24 +154,22 @@ uint8_t PR_Wheel_GetGpioLevel(uint8_t idx)
  * running vehicle jump from >40 % demand to the old 40 % LIMP_HOME ceiling.
  *
  * Policy while already ACTIVE/DEGRADED:
- *   - remain in the same state and preserve the current pedal/PWM ramp;
- *   - RC override expires independently after 200 ms and control falls back to
- *     the physical STM32 pedal;
- *   - freeze the already-applied gear/mode (no new CAN command can arrive);
- *   - report MODULE_CAN_TIMEOUT as a diagnostic warning;
- *   - continue FDCAN bus-off recovery in the background;
+ *   - preserve the current state/ramp only for a short bounded bridge;
+ *   - RC authority is disabled in this local-only image;
+ *   - freeze the already-applied gear/mode while the bridge is active;
+ *   - after the maximum bridge time, enter LIMP_HOME conservatively;
  *   - clear the warning only after 500 ms of stable heartbeat and no bus-off.
  *
  * Real hardware hazards (overcurrent, battery, temperature, pedal
  * contradiction, obstacle emergency, EPS electrical hazard, emergency stop)
  * retain all of their existing state transitions.  Only CAN-only requests to
- * enter LIMP_HOME are suppressed for a vehicle that was already drive-capable.
+ * enter LIMP_HOME are delayed only for the bounded bridge below.
  */
-#define PR_CAN_RECOVERY_STABLE_MS 500U
 
 static bool          pr_can_holdover_active          = false;
 static bool          pr_can_limp_transition_pending  = false;
 static uint32_t      pr_can_recovery_since           = 0U;
+static uint32_t      pr_can_holdover_since           = 0U;
 static SystemState_t pr_can_holdover_origin          = SYS_STATE_ACTIVE;
 
 /* -------------------------------------------------------------------------
@@ -267,6 +281,7 @@ static void PR_EnterCanHoldover(void)
 {
     if (!pr_can_holdover_active) {
         pr_can_holdover_origin = system_state;
+        pr_can_holdover_since = HAL_GetTick();
     }
     pr_can_holdover_active = true;
     pr_can_recovery_since = 0U;
@@ -355,7 +370,21 @@ void Safety_CheckCANTimeout(void)
 
     if (PR_IsDriveState(system_state) || pr_can_holdover_active) {
         if (heartbeat_stale || bus_off) {
+            recovery_pending = 0U;
+            recovery_clean_since = 0U;
             PR_EnterCanHoldover();
+            if (CanHoldover_Expired(pr_can_holdover_since, now)) {
+                /* The bridge is intentionally finite.  A persistent HMI/CAN
+                 * loss becomes a real LIMP_HOME transition instead of leaving
+                 * ACTIVE/DEGRADED and full local pedal authority indefinitely. */
+                pr_can_holdover_active = false;
+                pr_can_limp_transition_pending = false;
+                pr_can_recovery_since = 0U;
+                pr_can_holdover_since = 0U;
+                Safety_SetError_Legacy(bus_off ? SAFETY_ERROR_CAN_BUSOFF
+                                               : SAFETY_ERROR_CAN_TIMEOUT);
+                Safety_SetState_Legacy(SYS_STATE_LIMP_HOME);
+            }
             return;
         }
 
@@ -365,10 +394,11 @@ void Safety_CheckCANTimeout(void)
             if (pr_can_recovery_since == 0U) {
                 pr_can_recovery_since = now;
             } else if ((now - pr_can_recovery_since) >=
-                       PR_CAN_RECOVERY_STABLE_MS) {
+                       CAN_HOLDOVER_RECOVERY_STABLE_MS) {
                 pr_can_holdover_active = false;
                 pr_can_limp_transition_pending = false;
                 pr_can_recovery_since = 0U;
+                pr_can_holdover_since = 0U;
                 ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
 
                 /* Defensive cleanup for a CAN error left by an older path or
@@ -377,11 +407,38 @@ void Safety_CheckCANTimeout(void)
                     Safety_ClearError(safety_error);
                 }
             }
+            if (pr_can_holdover_active) {
+                recovery_pending = 0U;
+                recovery_clean_since = 0U;
+                return;
+            }
         } else {
             ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
             if (PR_IsCanOnlyError(safety_error)) {
                 Safety_ClearError(safety_error);
             }
+        }
+
+        /* The wrapper owns ACTIVE/DEGRADED CAN handling and therefore must
+         * preserve the legacy clean-fault recovery too.  Previously the early
+         * return skipped this block permanently, leaving DEGRADED L1 latched
+         * even after Fault Viewer reported no active fault. */
+        if (system_state == SYS_STATE_DEGRADED &&
+            safety_error == SAFETY_ERROR_NONE &&
+            !PR_PedalCalServiceActive()) {
+            if (!recovery_pending) {
+                recovery_pending = 1U;
+                recovery_clean_since = now;
+            } else if ((now - recovery_clean_since) >= RECOVERY_HOLD_MS) {
+                recovery_pending = 0U;
+                Safety_SetState(SYS_STATE_ACTIVE);
+            }
+        } else {
+            /* Any active error, calibration lock or non-DEGRADED state resets
+             * the clean recovery timer.  Never reuse stale clean time after a
+             * fault reappears. */
+            recovery_pending = 0U;
+            recovery_clean_since = 0U;
         }
         return;
     }
@@ -722,6 +779,14 @@ void Safety_CheckRelayHealth(void)
 
 void Relay_SequencerUpdate(void)
 {
+    /* Pedal-calibration service lock has priority over every drive-capable
+     * state.  Keep both power relays physically down; never let the normal
+     * ACTIVE/DEGRADED sequencer race the 50 ms calibration FSM. */
+    if (PR_PedalCalServiceActive()) {
+        Relay_PowerDown();
+        return;
+    }
+
     const bool drive_capable =
         (system_state == SYS_STATE_ACTIVE)   ||
         (system_state == SYS_STATE_DEGRADED) ||
@@ -752,6 +817,10 @@ void Relay_SequencerUpdate(void)
 
 void Safety_RelayOverrideUpdate(void)
 {
+    if (PR_PedalCalServiceActive()) {
+        Relay_PowerDown();
+        return;
+    }
     if (Steering_IsAssistLatchedOff()) {
         relay_override_mask &= (uint8_t)~0x04U;
     }

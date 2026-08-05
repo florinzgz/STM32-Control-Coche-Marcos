@@ -179,10 +179,16 @@ static inline float EpsAssist_EffectiveCoastBand(float configured_pct,
 }
 
 static inline float EpsAssist_EffectiveMinDrive(float configured_pct,
-                                                bool driver_intent)
+                                                bool driver_intent,
+                                                float vehicle_speed_kmh)
 {
     if (!EpsAssist_IsFiniteNonnegative(configured_pct)) return 0.0f;
+    /* Cap the breakaway (minimum-drive) limit only at low speed where
+     * driver-assist is active.  Above EPS_ACTIVE_RETURN_MIN_KMH the base
+     * controller uses the full configured breakaway without restriction. */
     if (driver_intent &&
+        EpsAssist_IsFiniteNonnegative(vehicle_speed_kmh) &&
+        vehicle_speed_kmh <= EPS_ACTIVE_RETURN_MIN_KMH &&
         configured_pct > EPS_DRIVER_ASSIST_BREAKAWAY_MAX_PCT) {
         return EPS_DRIVER_ASSIST_BREAKAWAY_MAX_PCT;
     }
@@ -190,10 +196,17 @@ static inline float EpsAssist_EffectiveMinDrive(float configured_pct,
 }
 
 static inline float EpsAssist_EffectiveSlewRate(float configured_pct,
-                                               bool driver_intent)
+                                               bool driver_intent,
+                                               float vehicle_speed_kmh)
 {
     if (!isfinite(configured_pct) || configured_pct <= 0.0f) return 0.1f;
-    if (driver_intent && configured_pct > EPS_DRIVER_ASSIST_SLEW_MAX_PCT) {
+    /* Cap the slew rate only at low speed where driver-assist is active.
+     * Above EPS_ACTIVE_RETURN_MIN_KMH the base controller may use the full
+     * configured slew rate without the low-speed restriction.             */
+    if (driver_intent &&
+        EpsAssist_IsFiniteNonnegative(vehicle_speed_kmh) &&
+        vehicle_speed_kmh <= EPS_ACTIVE_RETURN_MIN_KMH &&
+        configured_pct > EPS_DRIVER_ASSIST_SLEW_MAX_PCT) {
         return EPS_DRIVER_ASSIST_SLEW_MAX_PCT;
     }
     return configured_pct;

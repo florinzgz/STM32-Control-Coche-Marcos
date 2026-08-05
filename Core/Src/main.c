@@ -46,6 +46,10 @@
 #define CAN_LOOPBACK_TEST  0
 #endif
 
+#ifndef CAN_PERIODIC_TEST_FRAME_ENABLED
+#define CAN_PERIODIC_TEST_FRAME_ENABLED 0
+#endif
+
 /* ---- HAL handle instances ---- */
 ADC_HandleTypeDef   hadc1;
 FDCAN_HandleTypeDef hfdcan1;
@@ -913,11 +917,16 @@ int main(void)
                 (diag_phase < 125U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
         }
 
-        /* ---- 500 ms CAN test transmit: send a test frame (ID 0x123) ---- */
-        if ((now - tick_500ms) >= 500) {
+#if CAN_PERIODIC_TEST_FRAME_ENABLED
+        /* Diagnostic-only test traffic.  Delivery/road builds keep 0x123 off
+         * the bus so load measurements and ID ownership remain deterministic. */
+        if ((now - tick_500ms) >= 500U) {
             tick_500ms = now;
             CAN_TestTransmit();
         }
+#else
+        (void)tick_500ms;
+#endif
 
         /* Process incoming CAN commands from ESP32 */
         CAN_ProcessMessages();
@@ -1540,13 +1549,12 @@ static void MX_IWDG_Init(void)
 {
     hiwdg.Instance       = IWDG;
     hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
-    /* Reload = 4095 → ~4.1 s timeout.
-     * Nominal calculation: LSI / 32 = 1 kHz tick × 4095 counts = 4.095 s.
-     * The "~" reflects LSI tolerance: per RM0440 the internal LSI is rated
-     * ±5 % across temperature and supply, so the real-world reload range is
-     * approximately 3.9–4.3 s.  All time-critical software loops are sized
-     * with margin for the worst-case (shortest) bound.                     */
-    hiwdg.Init.Reload    = 4095;
+    /* Local-control safety build: ~1.0 s watchdog.  The 100 Hz safety loop,
+     * CAN pump and all current flash transactions complete with large margin;
+     * a cooperative-loop deadlock therefore cannot preserve stale motor
+     * outputs for the previous ~4.1 s window.  LSI tolerance gives roughly
+     * 0.95..1.05 s in hardware and must be verified on the bench. */
+    hiwdg.Init.Reload    = 999U;
     hiwdg.Init.Window    = IWDG_WINDOW_DISABLE;
     if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {
         Error_Handler();

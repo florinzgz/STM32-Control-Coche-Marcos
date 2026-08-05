@@ -106,11 +106,11 @@ static void test_physical_rear_4x2_plan(void)
     const float scales[4] = {1.0f, 1.0f, 0.5f, 1.0f};
     TractionOutputPlan p;
 
-    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
-                                         4249U, NULL));
+    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, 3.0f, 2.0f,
+                                         scales, 4249U, NULL));
 
-    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
-                                        4249U, &p));
+    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, 3.0f, 2.0f,
+                                        scales, 4249U, &p));
     CHECK(p.mode[TRACTION_OUTPUT_FL] == TRACTION_OUTPUT_MODE_COAST);
     CHECK(p.mode[TRACTION_OUTPUT_FR] == TRACTION_OUTPUT_MODE_COAST);
     CHECK(p.pwm[TRACTION_OUTPUT_FL] == 0U);
@@ -122,17 +122,42 @@ static void test_physical_rear_4x2_plan(void)
     CHECK(p.pwm[TRACTION_OUTPUT_RL] == 600U);  /* physical RL scale reapplied */
     CHECK(p.pwm[TRACTION_OUTPUT_RR] == 1000U);
 
+    /* Straight, unlimited rear drive removes residual left/right skew without
+     * ever raising the lower wheel. */
+    const float unity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const int8_t same_forward[4] = {1, 1, 0, 0};
+    CHECK(TractionOutput_Resolve4x2Rear(mode, same_forward, pwm, 0.0f, 2.0f,
+                                        unity, 4249U, &p));
+    CHECK(p.pwm[TRACTION_OUTPUT_RL] == 1000U);
+    CHECK(p.pwm[TRACTION_OUTPUT_RR] == 1000U);
+    CHECK(p.direction[TRACTION_OUTPUT_RL] == 1);
+    CHECK(p.direction[TRACTION_OUTPUT_RR] == 1);
+
+    const int8_t same_reverse[4] = {-1, -1, 0, 0};
+    CHECK(TractionOutput_Resolve4x2Rear(mode, same_reverse, pwm, 0.0f, 2.0f,
+                                        unity, 4249U, &p));
+    CHECK(p.pwm[TRACTION_OUTPUT_RL] == 1000U);
+    CHECK(p.pwm[TRACTION_OUTPUT_RR] == 1000U);
+    CHECK(p.direction[TRACTION_OUTPUT_RL] == -1);
+    CHECK(p.direction[TRACTION_OUTPUT_RR] == -1);
+
+    /* At the deadband boundary Ackermann remains authoritative. */
+    CHECK(TractionOutput_Resolve4x2Rear(mode, same_forward, pwm, 2.0f, 2.0f,
+                                        unity, 4249U, &p));
+    CHECK(p.pwm[TRACTION_OUTPUT_RL] == 1200U);
+    CHECK(p.pwm[TRACTION_OUTPUT_RR] == 1000U);
+
     /* A physical rear cutoff must never be bypassed by the logical FL result. */
     const float rear_cut[4] = {1.0f, 1.0f, 0.0f, 1.0f};
-    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, rear_cut,
-                                        4249U, &p));
+    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, 0.0f, 2.0f,
+                                        rear_cut, 4249U, &p));
     CHECK(p.pwm[TRACTION_OUTPUT_RL] == 0U);
     CHECK(p.pwm[TRACTION_OUTPUT_RR] == 1000U);
 
     /* Brake is routed to the rear axle only. */
     mode[0] = mode[1] = TRACTION_OUTPUT_MODE_BRAKE;
-    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
-                                        4249U, &p));
+    CHECK(TractionOutput_Resolve4x2Rear(mode, direction, pwm, 3.0f, 2.0f,
+                                        scales, 4249U, &p));
     CHECK(p.mode[TRACTION_OUTPUT_FL] == TRACTION_OUTPUT_MODE_COAST);
     CHECK(p.mode[TRACTION_OUTPUT_FR] == TRACTION_OUTPUT_MODE_COAST);
     CHECK(p.mode[TRACTION_OUTPUT_RL] == TRACTION_OUTPUT_MODE_BRAKE);
@@ -141,13 +166,13 @@ static void test_physical_rear_4x2_plan(void)
     /* An asymmetric or unknown base decision fails closed to all-coast. */
     mode[0] = TRACTION_OUTPUT_MODE_DRIVE;
     mode[1] = TRACTION_OUTPUT_MODE_BRAKE;
-    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
-                                         4249U, &p));
+    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, 3.0f, 2.0f,
+                                         scales, 4249U, &p));
     check_all_coast(&p);
 
     mode[0] = mode[1] = 99U;
-    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, scales,
-                                         4249U, &p));
+    CHECK(!TractionOutput_Resolve4x2Rear(mode, direction, pwm, 3.0f, 2.0f,
+                                         scales, 4249U, &p));
     check_all_coast(&p);
 }
 

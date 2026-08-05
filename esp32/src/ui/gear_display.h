@@ -32,8 +32,12 @@ public:
     /// Draw all gear labels (call once on screen enter)
     static void drawStatic(TFT_eSPI& tft);
 
-    /// Update highlighted gear. Only redraws changed labels.
-    static void draw(TFT_eSPI& tft, Gear current, Gear previous);
+    /// Highlight the STM32-applied gear and show the physical lever request.
+    /// When applied telemetry is stale no pill is presented as confirmed.
+    static void draw(TFT_eSPI& tft,
+                     Gear applied, Gear previousApplied,
+                     bool appliedValid, bool previousAppliedValid,
+                     Gear requested, Gear previousRequested);
 
 private:
     static constexpr const char* GEAR_LABELS[NUM_GEARS] = {

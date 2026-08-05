@@ -106,7 +106,7 @@ CPU = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 
 # Compiler flags
 CFLAGS = $(CPU) $(C_INCLUDES) -DSTM32G474xx -DUSE_HAL_DRIVER \
-         -Wall -Wextra -Werror -fdata-sections -ffunction-sections -g -O2
+         -Wall -Wextra -Werror -DRC_OVERRIDE_ENABLED=0 -fdata-sections -ffunction-sections -g -O2
 
 ASFLAGS = $(CPU) -g
 

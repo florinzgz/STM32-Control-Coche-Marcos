@@ -56,6 +56,17 @@ extern TFT_eSPI tft;
 static constexpr uint8_t TRACTION_THRESHOLD = ui::cfg::THR_TRACTION_DELTA;
 static constexpr int8_t  TEMP_THRESHOLD     = ui::cfg::THR_TEMP_DELTA;
 
+static ui::Gear mapUiGear(uint8_t raw) {
+    switch (raw) {
+        case 0: return ui::Gear::P;
+        case 1: return ui::Gear::R;
+        case 2: return ui::Gear::N;
+        case 3: return ui::Gear::D1;
+        case 4: return ui::Gear::D2;
+        default: return ui::Gear::N;
+    }
+}
+
 /// Apply threshold filtering to a single wheel's traction + temperature.
 /// Returns true if either value crossed its threshold.
 static inline bool wheelThresholdFilter(
@@ -99,7 +110,8 @@ void DriveScreen::onEnter() {
     tiles_.setRect(DTILE_CAN,        ui::CAN_IND_X, 0, ui::CAN_IND_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_AMBIENT,    ui::AMB_X, 0, ui::AMB_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_GEAR,       ui::CLUSTER_X, ui::DGEAR_Y - 2,
-                                     ui::CLUSTER_W, ui::DGEAR_H + 4);
+                                     ui::CLUSTER_W,
+                                     (ui::DTHR_LABEL_Y - ui::DGEAR_Y) + 2);
     tiles_.setRect(DTILE_PEDAL,      ui::DTHR_X - 14, ui::DTHR_Y - 2,
                                      ui::DTHR_W + 20, ui::DTHR_H + 4);
     tiles_.setRect(DTILE_MODE_ICONS, ui::cfg::DTILE_MODE_ICONS_X, 0,
@@ -127,6 +139,11 @@ void DriveScreen::onEnter() {
     prevAmbientTemp_ = 0;
     prevPedalPct_    = 0;
     prevGear_        = ui::Gear::P;
+    prevRequestedGear_ = ui::Gear::P;
+    prevGearValid_   = false;
+    prevSpeedStale_  = true;
+    prevSteeringStale_ = true;
+    prevPedalStale_  = true;
     prevMode_        = {};
     prevObstacleCm_  = 0;
     prevFrontLedOn_  = false;
@@ -217,17 +234,27 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
                                ((wsd.flags & can::WHEEL_DIAG_FLAG_POWERTRAIN) != 0);
     }
 
-    // Steering angle
-    curSteeringRaw_ = data.steering().angleRaw;
-
-    // Average speed (all 4 wheels, raw 0.1 km/h units)
-    // Max sum: 4 × 65535 = 262140, fits in uint32_t
-    // Max average: 65535, fits in uint16_t
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < 4; ++i) {
-        sum += data.speed().raw[i];
+    // Steering angle: never present a frozen value as current telemetry.
+    {
+        const unsigned long ts = data.steering().timestampMs;
+        curSteeringStale_ = ts == 0U ||
+            (frameTimeMs - ts) > ui::cfg::TELEMETRY_FAST_STALE_MS;
+        curSteeringRaw_ = curSteeringStale_ ? 0 : data.steering().angleRaw;
     }
-    curSpeedAvgRaw_ = static_cast<uint16_t>(sum / 4);
+
+    // Average wheel speed.  A stale/never-received 0x200 frame is rendered as
+    // unknown rather than retaining the last moving speed indefinitely.
+    {
+        const unsigned long ts = data.speed().timestampMs;
+        curSpeedStale_ = ts == 0U ||
+            (frameTimeMs - ts) > ui::cfg::TELEMETRY_FAST_STALE_MS;
+        uint32_t sum = 0U;
+        if (!curSpeedStale_) {
+            for (uint8_t i = 0; i < 4; ++i) sum += data.speed().raw[i];
+        }
+        curSpeedAvgRaw_ = curSpeedStale_ ? 0U
+                                         : static_cast<uint16_t>(sum / 4U);
+    }
 
     // Wheel RPM from average speed:
     //   RPM = speed_kmh / (3.6 × WHEEL_CIRCUMF_M) × 60
@@ -257,31 +284,23 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
                         ((frameTimeMs - bts) > ui::cfg::TELEMETRY_FAST_STALE_MS);
     }
 
-    // Pedal/throttle — real Hall pedal travel published by the STM32 on the
-    // dedicated telemetry frame (0x20B).  This is the physical pedal position
-    // (0 % released … 100 % full), NOT the per-wheel torque/TCS scale (0x205),
-    // which is unrelated to pedal travel.  When the pedal frame is stale
-    // (never received or older than the CAN-loss timeout) we show 0 % rather
-    // than a frozen value, matching the released-pedal default.
+    // Physical pedal telemetry.  Stale is a distinct unknown state, never a
+    // fabricated 0 % released reading.
     {
-        unsigned long pts = data.pedal().timestampMs;
-        bool pedalStale = (pts == 0) ||
-                          ((frameTimeMs - pts) > ui::cfg::TELEMETRY_FAST_STALE_MS);
-        curPedalPct_ = pedalStale ? 0 : data.pedal().percent;
+        const unsigned long pts = data.pedal().timestampMs;
+        curPedalStale_ = pts == 0U ||
+            (frameTimeMs - pts) > ui::cfg::TELEMETRY_FAST_STALE_MS;
+        curPedalPct_ = curPedalStale_ ? 0U : data.pedal().percent;
     }
 
-    // Gear — read from physical shifter via MCP23017
+    // Requested lever position and independently confirmed STM32-applied gear.
+    curRequestedGear_ = mapUiGear(shifter::getGearRaw());
     {
-        uint8_t raw = shifter::getGearRaw();
-        // Map shifter::Gear (0-4) to ui::Gear enum
-        switch (raw) {
-            case 0: curGear_ = ui::Gear::P;  break;
-            case 1: curGear_ = ui::Gear::R;  break;
-            case 2: curGear_ = ui::Gear::N;  break;
-            case 3: curGear_ = ui::Gear::D1; break;
-            case 4: curGear_ = ui::Gear::D2; break;
-            default: curGear_ = ui::Gear::N; break;
-        }
+        const auto& mi = data.motionInhibit();
+        curGearValid_ = mi.valid && mi.gear <= 4U &&
+            (frameTimeMs - mi.timestampMs) <=
+                ui::cfg::TELEMETRY_FAST_STALE_MS;
+        if (curGearValid_) curGear_ = mapUiGear(mi.gear);
     }
 
     // Mode flags — read from vehicle data (confirmed by STM32 heartbeat echo)
@@ -371,11 +390,17 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Each tile gets a compact FNV-1a hash of its source data.
     // If the hash matches the previous frame, the tile is skipped.
 
-    // SPEED tile
-    tiles_.updateHash(DTILE_SPEED, ui::tileHashVal(curSpeedAvgRaw_));
-
-    // RPM tile (derived from average speed)
-    tiles_.updateHash(DTILE_RPM, ui::tileHashVal(curRpmAvg_));
+    // SPEED/RPM tiles include freshness so live↔stale transitions repaint.
+    {
+        ui::TileHash h = ui::tileHashVal(curSpeedAvgRaw_);
+        h = ui::tileHashFeed(h, curSpeedStale_ ? 1U : 0U);
+        tiles_.updateHash(DTILE_SPEED, h);
+    }
+    {
+        ui::TileHash h = ui::tileHashVal(curRpmAvg_);
+        h = ui::tileHashFeed(h, curSpeedStale_ ? 1U : 0U);
+        tiles_.updateHash(DTILE_RPM, h);
+    }
 
     // CAN link tile
     tiles_.updateHash(DTILE_CAN, ui::tileHashVal(curCanOk_ ? 1u : 0u));
@@ -408,7 +433,11 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     }
 
     // STEERING tile
-    tiles_.updateHash(DTILE_STEERING, ui::tileHashVal(curSteeringRaw_));
+    {
+        ui::TileHash h = ui::tileHashVal(curSteeringRaw_);
+        h = ui::tileHashFeed(h, curSteeringStale_ ? 1U : 0U);
+        tiles_.updateHash(DTILE_STEERING, h);
+    }
 
     // BATTERY tile
     {
@@ -420,12 +449,18 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // GEAR tile (includes relay indicator — they share the same vertical strip)
     {
         ui::TileHash gh = ui::tileHashVal(curGear_);
+        gh = ui::tileHashFeed(gh, curRequestedGear_);
+        gh = ui::tileHashFeed(gh, curGearValid_ ? 1U : 0U);
         gh = ui::tileHashFeed(gh, curRelayStatus_);
         tiles_.updateHash(DTILE_GEAR, gh);
     }
 
     // PEDAL tile
-    tiles_.updateHash(DTILE_PEDAL, ui::tileHashVal(curPedalPct_));
+    {
+        ui::TileHash h = ui::tileHashVal(curPedalPct_);
+        h = ui::tileHashFeed(h, curPedalStale_ ? 1U : 0U);
+        tiles_.updateHash(DTILE_PEDAL, h);
+    }
 
     // MODE_ICONS tile
     {
@@ -535,7 +570,13 @@ void DriveScreen::draw() {
         prevCanOk_       = !curCanOk_;
         prevAmbientTemp_ = curAmbientTemp_ + 1;
         prevPedalPct_    = curPedalPct_ + 1;
+        prevPedalStale_  = !curPedalStale_;
+        prevSpeedStale_  = !curSpeedStale_;
+        prevSteeringStale_ = !curSteeringStale_;
         prevGear_        = (curGear_ == ui::Gear::P) ? ui::Gear::N : ui::Gear::P;
+        prevRequestedGear_ = (curRequestedGear_ == ui::Gear::P)
+                              ? ui::Gear::N : ui::Gear::P;
+        prevGearValid_   = !curGearValid_;
         prevSteeringRaw_ = curSteeringRaw_ + 10;
         prevObstacleCm_  = curObstacleCm_ + 1;
         for (uint8_t i = 0; i < 4; ++i) {
@@ -636,7 +677,8 @@ void DriveScreen::draw() {
 
     // TILE: Steering circular gauge (right side)
     if (tiles_.isDirty(DTILE_STEERING)) {
-        ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
+        ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_,
+                                      !curSteeringStale_, !prevSteeringStale_);
         tiles_.markClean(DTILE_STEERING);
     }
 
@@ -652,7 +694,9 @@ void DriveScreen::draw() {
     // TILE: Gear + Relay indicator (share same tile region)
     if (tiles_.isDirty(DTILE_GEAR)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::GEAR);
-        ui::GearDisplay::draw(tft, curGear_, prevGear_);
+        ui::GearDisplay::draw(tft, curGear_, prevGear_,
+                              curGearValid_, prevGearValid_,
+                              curRequestedGear_, prevRequestedGear_);
         ui::RelayIndicator::draw(tft, curRelayStatus_, prevRelayStatus_);
         tiles_.markClean(DTILE_GEAR);
     }
@@ -660,7 +704,8 @@ void DriveScreen::draw() {
     // TILE: Pedal bar
     if (tiles_.isDirty(DTILE_PEDAL)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::PEDAL);
-        ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
+        ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_,
+                           curPedalStale_, prevPedalStale_);
         tiles_.markClean(DTILE_PEDAL);
     }
 
@@ -744,7 +789,12 @@ void DriveScreen::draw() {
     prevCanOk_       = curCanOk_;
     prevBattVoltRaw_ = curBattVoltRaw_;
     prevPedalPct_    = curPedalPct_;
+    prevPedalStale_  = curPedalStale_;
+    prevSpeedStale_  = curSpeedStale_;
+    prevSteeringStale_ = curSteeringStale_;
     prevGear_        = curGear_;
+    prevRequestedGear_ = curRequestedGear_;
+    prevGearValid_   = curGearValid_;
     prevMode_        = curMode_;
     prevObstacleCm_  = curObstacleCm_;
     prevFrontLedOn_  = curFrontLedOn_;
@@ -772,9 +822,10 @@ void DriveScreen::draw() {
 void DriveScreen::drawSpeedDial() {
     // Raw is 0.1 km/h; the dial scales 0..SPEED_DIAL_MAX (=40.0 km/h).
     char buf[ui::FMT_BUF_SMALL];
-    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curSpeedAvgRaw_ / 10));
+    if (curSpeedStale_) snprintf(buf, sizeof(buf), "--");
+    else snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curSpeedAvgRaw_ / 10));
     ui::DialGauge::draw(tft, ui::SPEED_DIAL_CX, ui::SPEED_DIAL_CY, ui::DIAL_R,
-                        curSpeedAvgRaw_, ui::SPEED_DIAL_MAX,
+                        curSpeedStale_ ? 0U : curSpeedAvgRaw_, ui::SPEED_DIAL_MAX,
                         ui::COL_NEEDLE, /*zoned=*/false, buf, "km/h");
 }
 
@@ -784,10 +835,11 @@ void DriveScreen::drawSpeedDial() {
 // -------------------------------------------------------------------------
 void DriveScreen::drawRpmDial() {
     char buf[ui::FMT_BUF_SMALL];
-    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curRpmAvg_));
+    if (curSpeedStale_) snprintf(buf, sizeof(buf), "--");
+    else snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curRpmAvg_));
     ui::DialGauge::draw(tft, ui::RPM_DIAL_CX, ui::RPM_DIAL_CY, ui::DIAL_R,
-                        curRpmAvg_, ui::cfg::RPM_DISPLAY_MAX,
-                        ui::COL_NEEDLE_RPM, /*zoned=*/true, buf, "rpm");
+                        curSpeedStale_ ? 0U : curRpmAvg_, ui::cfg::RPM_DISPLAY_MAX,
+                        ui::COL_NEEDLE_RPM, /*zoned=*/true, buf, "wheel rpm");
 }
 
 // -------------------------------------------------------------------------

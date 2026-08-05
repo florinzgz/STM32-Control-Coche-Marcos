@@ -490,15 +490,16 @@ void SafeScreen::draw() {
     if (tiles_.isDirty(STILE_STEERING)) {
         prevSteeringAngle_ = steeringAngle_;
         char buf[ui::FMT_BUF_MED];
-        int16_t deg = steeringAngle_ / 10;
-        int16_t frac = steeringAngle_ % 10;
+        const int16_t displayAngle = ui::clampRoadWheelTenths(steeringAngle_);
+        int16_t deg = displayAngle / 10;
+        int16_t frac = displayAngle % 10;
         if (frac < 0) frac = -frac;
 
-        // Direction indicator: < for left, > for right, | for center
+        // Use the same installed display polarity as Drive/Engineering.
         const char* dirIndicator;
-        if (steeringAngle_ < -150) {
+        if (displayAngle < -150) {
             dirIndicator = "<< LEFT ";
-        } else if (steeringAngle_ > 150) {
+        } else if (displayAngle > 150) {
             dirIndicator = " RIGHT >>";
         } else {
             dirIndicator = " | CENTER";
@@ -508,7 +509,7 @@ void SafeScreen::draw() {
 
         // Color code direction
         uint16_t col = ui::COL_WHITE;
-        if (steeringAngle_ < -150 || steeringAngle_ > 150) {
+        if (displayAngle < -150 || displayAngle > 150) {
             col = ui::COL_CYAN;
         }
 

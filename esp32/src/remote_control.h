@@ -27,7 +27,8 @@
 //                                       CAN status / 0x10A override frames may still
 //                                       be emitted with override_flag=0)
 //
-// **Enabled by default** via REMOTE_CONTROL_ENABLED=1 in platformio.ini.
+// **Disabled in the bench build** via `-DREMOTE_CONTROL_ENABLED=0` in
+// platformio.ini (restored to 1 only in a follow-up after bench validation).
 // When compiled with `-DREMOTE_CONTROL_ENABLED=0` this header still compiles
 // and exposes stub-safe inline no-ops so main.cpp can reference the API
 // without conditional compilation everywhere.  The real implementation in

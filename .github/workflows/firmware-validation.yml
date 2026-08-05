@@ -98,6 +98,8 @@ jobs:
               Core/Src/test_relay_health_frame.c \
               Core/Src/test_ina226_channel_diag.c \
               Core/Src/test_ina226_ch5_frame.c \
+              Core/Src/test_can_rx_policy.c \
+              Core/Src/test_holdover_service_policy.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -123,6 +125,7 @@ jobs:
                 Core/Src/test_relay_health_frame.c) extra="Core/Src/relay_health_diag.c" ;;
                 Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
                 Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_gear_limits.c) extra="Core/Src/gear_limits_store.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -130,6 +133,20 @@ jobs:
                 "$src" $extra -lm -o "$exe"
               "$exe"
             done
+
+            echo "-- test_rc_arbiter_policy.c (local-only bench build)"
+            gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -DRC_OVERRIDE_ENABLED=0 \
+              -Ianalysis_artifacts/stubs -ICore/Inc \
+              Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+              -o /tmp/test_rc_arbiter_disabled
+            /tmp/test_rc_arbiter_disabled
+
+            echo "-- test_rc_arbiter_policy.c (future RC-enabled contract)"
+            gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -DRC_OVERRIDE_ENABLED=1 \
+              -Ianalysis_artifacts/stubs -ICore/Inc \
+              Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+              -o /tmp/test_rc_arbiter_enabled
+            /tmp/test_rc_arbiter_enabled
 
             # Section-L integration test: compiles the EFFECTIVE (patched)
             # relay sequencer + real EPS authority and proves PC12 stays OFF
@@ -309,6 +326,51 @@ jobs:
               -Iesp32/src -Iesp32/test_stubs \
               -o /tmp/test_remote_control
             /tmp/test_remote_control
+
+            echo "-- test_rc_disabled.cpp"
+            g++ -std=c++17 -DREMOTE_CONTROL_ENABLED=0 \
+              esp32/src/test_rc_disabled.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_rc_disabled
+            /tmp/test_rc_disabled
+
+            echo "-- test_cmd_mode_transaction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_cmd_mode_transaction.cpp \
+              -o /tmp/test_cmd_mode_transaction
+            /tmp/test_cmd_mode_transaction
+
+            echo "-- test_decor_modes.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror \
+              esp32/src/test_decor_modes.cpp -o /tmp/test_decor_modes
+            /tmp/test_decor_modes
+
+            echo "-- test_knight_rider.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror \
+              esp32/src/test_knight_rider.cpp -o /tmp/test_knight_rider
+            /tmp/test_knight_rider
+
+            echo "-- test_obstacle_sensor.cpp (TOFSense-M)"
+            g++ -std=c++17 -Wall -Wextra -Werror -Wno-unused-function \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=0 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tof
+            /tmp/test_obstacle_sensor_tof
+
+            echo "-- test_obstacle_sensor.cpp (TF-Mini Plus)"
+            g++ -std=c++17 -Wall -Wextra -Werror -Wno-unused-function \
+              -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=1 \
+              -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/sensors/obstacle_sensor.cpp esp32/src/test_obstacle_sensor.cpp \
+              -o /tmp/test_obstacle_sensor_tfmini
+            /tmp/test_obstacle_sensor_tfmini
+
+            echo "-- test_hmi_steering_polarity.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_hmi_steering_polarity.cpp \
+              -o /tmp/test_hmi_steering_polarity
+            /tmp/test_hmi_steering_polarity
 
             echo "-- test_shifter_input.cpp"
             g++ -std=c++17 esp32/src/shifter_input.cpp esp32/src/test_shifter_input.cpp \

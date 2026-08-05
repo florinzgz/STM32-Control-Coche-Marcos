@@ -54,11 +54,18 @@ int main(void)
 
     CHECK(NEAR(EpsAssist_EffectiveCoastBand(3.0f, true), 1.0f));
     CHECK(NEAR(EpsAssist_EffectiveCoastBand(3.0f, false), 3.0f));
-    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, true), 4.0f));
-    CHECK(NEAR(EpsAssist_EffectiveMinDrive(3.0f, true), 3.0f));
-    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, false), 8.0f));
-    CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true), 1.5f));
-    CHECK(NEAR(EpsAssist_EffectiveSlewRate(1.0f, true), 1.0f));
+    /* At low speed (≤8.0 km/h) the breakaway cap applies. */
+    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, true, 7.9f), 4.0f));
+    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, true, 8.0f), 4.0f));
+    /* At 8.1 km/h the cap no longer applies — full configured value. */
+    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, true, 8.1f), 8.0f));
+    CHECK(NEAR(EpsAssist_EffectiveMinDrive(3.0f, true, 5.0f), 3.0f));
+    CHECK(NEAR(EpsAssist_EffectiveMinDrive(8.0f, false, 5.0f), 8.0f));
+    /* Slew rate cap also only at low speed. */
+    CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true, 7.9f), 1.5f));
+    CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true, 8.0f), 1.5f));
+    CHECK(NEAR(EpsAssist_EffectiveSlewRate(5.883f, true, 8.1f), 5.883f));
+    CHECK(NEAR(EpsAssist_EffectiveSlewRate(1.0f, true, 5.0f), 1.0f));
 
     /* Damping may reduce assistance, but never reverse its sign. */
     CHECK(NEAR(EpsAssist_ApplyDamping(4.5f, 0.1f, 10.0f), 3.5f));
@@ -81,10 +88,11 @@ int main(void)
     CHECK(!EpsAssist_DirectionChanged(1, &flip_state, false));
 
     /* The complete driver-intent path resolves to a bounded 4 % breakaway,
-     * not the historical 8 % step and never to the opposite direction. */
+     * not the historical 8 % step and never to the opposite direction.
+     * Use low speed (5.0 km/h) so the cap applies.                      */
     EpsOutputDecision_t output = EpsOutput_Resolve(
         1.25f, EpsAssist_EffectiveCoastBand(3.0f, true),
-        EpsAssist_EffectiveMinDrive(8.0f, true));
+        EpsAssist_EffectiveMinDrive(8.0f, true, 5.0f));
     CHECK(!output.coast && NEAR(output.pwm_pct, 4.0f));
 
     d = EpsAssist_Resolve(&state, 600U, NAN, 0.0f,

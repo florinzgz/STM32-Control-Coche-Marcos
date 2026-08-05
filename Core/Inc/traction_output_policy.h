@@ -8,6 +8,10 @@
 #define TRACTION_OUTPUT_WHEEL_COUNT 4U
 #define TRACTION_OUTPUT_UNITY_EPSILON 1.0e-6f
 
+/* Final PR441 validation anchor: both 4x4 and installed rear-drive 4x2 use
+ * this reduction-only policy, so the registered workflows compile the same
+ * path that reaches the physical BTS7960 outputs. */
+
 /* These values intentionally mirror motor_mode_t without including the
  * hardware-heavy motor_control.h.  motor_control_patched.c asserts the mapping
  * at compile time before applying a plan to real BTS7960 outputs. */
@@ -152,6 +156,8 @@ static inline bool TractionOutput_Resolve4x2Rear(
     const uint8_t logical_mode[TRACTION_OUTPUT_WHEEL_COUNT],
     const int8_t logical_direction[TRACTION_OUTPUT_WHEEL_COUNT],
     const uint16_t logical_pwm[TRACTION_OUTPUT_WHEEL_COUNT],
+    float steering_angle_deg,
+    float deadband_deg,
     const float wheel_scale[TRACTION_OUTPUT_WHEEL_COUNT],
     uint16_t pwm_max,
     TractionOutputPlan *out)
@@ -183,6 +189,31 @@ static inline bool TractionOutput_Resolve4x2Rear(
         logical_pwm[TRACTION_OUTPUT_FL], wheel_scale[TRACTION_OUTPUT_RL], pwm_max);
     out->pwm[TRACTION_OUTPUT_RR] = TractionOutput_CapPwmByScale(
         logical_pwm[TRACTION_OUTPUT_FR], wheel_scale[TRACTION_OUTPUT_RR], pwm_max);
+
+    /* In straight-line rear drive, neutralise any residual logical Ackermann or
+     * per-wheel history by reducing both driven wheels to the safer minimum.
+     * A real ABS/TCS scale disables equalisation so no limiter is bypassed. */
+    const bool rear_unlimited =
+        isfinite(steering_angle_deg) && isfinite(deadband_deg) &&
+        deadband_deg > 0.0f && fabsf(steering_angle_deg) < deadband_deg &&
+        isfinite(wheel_scale[TRACTION_OUTPUT_RL]) &&
+        isfinite(wheel_scale[TRACTION_OUTPUT_RR]) &&
+        fabsf(wheel_scale[TRACTION_OUTPUT_RL] - 1.0f) <=
+            TRACTION_OUTPUT_UNITY_EPSILON &&
+        fabsf(wheel_scale[TRACTION_OUTPUT_RR] - 1.0f) <=
+            TRACTION_OUTPUT_UNITY_EPSILON;
+    const bool same_direction =
+        out->direction[TRACTION_OUTPUT_RL] != 0 &&
+        out->direction[TRACTION_OUTPUT_RL] ==
+            out->direction[TRACTION_OUTPUT_RR];
+    if (rear_unlimited && same_direction) {
+        const uint16_t equal_pwm =
+            out->pwm[TRACTION_OUTPUT_RL] < out->pwm[TRACTION_OUTPUT_RR]
+            ? out->pwm[TRACTION_OUTPUT_RL]
+            : out->pwm[TRACTION_OUTPUT_RR];
+        out->pwm[TRACTION_OUTPUT_RL] = equal_pwm;
+        out->pwm[TRACTION_OUTPUT_RR] = equal_pwm;
+    }
     return true;
 }
 

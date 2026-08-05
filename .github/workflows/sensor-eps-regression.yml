@@ -7,8 +7,27 @@ on:
     paths:
       - 'Makefile'
       - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/can_rx_policy.h'
+      - 'Core/Inc/can_holdover_policy.h'
+      - 'Core/Inc/service_hold_policy.h'
+      - 'Core/Inc/rc_arbiter.h'
       - 'Core/Inc/motor_control.h'
+      - 'Core/Inc/gear_limits_store.h'
+      - 'Core/Inc/traction_output_policy.h'
       - 'Core/Src/can_handler.c'
+      - 'Core/Src/rc_arbiter.c'
+      - 'Core/Src/safety_system_patched.c'
+      - 'Core/Src/pedal_cal_store.c'
+      - 'Core/Src/test_can_rx_policy.c'
+      - 'Core/Src/test_holdover_service_policy.c'
+      - 'Core/Src/test_rc_arbiter_policy.c'
+      - 'STM32G474RETX_FLASH.ld'
+      - 'Core/Src/gear_limits_store.c'
+      - 'Core/Src/test_gear_limits.c'
+      - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_steering_z.c'
+      - 'Core/Src/steering_z.c'
+      - 'Core/Src/encoder_reader.c'
       - 'Core/Src/main.c'
       - 'esp32/include/can_ids.h'
       - 'esp32/src/vehicle_data.h'
@@ -30,17 +49,41 @@ on:
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/src/screens/safe_screen.cpp'
+      - 'esp32/src/ui/ui_common.h'
+      - 'esp32/src/test_hmi_steering_polarity.cpp'
       - 'esp32/host_tests/test_degraded_banner.cpp'
       - 'esp32/src/traction_limit_diag_view.h'
       - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
+      - 'Core/Inc/steering_z.h'
+      - 'Core/Inc/encoder_reader.h'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'Makefile'
       - 'Core/Inc/can_handler.h'
+      - 'Core/Inc/can_rx_policy.h'
+      - 'Core/Inc/can_holdover_policy.h'
+      - 'Core/Inc/service_hold_policy.h'
+      - 'Core/Inc/rc_arbiter.h'
       - 'Core/Inc/motor_control.h'
+      - 'Core/Inc/gear_limits_store.h'
+      - 'Core/Inc/traction_output_policy.h'
       - 'Core/Src/can_handler.c'
+      - 'Core/Src/rc_arbiter.c'
+      - 'Core/Src/safety_system_patched.c'
+      - 'Core/Src/pedal_cal_store.c'
+      - 'Core/Src/test_can_rx_policy.c'
+      - 'Core/Src/test_holdover_service_policy.c'
+      - 'Core/Src/test_rc_arbiter_policy.c'
+      - 'STM32G474RETX_FLASH.ld'
+      - 'Core/Src/gear_limits_store.c'
+      - 'Core/Src/test_gear_limits.c'
+      - 'Core/Src/test_traction_output_policy.c'
+      - 'Core/Src/test_steering_z.c'
+      - 'Core/Src/steering_z.c'
+      - 'Core/Src/encoder_reader.c'
       - 'Core/Src/main.c'
       - 'esp32/include/can_ids.h'
       - 'esp32/src/vehicle_data.h'
@@ -62,10 +105,15 @@ on:
       - 'esp32/src/degraded_banner.h'
       - 'esp32/src/screens/drive_screen.cpp'
       - 'esp32/src/screens/drive_screen.h'
+      - 'esp32/src/screens/safe_screen.cpp'
+      - 'esp32/src/ui/ui_common.h'
+      - 'esp32/src/test_hmi_steering_polarity.cpp'
       - 'esp32/host_tests/test_degraded_banner.cpp'
       - 'esp32/src/traction_limit_diag_view.h'
       - 'esp32/src/test_traction_limit_diag_decode.cpp'
       - '.github/workflows/sensor-eps-regression.yml'
+      - 'Core/Inc/steering_z.h'
+      - 'Core/Inc/encoder_reader.h'
 
 permissions:
   contents: read
@@ -102,6 +150,66 @@ jobs:
       - name: Effective production EPS wrapper
         run: python3 scripts/check_effective_eps_wrapper.py
 
+      - name: Gear-limit defaults and production validation
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_gear_limits.c Core/Src/gear_limits_store.c -lm \
+            -o /tmp/test_gear_limits
+          /tmp/test_gear_limits
+          grep -Eq '^#define GEAR_LIMIT_R_DEFAULT_PCT[[:space:]]+60U$' Core/Inc/gear_limits_store.h
+          grep -Eq '^#define GEAR_LIMIT_R_MAX_PCT[[:space:]]+60U$' Core/Inc/gear_limits_store.h
+
+      - name: Straight-line physical traction policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST -ICore/Inc \
+            Core/Src/test_traction_output_policy.c -lm \
+            -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+          grep -q 'Steering_GetCurrentAngle()' Core/Src/motor_control_patched.c
+
+      - name: PB5 and encoder-Z policy
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_steering_z.c Core/Src/steering_z.c \
+            -o /tmp/test_steering_z
+          /tmp/test_steering_z
+          ! grep -q '__HAL_TIM_SET_COUNTER' Core/Src/encoder_reader.c
+          grep -q 'if (!pb5_confirmed)' Core/Src/steering_z.c
+
+      - name: Local-only authority, CAN firewall and bounded holdover
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_can_rx_policy.c -o /tmp/test_can_rx_policy
+          /tmp/test_can_rx_policy
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_holdover_service_policy.c \
+            -o /tmp/test_holdover_service_policy
+          /tmp/test_holdover_service_policy
+          gcc -std=c11 -Wall -Wextra -Werror -DHOST_TEST \
+            -DRC_OVERRIDE_ENABLED=0 -Ianalysis_artifacts/stubs -ICore/Inc \
+            Core/Src/test_rc_arbiter_policy.c Core/Src/rc_arbiter.c \
+            -o /tmp/test_rc_arbiter_disabled
+          /tmp/test_rc_arbiter_disabled
+          grep -q -- '-DRC_OVERRIDE_ENABLED=0' Makefile
+          grep -q 'CAN_HOLDOVER_MAX_MS' Core/Inc/can_holdover_policy.h
+          grep -q 'CanHoldover_Expired' Core/Src/safety_system_patched.c
+          grep -q 'FDCAN_REJECT' Core/Src/can_handler.c
+          grep -q '#define CAN_PERIODIC_TEST_FRAME_ENABLED 0' Core/Src/main.c
+          grep -q '#if CAN_PERIODIC_TEST_FRAME_ENABLED' Core/Src/main.c
+
+      - name: HMI steering polarity contract
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+            esp32/src/test_hmi_steering_polarity.cpp \
+            -o /tmp/test_hmi_steering_polarity
+          /tmp/test_hmi_steering_polarity
+          grep -q 'clampRoadWheelTenths(steeringAngle_)' \
+            esp32/src/screens/safe_screen.cpp
+
       - name: Traction limit CAN frame contract
         run: |
           gcc -std=c11 -Wall -Wextra -Werror -ICore/Inc \
@@ -125,3 +233,8 @@ jobs:
         run: |
           grep -q 'CurrentPlausibility_IsFault' Core/Src/safety_system.c
           grep -q 'curDegradedLevel_' esp32/src/screens/drive_screen.cpp
+          grep -q 'if (!ok && service_ok) pedalcal_service_exit();' Core/Src/can_handler.c
+          grep -q 'Safety_GetState() == SYS_STATE_STANDBY' Core/Src/can_handler.c
+          grep -q 'PCAL_JOURNAL_MAGIC' Core/Src/pedal_cal_store.c
+          grep -q 'GLIM_MAGIC_V3' Core/Src/gear_limits_store.c
+          grep -q '0x08076000' STM32G474RETX_FLASH.ld

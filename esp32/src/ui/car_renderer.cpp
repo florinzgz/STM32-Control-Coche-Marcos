@@ -265,9 +265,29 @@ void CarRenderer::drawWheelCapsule(TFT_eSPI& tft,
 // -------------------------------------------------------------------------
 void CarRenderer::drawSteering(TFT_eSPI& tft,
                                int16_t angleRaw,
-                               int16_t prevAngleRaw) {
-    if (angleRaw == prevAngleRaw) return;
-    drawSteeringWheelDynamic(tft, angleRaw);
+                               int16_t prevAngleRaw,
+                               bool valid,
+                               bool prevValid) {
+    if (angleRaw == prevAngleRaw && valid == prevValid) return;
+    if (valid) {
+        drawSteeringWheelDynamic(tft, angleRaw);
+        return;
+    }
+
+    // Explicit unknown state: never present a stale steering angle as real.
+    tft.fillRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_FACE);
+    tft.drawRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_RING);
+    tft.fillCircle(SWHEEL_CX, SWHEEL_CY, SWHEEL_POD_R, COL_BG);
+    tft.drawCircle(SWHEEL_CX, SWHEEL_CY, SWHEEL_POD_R, COL_DIAL_RING);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(COL_GRAY, COL_DIAL_FACE);
+    tft.drawString("STEERING WHEEL", SWHEEL_CX, SWHEEL_TXT_Y1);
+    tft.setTextSize(2);
+    tft.drawString("--", SWHEEL_CX, SWHEEL_VAL_Y);
+    tft.setTextSize(1);
+    tft.drawString("WHEEL ANGLE --", SWHEEL_CX, SWHEEL_TXT_Y2);
+    tft.setTextDatum(TL_DATUM);
 }
 
 // -------------------------------------------------------------------------

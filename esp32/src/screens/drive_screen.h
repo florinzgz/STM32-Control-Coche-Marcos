@@ -88,7 +88,12 @@ private:
     uint16_t prevSpeedAvgRaw_    = 0;
     uint16_t prevBattVoltRaw_    = 0;
     uint8_t  prevPedalPct_       = 0;
-    ui::Gear prevGear_           = ui::Gear::P;
+    ui::Gear prevGear_           = ui::Gear::P;  // STM32-applied
+    ui::Gear prevRequestedGear_  = ui::Gear::P;  // physical lever
+    bool     prevGearValid_      = false;
+    bool     prevSpeedStale_     = true;
+    bool     prevSteeringStale_  = true;
+    bool     prevPedalStale_     = true;
     ui::ModeState prevMode_      = {};
     uint16_t prevObstacleCm_     = 0;
     bool     prevFrontLedOn_     = false;
@@ -104,7 +109,12 @@ private:
     uint16_t prevRpmAvg_         = 0;
     uint16_t curBattVoltRaw_     = 0;
     uint8_t  curPedalPct_        = 0;
-    ui::Gear curGear_            = ui::Gear::P;
+    ui::Gear curGear_            = ui::Gear::P;  // STM32-applied
+    ui::Gear curRequestedGear_   = ui::Gear::P;  // physical lever
+    bool     curGearValid_       = false;
+    bool     curSpeedStale_      = true;
+    bool     curSteeringStale_   = true;
+    bool     curPedalStale_      = true;
     ui::ModeState curMode_       = {};
     uint16_t curObstacleCm_      = 0;
     bool     curFrontLedOn_      = false;
