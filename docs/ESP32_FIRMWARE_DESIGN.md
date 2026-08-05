@@ -156,7 +156,7 @@ These are the messages the ESP32 will **receive and parse**. IDs 0x001–0x300 a
 | 0x200 | STATUS_SPEED | 4 × uint16 LE wheel speeds (×0.1 km/h) | 100 ms |
 | 0x201 | STATUS_CURRENT | 4 × uint16 LE motor currents (×0.01 A) | 100 ms |
 | 0x202 | STATUS_TEMP | 5 × int8 temperatures (°C) | 1000 ms |
-| 0x203 | STATUS_SAFETY | `abs_active` (byte 0), `tcs_active` (byte 1), `error_code` (byte 2) | 100 ms |
+| 0x203 | STATUS_SAFETY | `abs_active` (b0), `tcs_active` (b1), `error_code` (b2), `state` (b3), `rx_errors` (b4), `loop_peak_100us` (b5) — DLC 6 | 100 ms |
 | 0x204 | STATUS_STEERING | int16 LE actual angle (×0.1°), `calibrated` (byte 2) | 100 ms |
 | 0x205 | STATUS_TRACTION | 4 × uint8 per-wheel traction scale (%) | 100 ms |
 | 0x206 | STATUS_TEMP_MAP | 5 × int8 mapped temps: FL, FR, RL, RR, Ambient (°C) | 1000 ms |

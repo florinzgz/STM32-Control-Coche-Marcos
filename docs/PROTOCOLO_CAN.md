@@ -517,7 +517,7 @@ ESP32                              STM32
 | 0x200 STATUS_SPEED (DLC 8) [era 0x300] | 16 bytes | 10 Hz | 160 | 0.26% |
 | 0x201 STATUS_CURRENT (DLC 8) [era 0x301] | 16 bytes | 10 Hz | 160 | 0.26% |
 | 0x202 STATUS_TEMP (DLC 5) [era 0x302] | 13 bytes | 1 Hz | 13 | 0.02% |
-| 0x203 STATUS_SAFETY (DLC 3) [era 0x303] | 11 bytes | 10 Hz | 110 | 0.18% |
+| 0x203 STATUS_SAFETY (DLC 6) [era 0x303] | 14 bytes | 10 Hz | 140 | 0.22% |
 | 0x204 STATUS_STEERING (DLC 3) [era 0x304] | 11 bytes | 10 Hz | 110 | 0.18% |
 | **TOTAL** | | | **~1,153** | **~1.85%** |
 

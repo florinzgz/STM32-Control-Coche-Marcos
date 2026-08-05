@@ -103,7 +103,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x200 | STATUS_SPEED | 8 | 100 ms | Four wheel speeds | `can_handler.c`, `main.c` |
 | 0x201 | STATUS_CURRENT | 8 | 100 ms | Four motor currents | `can_handler.c`, `main.c` |
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
-| 0x203 | STATUS_SAFETY | 5 | 100 ms | ABS/TCS active flags, error code, system state, rx_errors | `can_handler.c`, `main.c` |
+| 0x203 | STATUS_SAFETY | 6 | 100 ms | ABS/TCS active flags, error code, system state, rx_errors, loop peak | `can_handler.c`, `main.c` |
 | 0x204 | STATUS_STEERING | 3 | 100 ms | Actual steering angle and calibration flag | `can_handler.c`, `main.c` |
 | 0x205 | STATUS_TRACTION | 4 | 100 ms | **ABS/TCS LIMIT** (power ALLOWED per wheel, `wheel_scale*100`). 100=not limited by ABS/TCS, 0=wheel inhibited. NOT torque/thrust/applied-PWM. Kept for compatibility; real applied effort now lives in 0x20C. | `can_handler.c`, `main.c` |
 | 0x20C | STATUS_WHEEL_EFFORT | 4 | 100 ms | **Final applied PWM %** per wheel after pedal/ramp/gear/ABS/TCS/jerk/DRIVE-BRAKE-COAST/EN: byte0=FL, byte1=FR, byte2=RL, byte3=RR (0–100). COAST/BRAKE/disabled wheel=0. This is what the HMI shows as the per-wheel %. | `can_handler.c`, `main.c` |
@@ -264,6 +264,16 @@ Source: `CAN_SendStatusTemp()` in `can_handler.c`, called from `main.c`
 | 2 | error_code | uint8 | Current safety error code (see section 6) |
 | 3 | state | uint8 | Current system state (`system_state`) |
 | 4 | rx_errors | uint8 | FDCAN RX error counter |
+| 5 | loop_peak_100us | uint8 | Peak 100 Hz task duration, ×100 µs, saturated at 255 (= 25.5 ms) |
+
+**DLC:** 6 (transmitted). Receivers MUST accept DLC ≥ 5: byte 5 was added in
+contract rev 1.4 and a pre-rev-1.4 sender reports `loop_peak_100us = 0` ("n/a").
+
+Single source of truth for this layout: `Core/Inc/status_safety_frame.h`
+(`StatusSafetyFrame_Pack` / `StatusSafetyFrame_Unpack`, `STATUS_SAFETY_DLC` = 6,
+`STATUS_SAFETY_DLC_MIN` = 5), mirrored on the ESP32 by
+`can::STATUS_SAFETY_DLC_TX` / `can::STATUS_SAFETY_DLC_RX_MIN` and asserted by
+`esp32/src/test_frame_parity_cross.cpp`.
 
 Source: `CAN_SendStatusSafety()` in `can_handler.c`, called from `main.c`
 
