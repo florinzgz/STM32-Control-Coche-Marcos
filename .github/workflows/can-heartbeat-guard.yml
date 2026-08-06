@@ -1,6 +1,7 @@
 name: CAN Heartbeat Guard
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'esp32/src/can/can_heartbeat_guard*'

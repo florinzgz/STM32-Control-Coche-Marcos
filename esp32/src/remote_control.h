@@ -27,11 +27,10 @@
 //                                       CAN status / 0x10A override frames may still
 //                                       be emitted with override_flag=0)
 //
-// **Disabled in the bench build** via `-DREMOTE_CONTROL_ENABLED=0` in
-// platformio.ini (restored to 1 only in a follow-up after bench validation).
-// When compiled with `-DREMOTE_CONTROL_ENABLED=0` this header still compiles
-// and exposes stub-safe inline no-ops so main.cpp can reference the API
-// without conditional compilation everywhere.  The real implementation in
+// The production PlatformIO firmware defines `REMOTE_CONTROL_ENABLED=1`.
+// Host/bench builds may pass `-DREMOTE_CONTROL_ENABLED=0`; this header still
+// compiles and exposes stub-safe inline no-ops so main.cpp can reference the
+// API without conditional compilation everywhere.  The real implementation in
 // remote_control.cpp links in whenever the flag is non-zero.
 //
 // **STM32 invariants preserved**: this module never sends frames out of range,
@@ -149,7 +148,7 @@ Stats getStats();
 /// has been received or index out of range.  For diagnostics only.
 uint16_t getChannelRaw(uint8_t ch);
 
-#else  // REMOTE_CONTROL_ENABLED == 0  (default — module compiled out)
+#else  // REMOTE_CONTROL_ENABLED == 0  (explicit stub build)
 
 inline void     init(const Config& = Config{}) {}
 inline void     update() {}

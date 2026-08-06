@@ -18,6 +18,7 @@
 #include "ui/ui_common.h"
 #include "ui/ui_config.h"
 #include "ui/render_trace.h"
+#include "ui/sensor_fault_hint.h"
 #include "can_ids.h"
 #include <TFT_eSPI.h>
 #include <Arduino.h>
@@ -166,6 +167,24 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         wheelFaultMask_ = wd.faultMask;
     }
 
+    // Cache the pedal (0x20B) and service-fault (0x301/0x303) diagnostic
+    // inputs used by the SENSOR_FAULT (code 4) cause hint.  Same 2 s
+    // freshness convention as the wheel-diag hint above.
+    {
+        const auto& pd = data.pedal();
+        pedalExtended_      = pd.extended;
+        pedalPlausible_     = pd.plausible;
+        pedalContradictory_ = pd.contradictory;
+        pedalFresh_         = (pd.timestampMs > 0) &&
+                               ((frameTimeMs - pd.timestampMs) <= 2000UL);
+
+        const auto& sd = data.service();
+        serviceFaultMask_    = sd.faultMask;
+        serviceDisabledMask_ = sd.disabledMask;
+        serviceFresh_        = (sd.faultTimestampMs > 0) &&
+                                ((frameTimeMs - sd.faultTimestampMs) <= 2000UL);
+    }
+
     // ---- Compute tile hashes ----
     // Feed canLost_ into the fault/safety/diag hashes so the "(STALE)" marker
     // appears/clears correctly: on CAN loss these values are the last frame
@@ -184,6 +203,17 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         fh = ui::tileHashFeed(fh, wheelDiagValid_ ? 1u : 0u);
         fh = ui::tileHashFeed(fh, wheelFaultMask_);
         for (uint8_t i = 0; i < 5; ++i) fh = ui::tileHashFeed(fh, wheelReason_[i]);
+        // Fold the SENSOR_FAULT cause-hint inputs so the tile refreshes when
+        // the pedal/service diagnostic changes even though errorCode_ and
+        // faultFlags_ stay constant (e.g. the culprit INA226 channel changes).
+        fh = ui::tileHashFeed(fh, errorCode_);
+        fh = ui::tileHashFeed(fh, pedalExtended_ ? 1u : 0u);
+        fh = ui::tileHashFeed(fh, pedalPlausible_ ? 1u : 0u);
+        fh = ui::tileHashFeed(fh, pedalContradictory_ ? 1u : 0u);
+        fh = ui::tileHashFeed(fh, pedalFresh_ ? 1u : 0u);
+        fh = ui::tileHashFeed(fh, serviceFaultMask_);
+        fh = ui::tileHashFeed(fh, serviceDisabledMask_);
+        fh = ui::tileHashFeed(fh, serviceFresh_ ? 1u : 0u);
         tiles_.updateHash(ETILE_FAULTS, fh);
     }
     {
@@ -377,6 +407,24 @@ void ErrorScreen::draw() {
             }
             tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
             tft.drawString(hbuf, 250, 150);
+        } else if (errorCode_ == ui::SAFETY_ERROR_SENSOR_FAULT_CODE) {
+            // ---- SENSOR_FAULT (code 4) cause hint: pedal / INA226 / temp /
+            // wheel (fallback) ----
+            // Reuses this same hint slot (mutually exclusive with the
+            // WHEEL_SENSOR hint above) to name which underlying sensor raised
+            // the generic SENSOR FAULT.  See esp32/src/ui/sensor_fault_hint.h
+            // for the priority/format rules; falls back silently (no text) if
+            // no specific cause can be identified from the cached CAN data.
+            char hbuf[40];
+            ui::SensorFaultCause cause = ui::buildSensorFaultHint(
+                errorCode_,
+                pedalExtended_, pedalPlausible_, pedalContradictory_, pedalFresh_,
+                serviceFaultMask_, serviceDisabledMask_, serviceFresh_,
+                hbuf, sizeof(hbuf));
+            if (cause != ui::SensorFaultCause::NONE) {
+                tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+                tft.drawString(hbuf, 250, 150);
+            }
         }
         tiles_.markClean(ETILE_FAULTS);
     }

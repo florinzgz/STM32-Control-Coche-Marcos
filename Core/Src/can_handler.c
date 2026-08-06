@@ -33,6 +33,7 @@
 #include "relay_health_frame.h"
 #include "ina226_ch5_frame.h"
 #include "traction_limit_frame.h"
+#include "status_safety_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include "can_rx_policy.h"
@@ -652,24 +653,28 @@ void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5) {
 
 void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code,
                           uint8_t loop_peak_100us) {
-    uint8_t safety_data[6];
+    uint8_t safety_data[STATUS_SAFETY_DLC];
 
-    safety_data[0] = abs ? 1 : 0;
-    safety_data[1] = tcs ? 1 : 0;
-    safety_data[2] = error_code;
-    /* Byte 3: system state (SYS_STATE_*) for HMI display.
-     * Byte 4: saturated CAN RX error count for diagnostics.
-     * Byte 5: peak 100 Hz task duration in 100 µs units, saturated
-     *         at 255 (= 25.5 ms).  Pure observational; resets each
-     *         TX cycle.  Roadmap additive item #1.
-     * Backward compatible: ESP32 parsers that only read bytes 0–2
-     * will ignore the additional payload (DLC ≥ 5 check passes).  */
-    safety_data[3] = (uint8_t)Safety_GetState();
-    safety_data[4] = (can_stats.rx_errors > 255) ? 255
-                     : (uint8_t)can_stats.rx_errors;
-    safety_data[5] = loop_peak_100us;
+    /* Layout, DLC and forward-compatibility rules live in ONE place:
+     * Core/Inc/status_safety_frame.h (shared with the ESP32 decoder and
+     * the host round-trip test), so the wire contract cannot drift.
+     *   b0 abs, b1 tcs, b2 error_code, b3 system state,
+     *   b4 saturated CAN RX error count,
+     *   b5 peak 100 Hz task duration in 100 us units (observational,
+     *      reset each TX cycle).
+     * Receivers accepting DLC >= 5 stay valid; byte 5 is optional. */
+    StatusSafetyFrame_t f;
+    f.abs_active      = abs;
+    f.tcs_active      = tcs;
+    f.error_code      = error_code;
+    f.state           = (uint8_t)Safety_GetState();
+    f.rx_errors       = (can_stats.rx_errors > 255) ? 255U
+                        : (uint8_t)can_stats.rx_errors;
+    f.loop_peak_100us = loop_peak_100us;
 
-    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 6);
+    uint8_t len = StatusSafetyFrame_Pack(&f, safety_data);
+
+    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, len);
 }
 
 void CAN_SendStatusSteering(int16_t angle, bool calibrated) {

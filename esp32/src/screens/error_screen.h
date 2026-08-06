@@ -61,6 +61,22 @@ private:
     uint8_t  wheelReason_[5]  = {0, 0, 0, 0, 0};  // FL,FR,RL,RR,STEER
     uint8_t  wheelFaultMask_  = 0;
     bool     wheelDiagValid_  = false;
+
+    // Sensor-fault (Safety_Error_t code 4) cause hint inputs, cached from CAN
+    // 0x20B STATUS_PEDAL and 0x301/0x303 SERVICE_FAULTS/SERVICE_DISABLED so
+    // the FAULTS tile can name the culprit (pedal / INA226 channel / temp
+    // sensor / wheel) when the wheel-specific 0x313 hint above has nothing to
+    // show.  "Fresh" mirrors wheelDiagValid_: a boolean computed once in
+    // update() (not a raw age) so the tile hash stays stable frame-to-frame.
+    // See esp32/src/ui/sensor_fault_hint.h for the priority/format rules.
+    bool     pedalExtended_       = false;
+    bool     pedalPlausible_      = true;
+    bool     pedalContradictory_  = false;
+    bool     pedalFresh_          = false;
+    uint32_t serviceFaultMask_    = 0;
+    uint32_t serviceDisabledMask_ = 0;
+    bool     serviceFresh_        = false;
+
     uint8_t  errorCode_      = 0;
     uint8_t  prevErrorCode_  = 0xFF;
     uint8_t  diagCode_       = 0;

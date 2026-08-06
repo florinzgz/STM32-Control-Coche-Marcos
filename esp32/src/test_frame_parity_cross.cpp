@@ -34,6 +34,7 @@
 #include "steering_centering_frame.h"
 #include "relay_health_frame.h"
 #include "ina226_ch5_frame.h"
+#include "status_safety_frame.h"
 
 // ---- ESP32 (view decoders + wire constants) ----
 #include "can_ids.h"
@@ -235,11 +236,67 @@ static void test_ina_parity(void) {
     CHECK(vp.busMilliVolts == 65535);
 }
 
+// ---- 0x203 STATUS_SAFETY wire contract -----------------------------------
+// The historic drift on this frame was its DLC (docs said 3 / 5 / 6 while the
+// STM32 transmitted 6).  Lock the single definition down: DLC 6 transmitted,
+// DLC >= 5 accepted, byte 5 optional.
+static void test_status_safety_parity(void) {
+    // The ESP32 mirror constants must equal the STM32 authority.
+    CHECK(can::STATUS_SAFETY_DLC_TX     == STATUS_SAFETY_DLC);
+    CHECK(can::STATUS_SAFETY_DLC_RX_MIN == STATUS_SAFETY_DLC_MIN);
+    CHECK(STATUS_SAFETY_DLC == 6U);
+    CHECK(STATUS_SAFETY_DLC_MIN == 5U);
+
+    StatusSafetyFrame_t in{};
+    in.abs_active      = true;
+    in.tcs_active      = false;
+    in.error_code      = 9;      // battery undervoltage warning
+    in.state           = 3;      // SYS_STATE_*
+    in.rx_errors       = 250;
+    in.loop_peak_100us = 95;     // 9.5 ms
+
+    uint8_t wire[STATUS_SAFETY_DLC] = {0};
+    CHECK(StatusSafetyFrame_Pack(&in, wire) == STATUS_SAFETY_DLC);
+
+    // Byte positions are part of the contract — assert them literally.
+    CHECK(wire[0] == 1);
+    CHECK(wire[1] == 0);
+    CHECK(wire[2] == 9);
+    CHECK(wire[3] == 3);
+    CHECK(wire[4] == 250);
+    CHECK(wire[5] == 95);
+
+    StatusSafetyFrame_t out{};
+    CHECK(StatusSafetyFrame_Unpack(wire, STATUS_SAFETY_DLC, &out));
+    CHECK(out.abs_active == in.abs_active);
+    CHECK(out.tcs_active == in.tcs_active);
+    CHECK(out.error_code == in.error_code);
+    CHECK(out.state == in.state);
+    CHECK(out.rx_errors == in.rx_errors);
+    CHECK(out.loop_peak_100us == in.loop_peak_100us);
+
+    // Forward compatibility: a DLC-5 sender is accepted, byte 5 reads as 0.
+    StatusSafetyFrame_t out5{};
+    out5.loop_peak_100us = 42;   // must be overwritten with 0, not left stale
+    CHECK(StatusSafetyFrame_Unpack(wire, STATUS_SAFETY_DLC_MIN, &out5));
+    CHECK(out5.error_code == 9);
+    CHECK(out5.loop_peak_100us == 0);
+
+    // DLC guard: anything shorter than the minimum is rejected outright,
+    // matching decodeSafety()'s `< can::STATUS_SAFETY_DLC_MIN` early return.
+    StatusSafetyFrame_t bad{};
+    CHECK(StatusSafetyFrame_Unpack(wire, 4, &bad) == false);
+    CHECK(StatusSafetyFrame_Unpack(wire, 0, &bad) == false);
+    CHECK(StatusSafetyFrame_Unpack(nullptr, STATUS_SAFETY_DLC, &bad) == false);
+    CHECK(StatusSafetyFrame_Pack(&in, nullptr) == 0);
+}
+
 int main() {
     test_flag_constants_parity();
     test_steering_parity();
     test_relay_parity();
     test_ina_parity();
+    test_status_safety_parity();
     printf("frame_parity_cross: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

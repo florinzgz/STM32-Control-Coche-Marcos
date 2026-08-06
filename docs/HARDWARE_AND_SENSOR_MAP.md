@@ -394,13 +394,19 @@ CAN bus runs at 500 kbps, CAN 2.0A (classic, 11-bit standard IDs).
 
 **Source:** `CAN_SendStatusTemp()` in `can_handler.c`, called from `main.c`
 
-#### STATUS_SAFETY (0x203) — 3 bytes, every 100 ms
+#### STATUS_SAFETY (0x203) — 6 bytes, every 100 ms
 
 | Byte | Field | Type | Description |
 |------|-------|------|-------------|
 | 0 | `abs_active` | uint8 | 1 = ABS currently active, 0 = inactive |
 | 1 | `tcs_active` | uint8 | 1 = TCS currently active, 0 = inactive |
 | 2 | `error_code` | uint8 | `Safety_Error_t` value (0 = none, see table below) |
+| 3 | `state` | uint8 | Current system state (`SYS_STATE_*`) |
+| 4 | `rx_errors` | uint8 | Saturated FDCAN RX error counter |
+| 5 | `loop_peak_100us` | uint8 | Peak 100 Hz task duration, ×100 µs (255 = 25.5 ms) |
+
+DLC 6 transmitted; receivers accept DLC ≥ 5 (byte 5 optional, added in contract
+rev 1.4). Single definition: `Core/Inc/status_safety_frame.h`.
 
 **Safety error codes:**
 
