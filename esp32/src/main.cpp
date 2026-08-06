@@ -1159,9 +1159,8 @@ void setup() {
     shifter::init();
 
     // Initialize remote control parser (FlySky FS-iA6B iBUS, GPIO 16 RX).
-    // Disabled in the current bench build (REMOTE_CONTROL_ENABLED=0);
-    // compiles to an inline no-op while the receiver is excluded.  See
-    // docs/REMOTE_CONTROL_IMPLEMENTATION_PLAN.md Phase 2.
+    // Production builds enable it; host/bench builds may compile it out with
+    // REMOTE_CONTROL_ENABLED=0, in which case this becomes an inline no-op.
     remote_control::init();
 
     // Initialize traction switch (DPDT rocker on GPIO 15)
