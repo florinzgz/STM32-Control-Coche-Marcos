@@ -406,6 +406,12 @@ jobs:
               -o /tmp/test_wheel_diag_hint
             /tmp/test_wheel_diag_hint
 
+            echo "-- test_sensor_fault_hint.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -DHOST_TEST -Iesp32/src/ui \
+              esp32/src/test_sensor_fault_hint.cpp \
+              -o /tmp/test_sensor_fault_hint
+            /tmp/test_sensor_fault_hint
+
             echo "-- test_stm32_liveness.cpp"
             g++ -std=c++17 -Wall -Wextra -Iesp32/src \
               esp32/src/test_stm32_liveness.cpp \
