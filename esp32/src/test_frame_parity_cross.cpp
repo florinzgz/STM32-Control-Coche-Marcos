@@ -59,6 +59,7 @@ static void test_flag_constants_parity(void) {
     CHECK(can::STEER_DIAG_FLAG_RELAY_PC12     == (1U << 3));
     CHECK(can::STEER_DIAG_FLAG_RESTORED_FLASH == (1U << 7));
     CHECK(can::STEER_DIAG_STATUS_PWM_REQUESTED == (1U << 6));
+    CHECK(can::STEER_DIAG_STATUS_CURRENT_GUARD_ARMED == (1U << 7));
 
     // 0x317 relay flags (byte 1) vs Core frame header.
     CHECK(can::RELAY_DIAG_FLAG_RELAY_CMD     == RELAY_FRAME_FLAG_RELAY_CMD);
@@ -91,7 +92,8 @@ static void test_steering_parity(void) {
     wire[2] = can::STEER_DIAG_FLAG_PB5_RAW |
               can::STEER_DIAG_FLAG_RELAY_PC12 |
               can::STEER_DIAG_FLAG_POWER_READY;
-    wire[3] = static_cast<uint8_t>(1U /*state*/ | can::STEER_DIAG_STATUS_PWM_REQUESTED);
+    wire[3] = static_cast<uint8_t>(1U /*state*/ | can::STEER_DIAG_STATUS_PWM_REQUESTED |
+                                   can::STEER_DIAG_STATUS_CURRENT_GUARD_ARMED);
     wire[4] = 0x2C; wire[5] = 0x01;                          // pwm_real = 0x012C = 300
     wire[6] = 0x00; wire[7] = 0xFF;                          // delta = 0xFF00 = -256
 
@@ -114,6 +116,8 @@ static void test_steering_parity(void) {
     CHECK(v.pwmReal == 300);                    // little-endian
     CHECK(v.encoderDelta == f.encoder_delta);
     CHECK(v.encoderDelta == -256);              // signed two's complement
+    CHECK(v.currentGuardArmed == f.current_guard_armed);
+    CHECK(v.currentGuardArmed == true);          // Bloque 2: bit 7 set above
 
     // DLC guard — a short frame (frame present but truncated) is rejected;
     // the HMI keeps its prior "valid=false" MISSING/absent semantics.
@@ -132,6 +136,7 @@ static void test_steering_parity(void) {
     d.pwm_applied_ch2 = 123;
     d.pwm_requested   = 400;
     d.encoder_delta   = -1000;
+    d.current_guard_armed = false;              // Bloque 2: CH5 not armed case
     uint8_t packed[8];
     SteerCentering_PackFrame(&d, packed);
     steering_diag_view::SteeringDiagView vp{};
@@ -139,6 +144,7 @@ static void test_steering_parity(void) {
     CHECK(vp.reason == 5);
     CHECK(vp.pwmReal == 400);                   // max(400,123)
     CHECK(vp.encoderDelta == -1000);
+    CHECK(vp.currentGuardArmed == false);
 }
 
 // ================= 0x317 relay-health =================

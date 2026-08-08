@@ -6811,6 +6811,8 @@ void EngineeringScreen::drawSteerDiag() {
                  v.powerReady ? ui::COL_GREEN : ui::COL_RED);
             hrow("PC4",         v.enPc4 ? "ON" : "OFF",
                  v.enPc4 ? ui::COL_GREEN : ui::COL_RED);
+            hrow("GUARDA CH5",  v.currentGuardArmed ? "ARMADA" : "NO ARMADA",
+                 v.currentGuardArmed ? ui::COL_GREEN : ui::COL_AMBER);
             snprintf(hb, sizeof(hb), "%u", (unsigned)(v.pwmRequested ? 425U : 0U));
             hrow("PWM REQ",     hb, ui::COL_WHITE);
             snprintf(hb, sizeof(hb), "%u", (unsigned)v.pwmReal);

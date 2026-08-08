@@ -45,12 +45,46 @@
 #define ENDSTOP_HARD_CURRENT_MA          20000U
 #define ENDSTOP_STALL_CURRENT_MA          8000U
 
+/* ---- Bloque 2 (P1 audit fix) -------------------------------------------
+ * "Homing a 100% PWM sin guarda efectiva": endstop_pressure_detected() below
+ * can only observe end-of-travel pressure while the CH5 current reading is
+ * trustworthy.  INA226_CH_PRESENT_NO_SHUNT still ACKs and returns a "valid"
+ * shunt read, but the measured current is structurally ~0 A, so the guard
+ * silently never fires — full 100% authority could then push against a
+ * mechanical stop for up to TOTAL_TIMEOUT_MS (10 s) with only the encoder
+ * stall/range fallbacks left, both of which a jittering encoder can defeat.
+ *
+ * Fix (minimal, does not redesign the FSM):
+ *   (a) HOMING_SWEEP_TIMEOUT_MS - a wall-clock ceiling per sweep leg,
+ *       independent of encoder motion and of CH5, mirroring the existing
+ *       end-stop guard's reversal/abort behaviour on expiry.
+ *   (b) HOMING_PWM_REDUCED_PERCENT - full 4249-count (100%) authority is
+ *       only applied while current_guard_armed() confirms CH5 is genuinely
+ *       healthy; otherwise homing falls back to this safer percentage.
+ *   (c) current_guard_armed() is also latched into the 0x316 telemetry
+ *       (SteeringCenteringDiag.current_guard_armed) so the "guard inert"
+ *       state is observable instead of silent.
+ *   (d) INA226_CH_PRESENT_NO_SHUNT keeps classifying as EPS_FAULT_NONE in
+ *       SteeringSupervisor_Ch5ToEpsFault() (steering_supervisor.c) — the
+ *       manual/mechanical steering path must keep working; only the homing
+ *       PWM policy and its diagnostics change here.                       */
+#define HOMING_PWM_REDUCED_PERCENT       55U
+#define HOMING_PWM_REDUCED_COUNTS \
+    ((uint16_t)(((uint32_t)HOMING_PWM_COUNTS * HOMING_PWM_REDUCED_PERCENT) / 100U))
+#define HOMING_SWEEP_TIMEOUT_MS         1000U
+
 _Static_assert(HOMING_PWM_COUNTS == 4249U,
                "homing full authority must match TIM3 period");
 _Static_assert(CENTER_RAW_CONFIRM_CYCLES >= 2U,
                "PB5 level fallback must debounce EMI");
 _Static_assert(ENDSTOP_CONFIRM_SAMPLES >= 2U,
                "end-stop pressure must reject an isolated current spike");
+_Static_assert(HOMING_PWM_REDUCED_PERCENT >= 40U &&
+               HOMING_PWM_REDUCED_PERCENT <= 100U,
+               "reduced homing PWM must stay a safe fraction of full authority");
+_Static_assert(HOMING_SWEEP_TIMEOUT_MS >= 600U && HOMING_SWEEP_TIMEOUT_MS <= 1000U,
+               "max full-authority sweep-leg guard must stay in the mandated "
+               "600-1000ms band");
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
@@ -84,9 +118,35 @@ static bool HomingPowerReady(void)
 #undef Motor_SetPWM_Steering
 #undef Safety_IsPowerReady
 
+/**
+ * @brief  Bloque 2 (P1 audit fix): is the CH5 current end-stop guard armed?
+ *
+ *         "Armed" means endstop_pressure_detected() can actually observe a
+ *         genuine end-of-travel current rise: CH5 ACKs, the shunt read is
+ *         valid, the sample is fresh (same freshness window the guard
+ *         itself requires) AND the channel classifies as fully healthy
+ *         (INA226_CH_OK).  The classifier check is the important part —
+ *         INA226_CH_PRESENT_NO_SHUNT also ACKs and reports shunt_read_ok,
+ *         yet the shunt drop stays ~0 V so current always reads ~0 A and the
+ *         guard can never cross ENDSTOP_STALL_CURRENT_MA /
+ *         ENDSTOP_HARD_CURRENT_MA.  Pure read-only query; drives nothing. */
+static bool current_guard_armed(void)
+{
+    const Ina226ChannelDiag *diag = Sensor_GetChannel5Diag();
+    return diag != NULL && diag->i2c_ack && diag->shunt_read_ok &&
+           diag->sample_age_ms <= ENDSTOP_SAMPLE_MAX_AGE_MS &&
+           diag->fault_reason == INA226_CH_OK;
+}
+
 static void Homing_SetPwm(uint16_t requested_pwm, bool reverse)
 {
-    const uint16_t applied = requested_pwm == 0U ? 0U : HOMING_PWM_COUNTS;
+    /* Full 100% authority is reserved for a confirmed-healthy CH5, because
+     * only then can the fast current guard above stop it quickly.  Whenever
+     * that guard is not armed, fall back to HOMING_PWM_REDUCED_COUNTS so the
+     * new HOMING_SWEEP_TIMEOUT_MS wall-clock guard (see
+     * handle_sweep_leg_timeout()) is the sole, but sufficient, backstop. */
+    const uint16_t applied = requested_pwm == 0U ? 0U :
+        (current_guard_armed() ? HOMING_PWM_COUNTS : HOMING_PWM_REDUCED_COUNTS);
     Motor_SetPWM_Steering(applied, reverse);
 }
 
@@ -165,6 +225,12 @@ typedef struct {
     uint8_t stall_current_samples;
     bool reverse_pending;
     uint32_t reverse_started_ms;
+    /* Bloque 2: wall-clock start of the CURRENT sweep leg.  Unlike
+     * last_motion_ms, this is set ONLY once per new leg (reset_observation())
+     * and is never refreshed by encoder motion, so a jittering encoder
+     * (small counts changing <300ms apart while physically stalled against
+     * the mechanical stop) cannot keep resetting it and defeat the guard. */
+    uint32_t leg_start_ms;
 } HomingGuard;
 
 static HomingGuard s_guard;
@@ -182,6 +248,7 @@ static void reset_observation(CenteringState_t state)
     s_guard.reference_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     s_guard.last_motion_ms = HAL_GetTick();
     s_guard.last_sample_sequence = 0U;
+    s_guard.leg_start_ms = s_guard.last_motion_ms;
     reset_pressure_samples();
 }
 
@@ -195,6 +262,7 @@ static void reset_guard(void)
     reset_pressure_samples();
     s_guard.reverse_pending = false;
     s_guard.reverse_started_ms = 0U;
+    s_guard.leg_start_ms = 0U;
 }
 
 static bool endstop_pressure_detected(void)
@@ -313,6 +381,40 @@ static bool handle_endstop_pressure(void)
     return true;
 }
 
+/**
+ * @brief  Bloque 2 (P1 audit fix): wall-clock ceiling per sweep leg.
+ *
+ *         endstop_pressure_detected() above is the fast, preferred guard but
+ *         depends on CH5 being armed (see current_guard_armed()); the
+ *         encoder stall/range fallbacks inside Homing_BaseStep() depend on
+ *         the encoder actually being quiet.  A jittering encoder (counts
+ *         changing <300ms apart while the rack is physically against the
+ *         stop) defeats both at once, leaving only TOTAL_TIMEOUT_MS (10 s)
+ *         at full authority.  This guard is independent of both signals: it
+ *         only looks at HAL_GetTick() since the CURRENT leg started
+ *         (leg_start_ms, set once per leg and never refreshed by encoder
+ *         motion), so jitter cannot extend it.  On expiry it mirrors
+ *         handle_endstop_pressure()'s own behaviour exactly: zero PWM, then
+ *         reverse if this was the left leg or abort if it was the right. */
+static bool handle_sweep_leg_timeout(void)
+{
+    const CenteringState_t state = centering_state;
+    if (!is_sweep(state) || !s_guard.initialized || s_guard.state != state) {
+        return false;
+    }
+    if ((uint32_t)(HAL_GetTick() - s_guard.leg_start_ms) < HOMING_SWEEP_TIMEOUT_MS) {
+        return false;
+    }
+
+    Homing_SetPwm(0U, false);
+    if (state == CENTERING_SWEEP_LEFT) {
+        begin_right_reverse();
+    } else {
+        Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
+    }
+    return true;
+}
+
 static void transfer_completed_homing_to_eps(void)
 {
     if (centering_state != CENTERING_DONE || Encoder_HasFault() ||
@@ -352,6 +454,7 @@ void SteeringCentering_Step(void)
 
     if (service_reverse_deadtime()) return;
     if (handle_endstop_pressure()) return;
+    if (handle_sweep_leg_timeout()) return;
 
     const CenteringState_t before = centering_state;
     Homing_BaseStep();
@@ -379,9 +482,11 @@ void SteeringCentering_Step(void)
 void SteeringCentering_UpdateDiag(void)
 {
     Homing_BaseUpdateDiag();
+    s_diag.current_guard_armed = current_guard_armed();
     if (s_guard.reverse_pending) {
         s_diag.pwm_requested = 0U;
     } else if (is_sweep(centering_state)) {
-        s_diag.pwm_requested = HOMING_PWM_COUNTS;
+        s_diag.pwm_requested =
+            s_diag.current_guard_armed ? HOMING_PWM_COUNTS : HOMING_PWM_REDUCED_COUNTS;
     }
 }

@@ -51,7 +51,8 @@ static void test_decode_no_movement() {
                                    can::STEER_DIAG_FLAG_POWER_READY |
                                    can::STEER_DIAG_FLAG_EN_PC4);
     data[3] = static_cast<uint8_t>(1 /*STANDBY*/ |
-                                   can::STEER_DIAG_STATUS_PWM_REQUESTED);
+                                   can::STEER_DIAG_STATUS_PWM_REQUESTED |
+                                   can::STEER_DIAG_STATUS_CURRENT_GUARD_ARMED);
     data[4] = 425 & 0xFF;         // PWM real low
     data[5] = (425 >> 8) & 0xFF;  // PWM real high
     data[6] = 0;                  // encoder delta = 0 (frozen)
@@ -67,6 +68,7 @@ static void test_decode_no_movement() {
     CHECK(v.powerReady);
     CHECK(v.enPc4);
     CHECK(v.pwmRequested);
+    CHECK(v.currentGuardArmed);
     CHECK(v.pwmReal == 425);
     CHECK(v.encoderDelta == 0);
     CHECK(isStuck(v.reason));
@@ -103,6 +105,7 @@ static void test_relay_not_ready() {
     CHECK(decode(data, 8, v));
     CHECK(!v.relayPc12);
     CHECK(!v.powerReady);
+    CHECK(!v.currentGuardArmed);
     CHECK(isStuck(v.reason));
     CHECK_STR(reasonText(v.reason), "RELE PC12 OFF");
     CHECK_STR(actionText(v.reason), "REVISAR RELE PC12");

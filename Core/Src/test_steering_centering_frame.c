@@ -108,6 +108,7 @@ static void check_roundtrip(const SteeringCenteringDiag *d,
     CHECK(out->module_disabled       == d->module_disabled);
     CHECK(out->fault_latched         == d->fault_latched);
     CHECK(out->pwm_requested         == (d->pwm_requested > 0U));
+    CHECK(out->current_guard_armed   == d->current_guard_armed);
 
     uint16_t exp_pwm = (d->pwm_applied_ch1 > d->pwm_applied_ch2)
                            ? d->pwm_applied_ch1 : d->pwm_applied_ch2;
@@ -227,6 +228,25 @@ static void test_restored_from_flash(void)
     CHECK(out.pwm_requested == false);
 }
 
+/* Scenario 9 (Bloque 2, P1 audit fix): current_guard_armed round-trips both
+ * true (CH5 healthy, full 100% authority may be used) and false (CH5 not
+ * armed — e.g. INA226_CH_PRESENT_NO_SHUNT — homing must fall back to
+ * reduced PWM and the new wall-clock sweep-leg guard is the sole backstop).
+ * This is the bit the audit demands be OBSERVABLE instead of silent. */
+static void test_current_guard_armed_flag(void)
+{
+    SteeringCenteringDiag d = base_snapshot();
+    d.current_guard_armed = true;
+    SteerCenteringFrame out = roundtrip(&d);
+    check_roundtrip(&d, &out);
+    CHECK(out.current_guard_armed == true);
+
+    d.current_guard_armed = false;
+    out = roundtrip(&d);
+    check_roundtrip(&d, &out);
+    CHECK(out.current_guard_armed == false);
+}
+
 int main(void)
 {
     test_nominal_sweep();
@@ -237,6 +257,7 @@ int main(void)
     test_negative_delta();
     test_delta_clamp();
     test_restored_from_flash();
+    test_current_guard_armed_flag();
 
     printf("steering_centering_frame: %d run, %d failed\n",
            tests_run, tests_failed);

@@ -20,7 +20,9 @@
   *            b3 PC12 relay commanded, b4 power ready, b5 PC4 EN commanded,
   *            b6 encoder fault, b7 restored-from-flash
   *   Byte 3   system state (low nibble) | b4 module disabled |
-  *            b5 fault latched | b6 pwm requested (>0)
+  *            b5 fault latched | b6 pwm requested (>0) | b7 current guard
+  *            armed (CH5 end-stop guard able to observe pressure — Bloque 2
+  *            audit fix; see steering_centering_diag.h current_guard_armed)
   *   Byte 4-5 PWM real (max CCR PA6/PA7, uint16 LE)
   *   Byte 6-7 encoder delta from sweep origin (int16 LE, clamped)
   ****************************************************************************
@@ -52,6 +54,7 @@ typedef struct {
     bool     module_disabled;       /* Disabled in Service Mode          */
     bool     fault_latched;         /* SAFETY_ERROR_CENTERING latched    */
     bool     pwm_requested;         /* pwm_requested > 0                 */
+    bool     current_guard_armed;   /* CH5 end-stop guard can observe    */
 
     uint16_t pwm_real;              /* max CCR PA6/PA7                    */
     int16_t  encoder_delta;         /* clamped delta from sweep origin   */
@@ -90,6 +93,7 @@ static inline void SteerCentering_PackFrame(const SteeringCenteringDiag *d,
     if (d->module_disabled)     st |= (uint8_t)(1U << 4);
     if (d->fault_latched)       st |= (uint8_t)(1U << 5);
     if (d->pwm_requested > 0U)  st |= (uint8_t)(1U << 6);
+    if (d->current_guard_armed) st |= (uint8_t)(1U << 7);
     out[3] = st;
 
     uint16_t pwm_real = (d->pwm_applied_ch1 > d->pwm_applied_ch2)
@@ -133,6 +137,7 @@ static inline void SteerCentering_UnpackFrame(const uint8_t in[8],
     out->module_disabled = (in[3] & (1U << 4)) != 0U;
     out->fault_latched   = (in[3] & (1U << 5)) != 0U;
     out->pwm_requested   = (in[3] & (1U << 6)) != 0U;
+    out->current_guard_armed = (in[3] & (1U << 7)) != 0U;
 
     out->pwm_real      = (uint16_t)((uint16_t)in[4] |
                                     ((uint16_t)in[5] << 8));

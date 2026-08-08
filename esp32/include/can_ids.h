@@ -544,7 +544,10 @@ inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_COMPLETE    = 2;
 //            b3 PC12 relay commanded, b4 power ready, b5 PC4 EN commanded,
 //            b6 encoder fault, b7 restored-from-flash
 //   Byte 3   system state (low nibble) | b4 module disabled | b5 fault
-//            latched | b6 pwm requested (>0)
+//            latched | b6 pwm requested (>0) | b7 current guard armed
+//            (CH5 end-stop guard able to observe pressure — Bloque 2 P1
+//            audit fix; false means homing is running at reduced PWM and
+//            relying on the HOMING_SWEEP_TIMEOUT_MS wall-clock backstop)
 //   Byte 4-5 PWM real (max CCR PA6/PA7, uint16 LE)
 //   Byte 6-7 encoder delta from sweep origin (int16 LE)
 // =====================================================================
@@ -583,6 +586,9 @@ inline constexpr uint8_t STEER_DIAG_STATE_MASK          = 0x0F;
 inline constexpr uint8_t STEER_DIAG_STATUS_MODULE_DISABLED = 1 << 4;
 inline constexpr uint8_t STEER_DIAG_STATUS_FAULT_LATCHED   = 1 << 5;
 inline constexpr uint8_t STEER_DIAG_STATUS_PWM_REQUESTED   = 1 << 6;
+// Bloque 2 (P1 audit fix): CH5 current end-stop guard armed/disarmed — see
+// Core/Src/steering_centering_patched.c current_guard_armed().
+inline constexpr uint8_t STEER_DIAG_STATUS_CURRENT_GUARD_ARMED = 1 << 7;
 
 // -------------------------------------------------------------------------
 // 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health (Problem 3)
