@@ -510,6 +510,18 @@ struct ModeData {
 };
 
 // -------------------------------------------------------------------------
+// Remote (RC) motion authority — UX indicator only (Bloque 1: the HMI is
+// ALWAYS the mode/lights authority; this mirrors remoteMotionAuthorityActive,
+// computed each loop in main.cpp, purely so the drive screen can show a
+// discreet "RC" indicator when the remote is currently governing motion
+// (throttle/steering/gear).  Never read by any arbitration/CAN logic.
+// -------------------------------------------------------------------------
+struct RemoteAuthorityData {
+    bool motionActive         = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // EPS parameter telemetry (0x30F) — Engineering Menu tuning + live state
 // All float fields are decoded from the scaled int16 CAN frames.
 // -------------------------------------------------------------------------
@@ -689,6 +701,7 @@ public:
     void setLights(const LightsData& d)        { lights_ = d; }
     void setPedal(const PedalData& d)          { pedal_ = d; }
     void setMode(const ModeData& d)            { mode_ = d; }
+    void setRemoteAuthority(const RemoteAuthorityData& d) { remoteAuthority_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
     void setPedalCalSession(const PedalCalSessionData& d) { pedalCalSession_ = d; }
@@ -733,6 +746,7 @@ public:
     const LightsData&    lights()    const { return lights_; }
     const PedalData&     pedal()     const { return pedal_; }
     const ModeData&      mode()      const { return mode_; }
+    const RemoteAuthorityData& remoteAuthority() const { return remoteAuthority_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
     const PedalCalSessionData& pedalCalSession() const { return pedalCalSession_; }
@@ -778,6 +792,7 @@ private:
     LightsData    lights_;
     PedalData     pedal_;
     ModeData      mode_;
+    RemoteAuthorityData remoteAuthority_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
     PedalCalSessionData pedalCalSession_;

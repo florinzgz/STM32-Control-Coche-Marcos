@@ -120,6 +120,15 @@ inline uint8_t arbitratePure(bool remoteActive, uint8_t remoteModeFlags,
  * Runtime arbitration overload.  localTankTurn is passed by reference so the
  * pedal-release edge clears the actual HMI toggle, not merely the outgoing CAN
  * bit.  The next touch therefore activates 360 normally with a single press.
+ *
+ * Production contract (Bloque 1 — HMI absolute mode/lights authority): the
+ * ONLY production caller (esp32/src/main.cpp) always passes remoteActive as a
+ * literal `false` (via the named `!hmiOwnsModeAndLights` constant) and
+ * `remoteModeFlags=0`, so desiredModeFlags is composed EXCLUSIVELY from
+ * localSelector4x4 + localTankTurn.  The remoteActive/remoteModeFlags
+ * parameters are kept only for signature/test compatibility (see
+ * test_mode_authority.cpp's "production forces remoteActive=false" case) —
+ * remote_control::getDriveMode() must never feed this function again.
  */
 inline uint8_t arbitrate(bool remoteActive, uint8_t remoteModeFlags,
                          bool localSelector4x4, bool& localTankTurn) {
