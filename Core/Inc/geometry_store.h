@@ -40,6 +40,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include "vehicle_physics.h"
 
 /* ---- Hard validation ranges (matches the problem statement) ---- */
@@ -57,6 +58,10 @@ typedef struct {
 static inline bool Geometry_ValidateValues(const Geometry_t *g)
 {
     if (!g) return false;
+    /* Reject NaN/Inf explicitly: a NaN compared with < or > is always
+     * false, so the range checks below would silently let it through. */
+    if (isnan(g->wheelbase_m)   || isinf(g->wheelbase_m))   return false;
+    if (isnan(g->track_width_m) || isinf(g->track_width_m)) return false;
     if (g->wheelbase_m < GEOMETRY_WHEELBASE_M_MIN ||
         g->wheelbase_m > GEOMETRY_WHEELBASE_M_MAX) return false;
     if (g->track_width_m < GEOMETRY_TRACK_WIDTH_M_MIN ||

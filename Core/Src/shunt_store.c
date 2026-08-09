@@ -8,6 +8,7 @@
 #include "shunt_store.h"
 #include "project_config.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -110,6 +111,14 @@ bool ShuntStore_IsValid(void)
 
 float ShuntStore_GetEffectiveMohm(uint8_t channel)
 {
+    /* RAM-staged value, consistent with every other Bloque C store's
+     * GetEffective*() (tcs_tuning/geometry/wheel_sensor read _staged; C4
+     * steering_service_store, which shares C3's own "actuators must be
+     * stopped before Stage()" precondition, ALSO reads _staged) -- see the
+     * file header's "takes effect... after Stage(), for host-test
+     * observability" note.  The "actuators stopped" rule gates WHEN Stage()
+     * may be called (enforced by the future service-diag session, Block A),
+     * not what this getter reads once staging has already happened. */
     if (channel >= SHUNT_STORE_NUM_CHANNELS) return (float)INA226_SHUNT_MOHM_MOTOR;
     return shunt_staged.mohm[channel];
 }
@@ -140,6 +149,15 @@ void ShuntStore_ResetToDefaults(void)
 bool ShuntStore_Save(void)
 {
     const ShuntCal_t *s = &shunt_staged;
+
+    /* Defense in depth: never persist while actuators may be live (flash
+     * erase/program blocks the CPU for tens of ms). Consistent with every
+     * other flash-backed store. No production caller exists yet (Block A),
+     * so this is pure future-proofing against a caller that forgets to
+     * gate to STANDBY. Compiled out in host tests, which stub
+     * Safety_GetState() to always report STANDBY. */
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
 
     if (!ShuntStore_Validate(s))
         return false;

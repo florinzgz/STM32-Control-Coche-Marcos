@@ -7,6 +7,7 @@
 
 #include "tcs_tuning_store.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -152,6 +153,16 @@ void TcsTuningStore_ResetToDefaults(void)
 bool TcsTuningStore_Save(void)
 {
     const TcsTuning_t *t = &tcs_tune_staged;
+
+    /* Defense in depth: never persist while actuators may be live (flash
+     * erase/program blocks the CPU for tens of ms). Consistent with every
+     * other flash-backed store (drive_tuning_store.c, battery_limits_store.c,
+     * gear_limits_store.c, eps_params.c, ...). No production caller exists
+     * yet (Block A), so this is pure future-proofing against a caller that
+     * forgets to gate to STANDBY. Compiled out in host tests, which stub
+     * Safety_GetState() to always report STANDBY. */
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
 
     if (!TcsTuningStore_Validate(t))
         return false;

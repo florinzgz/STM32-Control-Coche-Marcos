@@ -8,6 +8,7 @@
 #include "geometry_store.h"
 #include "motor_control.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -147,6 +148,15 @@ void GeometryStore_ResetToDefaults(void)
 bool GeometryStore_Save(void)
 {
     const Geometry_t *g = &geometry_staged;
+
+    /* Defense in depth: never persist while actuators may be live (flash
+     * erase/program blocks the CPU for tens of ms). Consistent with every
+     * other flash-backed store. No production caller exists yet (Block A),
+     * so this is pure future-proofing against a caller that forgets to
+     * gate to STANDBY. Compiled out in host tests, which stub
+     * Safety_GetState() to always report STANDBY. */
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
 
     if (!GeometryStore_Validate(g))
         return false;

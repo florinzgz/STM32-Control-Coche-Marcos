@@ -7,6 +7,7 @@
 
 #include "steering_service_store.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -149,6 +150,15 @@ void SteeringServiceStore_ResetToDefaults(void)
 bool SteeringServiceStore_Save(void)
 {
     const SteeringServiceParams_t *p = &stsvc_staged;
+
+    /* Defense in depth: never persist while actuators may be live (flash
+     * erase/program blocks the CPU for tens of ms). Consistent with every
+     * other flash-backed store. No production caller exists yet (Block A),
+     * so this is pure future-proofing against a caller that forgets to
+     * gate to STANDBY. Compiled out in host tests, which stub
+     * Safety_GetState() to always report STANDBY. */
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
 
     if (!SteeringServiceStore_Validate(p))
         return false;

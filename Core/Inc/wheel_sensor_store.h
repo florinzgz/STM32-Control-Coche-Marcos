@@ -51,6 +51,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 
 #define WHEEL_SENSOR_PULSES_REV_MIN         1U
 #define WHEEL_SENSOR_PULSES_REV_MAX         50U
@@ -74,6 +75,9 @@ static inline bool WheelSensor_ValidateValues(const WheelSensorParams_t *w)
     if (!w) return false;
     if (w->pulses_per_rev < WHEEL_SENSOR_PULSES_REV_MIN ||
         w->pulses_per_rev > WHEEL_SENSOR_PULSES_REV_MAX) return false;
+    /* Reject NaN/Inf explicitly: a NaN compared with < or > is always
+     * false, so the range check below would silently let it through. */
+    if (isnan(w->circumference_mm) || isinf(w->circumference_mm)) return false;
     if (w->circumference_mm < WHEEL_SENSOR_CIRCUM_MM_MIN ||
         w->circumference_mm > WHEEL_SENSOR_CIRCUM_MM_MAX) return false;
     if (w->debounce_us < WHEEL_SENSOR_DEBOUNCE_US_MIN ||

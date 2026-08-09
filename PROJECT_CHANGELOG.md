@@ -1,5 +1,55 @@
 # PROJECT_CHANGELOG
 
+## [2026-08-09] — AUDITORÍA PR #445 (BLOQUE C): correcciones mínimas + tests host (STM32)
+
+Auditoría de verificación (V1–V7) sobre los cinco stores del Bloque C
+(`tcs_tuning_store`, `geometry_store`, `shunt_store`,
+`steering_service_store`, `wheel_sensor_store`). No se ha añadido
+funcionalidad nueva ni implementado los bloques A/B/C6/D/E. Correcciones
+mínimas derivadas de los hallazgos:
+
+- **V3d (flash, P1)**: ninguno de los 5 `Save()` comprobaba el estado del
+  sistema antes de escribir en flash (a diferencia de `gear_limits_store` y
+  el resto de stores existentes). Añadida la guarda
+  `Safety_GetState() != SYS_STATE_STANDBY → rechazar` en
+  `tcs_tuning_store.c`, `geometry_store.c`, `shunt_store.c`,
+  `steering_service_store.c` y `wheel_sensor_store.c`, igual que el resto de
+  stores del proyecto.
+- **V6d (validación de float, P2)**: el patrón `v < MIN || v > MAX` no
+  detecta `NaN` (comparación IEEE-754 siempre falsa), permitiendo que un
+  `NaN` se aceptara como válido. Añadida comprobación explícita
+  `isnan()`/`isinf()` (mismo patrón que `eps_params.c`) en
+  `tcs_tuning_store.h`, `geometry_store.h`, `shunt_store.h` y
+  `wheel_sensor_store.h` (los seis campos float de `tcs_tuning_store` y los
+  campos float de los otros tres). `steering_service_store` no tiene campos
+  float, no requiere cambio.
+- **Documentación (`shunt_store.h`)**: corregidos dos comentarios que
+  describían incorrectamente `GetEffectiveMohm()` como reflejo del valor
+  *persistido* (`stored`); el comportamiento real e intencionado — coherente
+  con el resto de stores del Bloque C y con `steering_service_store` (C4),
+  que comparte la misma precondición "actuadores parados" — es que el valor
+  efectivo seguido inmediatamente el valor *staged* en RAM tras `Stage()`,
+  sin necesitar `Save()`. Solo se ha corregido la documentación; el código
+  (`shunt_store.c`) ya se comportaba así y no ha cambiado.
+- **Tests host nuevos** (uno por store, exigido por V1/V2/V6):
+  `Core/Src/test_tcs_tuning_store.c` (36 aserciones),
+  `Core/Src/test_geometry_store.c` (31), `Core/Src/test_shunt_store.c` (41),
+  `Core/Src/test_steering_service_store.c` (33) y
+  `Core/Src/test_wheel_sensor_store.c` (39). Cada uno verifica: paridad
+  bit a bit del default contra el macro de compilación (V1), rechazo de
+  valores fuera de rango/NaN/Inf/negativos (V6c/d), guarda STANDBY en
+  `Save()` (V3d), `Revert()` (V6b) y ausencia de cualquier campo de trim por
+  rueda (V6e). Registrados en
+  `.github/workflows/firmware-validation.yml`.
+- **Hallazgo reportado, no corregido (P2)**: `steering_service_store` expone
+  `search_pwm_counts` con techo `STEER_SVC_SEARCH_PWM_MAX=1200`, muy por
+  debajo del suelo reducido de seguridad (~2336) del homing en
+  `motor_control.c`; el store en sí no representa riesgo porque no está
+  cableado a ningún consumidor de producción todavía (ver informe de
+  auditoría completo en el PR). No se ha modificado: es una decisión de
+  alcance de la propia PR #445, no un bug.
+- Sin cambios de tamaño de binario ARM (`text=104600` antes y después).
+
 ## [2026-08-08] — BLOQUE 1: LA PANTALLA (HMI) ES AUTORIDAD ABSOLUTA SOBRE MODO/LUCES; BLOQUE 2: GUARDA DE TIEMPO EN HOMING (STM32 + ESP32)
 
 ### Bloque 1 — HMI autoridad absoluta de modo (360/tank) y luces; emisora solo mueve (ESP32)

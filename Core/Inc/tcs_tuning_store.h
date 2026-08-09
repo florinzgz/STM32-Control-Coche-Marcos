@@ -47,6 +47,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include "drive_dynamics_policy.h"
 
 /* ---- Hard validation ranges (matches the problem statement) ---- */
@@ -76,6 +77,14 @@ typedef struct {
 static inline bool TcsTuning_ValidateValues(const TcsTuning_t *t)
 {
     if (!t) return false;
+    /* Reject NaN/Inf explicitly: a NaN compared with < or > is always
+     * false, so the range checks below would silently let it through. */
+    if (isnan(t->min_reference_kmh)    || isinf(t->min_reference_kmh))    return false;
+    if (isnan(t->slip_threshold_pct)   || isinf(t->slip_threshold_pct))   return false;
+    if (isnan(t->initial_reduction)    || isinf(t->initial_reduction))    return false;
+    if (isnan(t->reduction_rate_per_s) || isinf(t->reduction_rate_per_s)) return false;
+    if (isnan(t->recovery_rate_per_s)  || isinf(t->recovery_rate_per_s))  return false;
+    if (isnan(t->max_reduction)        || isinf(t->max_reduction))       return false;
     if (t->min_reference_kmh < TCS_TUNE_MIN_REFERENCE_KMH_MIN ||
         t->min_reference_kmh > TCS_TUNE_MIN_REFERENCE_KMH_MAX) return false;
     if (t->slip_threshold_pct < TCS_TUNE_SLIP_THRESHOLD_PCT_MIN ||
@@ -125,9 +134,15 @@ void TcsTuningStore_Revert(void);
 /**
  * @brief Persist the currently staged parameter set to flash.
  * Write conditions: identical write-rate-limit / no-op-elision guard as
- * battery_limits_store.c.  No system-state gate here: C1 is one of the
- * parameters explicitly editable DURING an active service-diag test
- * (Block C rule); the service session itself gates entry.
+ * battery_limits_store.c, PLUS the same STANDBY-only flash-write gate used
+ * by every other flash-backed store (drive_tuning_store.c,
+ * battery_limits_store.c, gear_limits_store.c, eps_params.c, ...): flash
+ * erase/program blocks the CPU for tens of ms, so SAVE is refused unless
+ * Safety_GetState() == SYS_STATE_STANDBY.  Staging (TcsTuningStore_Stage())
+ * is unaffected and remains usable at any time, including DURING an active
+ * service-diag test (Block C rule) -- only the flash write itself is
+ * gated, matching the STAGE-anytime / SAVE-in-STANDBY-only pattern used
+ * throughout the codebase.
  */
 bool TcsTuningStore_Save(void);
 
