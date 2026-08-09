@@ -390,6 +390,10 @@ static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_WIDTH_M;
 static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
+/* Last computed per-wheel Ackermann differential, snapshotted every
+ * Traction_Update() cycle.  Read-only telemetry for Traction_GetAckermannDiff()
+ * (service-diag C6 wheel-equality test). */
+static float acker_diff_snapshot[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 /* ---- EPS torque-assist state ---- */
 static float   eps_omega_filt     = 0.0f;   /* EMA-filtered angular velocity  */
@@ -1241,12 +1245,12 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4])
      * filtered by deadband, but protect against float edge cases) */
     if (tan_angle < 0.001f) return;
 
-    float R = WHEELBASE_M / tan_angle;
+    float R = ackermann_wheelbase / tan_angle;
 
     /* Compute correction term: half_track / R.
      * This is the fractional velocity difference between inside
      * and outside wheels relative to the vehicle center speed.     */
-    float half_track = TRACK_WIDTH_M / 2.0f;
+    float half_track = ackermann_track / 2.0f;
     float correction = half_track / R;
 
     /* Bound correction to maximum differential */
@@ -1857,6 +1861,11 @@ void Traction_Update(void)
             for (int i = 0; i < 4; i++) acker_diff[i] = 1.0f;
         }
     }
+    /* Snapshot for Traction_GetAckermannDiff(): the service-diag wheel
+     * equality test (Block C6) reads this every cycle to confirm the
+     * computed differential is exactly 1.000 on all four wheels with the
+     * steering wheel centred, without duplicating this computation. */
+    for (int i = 0; i < 4; i++) acker_diff_snapshot[i] = acker_diff[i];
 
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
@@ -2640,6 +2649,12 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg)
     ackermann_wheelbase  = wheelbase_m;
     ackermann_track      = track_m;
     ackermann_max_inner  = maxInnerDeg;
+}
+
+float Traction_GetAckermannDiff(uint8_t wheel)
+{
+    if (wheel >= 4U) return 1.0f;
+    return acker_diff_snapshot[wheel];
 }
 
 /* ==================================================================

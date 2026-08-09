@@ -27,34 +27,59 @@ static inline float DriveDynamics_Clamp01(float value)
     return value;
 }
 
+/**
+ * @param min_reference_kmh Effective (possibly service-tuned) value of
+ *                           DRIVE_TCS_MIN_REFERENCE_KMH; pass the macro
+ *                           itself when no runtime override applies.
+ * @param slip_threshold_pct Effective value of DRIVE_TCS_SLIP_THRESHOLD_PCT.
+ *
+ * Kept as explicit parameters (rather than reading globals from inside the
+ * inline body) so this function stays a pure, header-only, HAL-free unit
+ * that test_drive_dynamics_policy.c can keep exercising standalone.  Callers
+ * that own a runtime store (tcs_tuning_store.c via tcs_tuned.c) pass the
+ * live effective values; everyone else may pass the compile-time macros.
+ */
 static inline bool DriveDynamics_TcsIsSlipping(float reference_kmh,
-                                                float wheel_kmh)
+                                                float wheel_kmh,
+                                                float min_reference_kmh,
+                                                float slip_threshold_pct)
 {
     if (!isfinite(reference_kmh) || !isfinite(wheel_kmh) ||
-        reference_kmh < DRIVE_TCS_MIN_REFERENCE_KMH || wheel_kmh < 0.0f) {
+        reference_kmh < min_reference_kmh || wheel_kmh < 0.0f) {
         return false;
     }
 
     const float slip_pct =
         ((wheel_kmh - reference_kmh) * 100.0f) / reference_kmh;
-    return slip_pct > DRIVE_TCS_SLIP_THRESHOLD_PCT;
+    return slip_pct > slip_threshold_pct;
 }
 
+/**
+ * @param initial_reduction    Effective DRIVE_TCS_INITIAL_REDUCTION.
+ * @param reduction_rate_per_s Effective DRIVE_TCS_REDUCTION_RATE_PER_S.
+ * @param recovery_rate_per_s  Effective DRIVE_TCS_RECOVERY_RATE_PER_S.
+ * @param max_reduction        Effective DRIVE_TCS_MAX_REDUCTION.
+ * See DriveDynamics_TcsIsSlipping() for why these are explicit parameters.
+ */
 static inline float DriveDynamics_TcsReductionNext(float current,
                                                     bool slipping,
-                                                    float dt_s)
+                                                    float dt_s,
+                                                    float initial_reduction,
+                                                    float reduction_rate_per_s,
+                                                    float recovery_rate_per_s,
+                                                    float max_reduction)
 {
     current = DriveDynamics_Clamp01(current);
     if (!isfinite(dt_s) || dt_s <= 0.0f || dt_s > 1.0f) dt_s = 0.01f;
 
     if (slipping) {
-        if (current < 0.01f) current = DRIVE_TCS_INITIAL_REDUCTION;
-        else current += DRIVE_TCS_REDUCTION_RATE_PER_S * dt_s;
-        if (current > DRIVE_TCS_MAX_REDUCTION) {
-            current = DRIVE_TCS_MAX_REDUCTION;
+        if (current < 0.01f) current = initial_reduction;
+        else current += reduction_rate_per_s * dt_s;
+        if (current > max_reduction) {
+            current = max_reduction;
         }
     } else {
-        current -= DRIVE_TCS_RECOVERY_RATE_PER_S * dt_s;
+        current -= recovery_rate_per_s * dt_s;
         if (current < 0.0f) current = 0.0f;
     }
     return current;

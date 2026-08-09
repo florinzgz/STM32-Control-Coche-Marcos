@@ -23,6 +23,8 @@
 #include "safety_system.h"
 #include "service_mode.h"  /* per-module fault tagging (1.5 / 2.3)    */
 #include "ina226_channel_diag.h" /* P4: explicit per-channel CH5 classifier  */
+#include "shunt_store.h"       /* C3: runtime-tunable per-channel shunt mOhm */
+#include "wheel_sensor_store.h" /* C5: runtime-tunable pulses/rev, circumference, debounce */
 #include "main.h"
 #include <string.h>    /* memcmp / memcpy — topology change detection */
 #include <math.h>      /* fabsf — stale detection epsilon              */
@@ -271,12 +273,17 @@ static void Wheel_ComputeSpeed(uint8_t idx)
     /* ---- Hybrid speed computation ----                                */
     float speed_kmh;
     float rpm;
-    const float dist_per_pulse = WHEEL_CIRCUMF_M / (float)WHEEL_PULSES_REV;
+    /* C5 (wheel_sensor_store): GLOBAL for all 4 wheels -- runtime-tunable,
+     * defaults to WHEEL_PULSES_REV / WHEEL_CIRCUMF_M when the flash slot is
+     * blank/corrupt.  No per-wheel variant exists or may be added.        */
+    const float    circumf_m  = WheelSensorStore_GetEffectiveCircumferenceM();
+    const uint16_t pulses_rev = WheelSensorStore_GetEffectivePulsesPerRev();
+    const float dist_per_pulse = circumf_m / (float)pulses_rev;
 
     if (delta >= 2U) {
         /* Count-based: accurate at medium-high speed */
-        float revolutions = (float)delta / (float)WHEEL_PULSES_REV;
-        float dist_m      = revolutions * WHEEL_CIRCUMF_M;
+        float revolutions = (float)delta / (float)pulses_rev;
+        float dist_m      = revolutions * circumf_m;
         float speed_ms    = dist_m * 1000.0f / (float)dt;
         speed_kmh = speed_ms * 3.6f;
         rpm       = revolutions * 60000.0f / (float)dt;
@@ -302,14 +309,14 @@ static void Wheel_ComputeSpeed(uint8_t idx)
         if (prev_pt != 0U && period_ms > 0U && period_ms < WHEEL_STALE_TIMEOUT_MS) {
             float speed_ms = dist_per_pulse * 1000.0f / (float)period_ms;
             speed_kmh = speed_ms * 3.6f;
-            rpm       = 60000.0f / ((float)period_ms * (float)WHEEL_PULSES_REV);
+            rpm       = 60000.0f / ((float)period_ms * (float)pulses_rev);
         } else {
             /* Isolated first pulse — upper-bound estimate, monotonic decay. */
             uint32_t since_last = now - last_pt;
             if (since_last > 0U) {
                 float speed_ms = dist_per_pulse * 1000.0f / (float)since_last;
                 speed_kmh = speed_ms * 3.6f;
-                rpm       = 60000.0f / ((float)since_last * (float)WHEEL_PULSES_REV);
+                rpm       = 60000.0f / ((float)since_last * (float)pulses_rev);
                 if (speed_kmh > wheel_speed_kmh[idx])
                     speed_kmh = wheel_speed_kmh[idx];
                 if (rpm > wheel_rpm[idx])
@@ -329,7 +336,7 @@ static void Wheel_ComputeSpeed(uint8_t idx)
         if (since_last > 0U) {
             float speed_ms = dist_per_pulse * 1000.0f / (float)since_last;
             speed_kmh = speed_ms * 3.6f;
-            rpm       = 60000.0f / ((float)since_last * (float)WHEEL_PULSES_REV);
+            rpm       = 60000.0f / ((float)since_last * (float)pulses_rev);
             /* Monotonic decay: never exceed previous reading */
             if (speed_kmh > wheel_speed_kmh[idx])
                 speed_kmh = wheel_speed_kmh[idx];
@@ -351,7 +358,7 @@ static void Wheel_ComputeSpeed(uint8_t idx)
     if (rpm < 0.0f || rpm != rpm)
         rpm = 0.0f;
     {
-        float rpm_ceil = WHEEL_SPEED_CLAMP_KMH / 3.6f / WHEEL_CIRCUMF_M * 60.0f;
+        float rpm_ceil = WHEEL_SPEED_CLAMP_KMH / 3.6f / circumf_m * 60.0f;
         if (rpm > rpm_ceil) rpm = rpm_ceil;
     }
 
@@ -1000,9 +1007,10 @@ void Current_ReadAll(void)
             }
         }
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
-        float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)
-                          ? (float)INA226_SHUNT_MOHM_BATTERY
-                          : (float)INA226_SHUNT_MOHM_MOTOR;
+        /* C3: per-channel mOhm is runtime-tunable via shunt_store (falls back
+         * to the INA226_SHUNT_MOHM_* compile-time defaults when the flash
+         * slot is blank/corrupt — see ShuntStore_GetDefaults()).            */
+        float shunt_mohm  = ShuntStore_GetEffectiveMohm((uint8_t)i);
         float raw_amps    = shunt_uv / shunt_mohm / 1000.0f;  /* µV/mΩ→mA→A */
 
         /* Battery channel: clamp negative current to 0.
@@ -1154,10 +1162,12 @@ static void Sensor_UpdateChannel5Diag(void)
             d.shunt_read_ok = ina_last_read_ok;
             d.raw_shunt = shunt_raw;
             d.shunt_uv  = (int32_t)lroundf((float)shunt_raw * INA226_SHUNT_LSB_UV);
-            /* I[mA] = V_shunt[µV] / R_shunt[mΩ] (steering uses the 1.5 mΩ motor
-             * shunt).  Signed: a reversed VIN+/VIN− wiring yields a negative mA. */
+            /* I[mA] = V_shunt[µV] / R_shunt[mΩ] (steering uses channel 5's
+             * shunt_store value, defaulting to the 1.5 mΩ motor shunt).
+             * Signed: a reversed VIN+/VIN− wiring yields a negative mA. */
             d.signed_current_ma =
-                (int32_t)lroundf((float)d.shunt_uv / (float)INA226_SHUNT_MOHM_MOTOR);
+                (int32_t)lroundf((float)d.shunt_uv /
+                                  ShuntStore_GetEffectiveMohm(INA226_CHANNEL_STEER));
 
             /* Step 6: bus voltage. */
             int16_t bus_raw = INA226_ReadReg(INA226_REG_BUS_VOLTAGE);
@@ -2087,6 +2097,16 @@ void Temperature_PeriodicRescan(void)
  *  Initialization
  * ========================================================================= */
 
+/* Recompute the ISR-facing cached cycle threshold from a microsecond value.
+ * Cheap (one multiply) -- safe to call from Sensor_Init() or from
+ * wheel_sensor_store.c's apply routine (Init/Stage/Save/Revert/
+ * ResetToDefaults), NEVER from the EXTI ISR itself (Wheel_IRQDebounced()
+ * only ever READS sensor_debounce_cycles).                                */
+void Sensor_SetDebounceUs(uint16_t debounce_us)
+{
+    sensor_debounce_cycles = (uint32_t)debounce_us * (SystemCoreClock / 1000000U);
+}
+
 void Sensor_Init(void)
 {
     /* ---- DWT high-resolution debounce setup (defensive / hardened) ----
@@ -2116,8 +2136,11 @@ void Sensor_Init(void)
     __DSB();  /* Ensure CYCCNTENA write is visible before first CYCCNT read */
 
     /* Precompute cycle threshold once.  SystemCoreClock = 170 MHz on
-     * STM32G474RE → 200 µs × 170 = 34 000 cycles.  No division in ISR.   */
-    sensor_debounce_cycles = SENSOR_DEBOUNCE_US * (SystemCoreClock / 1000000U);
+     * STM32G474RE → 200 µs × 170 = 34 000 cycles.  No division in ISR.
+     * C5 (wheel_sensor_store) may later override this window at runtime
+     * via Sensor_SetDebounceUs(); this call seeds it with the compile-time
+     * default before the store is initialised.                            */
+    Sensor_SetDebounceUs(SENSOR_DEBOUNCE_US);
 
     /* Initialise per-channel DWT timestamps to 0; first edge always
      * accepted because (cyc_now - 0) = cyc_now ≫ 34 000 by the time

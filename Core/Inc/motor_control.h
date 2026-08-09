@@ -127,6 +127,18 @@ const TractionState_t* Traction_GetState(void);
  * 4x2: RL/RR driven, FL/FR coast.  4x4 or tank turn: all four driven. */
 bool Traction_IsWheelDriven(uint8_t wheel);
 
+/* ---- Runtime-configurable Ackermann geometry (service diag C2) ----
+ * wheelbase_m/track_m default to WHEELBASE_M/TRACK_WIDTH_M (vehicle_physics.h)
+ * and are overridden only by geometry_store.c.  maxInnerDeg keeps the
+ * existing MAX_STEER_DEG clamp. */
+void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg);
+
+/** Last per-wheel Ackermann differential multiplier computed by
+ * Traction_Update() (1.000 = no correction).  Service-diag C6 reads this to
+ * verify the differential is exactly 1.000 on all four wheels when the
+ * steering wheel is centred, without recomputing it independently. */
+float Traction_GetAckermannDiff(uint8_t wheel);
+
 /* Steering Functions */
 void Steering_Init(void);
 void Steering_SetAngle(float angle_deg);

@@ -32,6 +32,11 @@
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
 #include "battery_limits_store.h"
+#include "tcs_tuning_store.h"
+#include "geometry_store.h"
+#include "shunt_store.h"
+#include "steering_service_store.h"
+#include "wheel_sensor_store.h"
 #include "error_log.h"
 #include "loop_diag.h"
 #include <math.h>
@@ -395,6 +400,22 @@ int main(void)
         BatteryLimitsStore_GetStored(&bl);
         (void)Safety_SetBatteryLimits(&bl);
     }
+
+    /* ---- Service-diagnostic runtime-tunable parameter stores (Block C) ----
+     * Each Init() loads its flash slot into a RAM "staged" value that is
+     * ALREADY the effective value consumed by production code (tcs_tuned.c,
+     * motor_control.c's Ackermann geometry, sensor_manager.c's shunt/wheel-
+     * geometry/debounce reads, safety_system.c's mismatch debounce).  On
+     * flash blank / CRC-invalid / out-of-range each store silently falls
+     * back to its compile-time defaults — boot is NEVER blocked.  These do
+     * NOT clear startup_inhibit, authorise ACTIVE, or bypass any safety
+     * gate; they only supply the numeric parameters an already-gated path
+     * consumes.                                                            */
+    TcsTuningStore_Init();
+    GeometryStore_Init();
+    ShuntStore_Init();
+    SteeringServiceStore_Init();
+    WheelSensorStore_Init();
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
