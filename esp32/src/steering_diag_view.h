@@ -51,6 +51,7 @@ struct SteeringDiagView {
     bool     moduleDisabled;
     bool     faultLatched;
     bool     pwmRequested;          // pwm_requested > 0
+    bool     currentGuardArmed;     // CH5 end-stop guard armed (Bloque 2)
 
     uint16_t pwmReal;               // max CCR PA6/PA7 (bytes 4-5)
     int16_t  encoderDelta;          // signed delta from sweep origin (bytes 6-7)
@@ -82,6 +83,7 @@ inline bool decode(const uint8_t* data, uint8_t len, SteeringDiagView& out) {
     out.moduleDisabled = (s & can::STEER_DIAG_STATUS_MODULE_DISABLED) != 0;
     out.faultLatched   = (s & can::STEER_DIAG_STATUS_FAULT_LATCHED)   != 0;
     out.pwmRequested   = (s & can::STEER_DIAG_STATUS_PWM_REQUESTED)   != 0;
+    out.currentGuardArmed = (s & can::STEER_DIAG_STATUS_CURRENT_GUARD_ARMED) != 0;
 
     out.pwmReal = static_cast<uint16_t>(
         static_cast<uint16_t>(data[4]) |

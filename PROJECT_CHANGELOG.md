@@ -1,5 +1,85 @@
 # PROJECT_CHANGELOG
 
+## [2026-08-08] — BLOQUE 1: LA PANTALLA (HMI) ES AUTORIDAD ABSOLUTA SOBRE MODO/LUCES; BLOQUE 2: GUARDA DE TIEMPO EN HOMING (STM32 + ESP32)
+
+### Bloque 1 — HMI autoridad absoluta de modo (360/tank) y luces; emisora solo mueve (ESP32)
+
+- `esp32/src/main.cpp`: separado el flag único `remoteAuthorityActive` en dos
+  autoridades explícitas: `remoteMotionAuthorityActive` (throttle/steering/
+  gear, respeta el kill switch — sin cambios de comportamiento) y
+  `hmiOwnsModeAndLights` (constante `true`; documenta que la pantalla manda
+  siempre en modo/luces).
+  - `mode_authority::arbitrate()` ya NO recibe `remoteAuthorityActive` ni
+    `remote_control::getDriveMode()`: el llamador de producción fuerza
+    `remoteActive=false` / `remoteModeFlags=0` siempre, así que el modo se
+    compone exclusivamente del selector físico 4x4 + `localTankTurn` del HMI.
+  - Acciones táctiles `FRONT_LED_TOGGLE` / `REAR_LED_TOGGLE` /
+    `TANK_MODE_TOGGLE`: eliminado el bloqueo `if (remoteAuthorityActive)`;
+    ahora incondicionales.
+  - Eliminado por completo el bloque "Remote lights (CH8)" que sobrescribía
+    `frontLedLocalState`/`rearLedLocalState` desde el mando.
+  - El bloque "Remote audio volume (CH9)" y el bloque CMD_RC_OVERRIDE
+    (kill switch de movimiento) quedan intactos: fuera del alcance de este
+    cambio (CH9 no es modo ni luces; CMD_RC_OVERRIDE ya usaba
+    `remoteMotionAuthorityActive`).
+  - `traction_sw`: al desaparecer la rama remota, el `clearChanged()` pasa a
+    ejecutarse siempre junto con el aviso de audio/log (una sola vez por
+    cambio, sin condicionar por autoridad).
+  - Añadido `vehicle::RemoteAuthorityData` (bandera `motionActive`) en
+    `vehicle_data.h`, poblado cada ciclo tras calcular
+    `remoteMotionAuthorityActive`, como base para el indicador "RC" en
+    pantalla (UX, sin efecto en arbitraje/CAN).
+  - CMD_MODE sigue teniendo un único propietario: `g_modeSync`/`ModeSync`; el
+    icono del HMI sigue actualizándose solo tras el eco confirmado del STM32
+    (`appliedModeFlags`). `TankReleaseGuard` y la liberación por pedal no se
+    tocan.
+- `esp32/src/mode_authority.h`: documentado el contrato de producción
+  (`remoteActive` se fuerza a `false` en el llamador real; el parámetro se
+  conserva solo por compatibilidad de firma/tests).
+- `esp32/src/test_mode_authority.cpp`: reescritos los tests que asumían que
+  REMOTE podía poseer el modo (`test_local_remote_switch_uses_modesync`,
+  `test_kill_active_desired_stays_remote_mode`,
+  `test_abandon_remote_adopts_local_selector`) para fijar el nuevo contrato:
+  ni CH10 (autoridad remota) ni CH6 (modo remoto) ni el kill switch alteran
+  jamás `desiredModeFlags`; el modo es siempre el selector físico + tank
+  local. 82/82 tests OK.
+
+### Bloque 2 — Guarda de tiempo de barrido en homing de dirección + PWM reducido quando CH5 no está armado (STM32 + ESP32)
+
+- `Core/Src/steering_centering_patched.c`: el homing (`Homing_SetPwm`)
+  aplicaba SIEMPRE el 100 % de PWM (`HOMING_PWM_COUNTS`) durante el barrido,
+  incluso cuando `SteeringSupervisor_Ch5ToEpsFault()` clasifica
+  `INA226_CH_PRESENT_NO_SHUNT` como benigno (`EPS_FAULT_NONE`): en ese caso la
+  guarda de corriente (`endstop_pressure_detected()`) nunca dispara porque la
+  corriente medida es ~0, dejando el motor contra el tope mecánico hasta
+  `TOTAL_TIMEOUT_MS=10000` si el encoder tiene jitter (evita stall y rango).
+  - Nueva guarda independiente del encoder/CH5: `HOMING_SWEEP_TIMEOUT_MS`
+    (1000 ms) por pierna de barrido (`leg_start_ms` + `handle_sweep_leg_timeout()`);
+    al expirar corta PWM=0, aplica dead-time y seguido invierte
+    (si venía de SWEEP_LEFT) o aborta (si venía de SWEEP_RIGHT), igual que la
+    guarda de tope existente.
+  - PWM de homing configurable en compile-time: 100 % (`HOMING_PWM_COUNTS`)
+    solo si la guarda de corriente está armada (CH5 sano); si NO está armada,
+    se reduce a `HOMING_PWM_REDUCED_COUNTS` (55 % de ARR, `HOMING_PWM_REDUCED_PERCENT`).
+  - Nuevo campo de telemetría `current_guard_armed` (bit 7/byte 3 de la trama
+    0x316 de diagnóstico de centrado) + fila "GUARDA CH5" en la pantalla de
+    diagnóstico de centrado del ESP32 (`engineering_screen.cpp`), para que el
+    estado inerte sea observable.
+  - `INA226_CH_PRESENT_NO_SHUNT` NO se reclasifica como fallo aislante: el
+    volante sigue funcionando mecánicamente; solo se añade el aviso de
+    diagnóstico anterior.
+- `Core/Src/test_centering_pc12_gate.c`: 2 tests nuevos
+  (`test_ch5_unarmed_uses_reduced_pwm_and_reports_disarmed`,
+  `test_ch5_unarmed_jitter_defeated_by_sweep_leg_timeout`) + aserción añadida
+  al test existente de CH5 sano. 277/277 (wrapper efectivo), 91/91 (FSM base).
+- `Core/Inc/steering_centering_diag.h`, `Core/Inc/steering_centering_frame.h`,
+  `esp32/include/can_ids.h`, `esp32/src/steering_diag_view.h`: extendidos con
+  el nuevo campo `current_guard_armed` (host tests actualizados:
+  `test_steering_centering_frame` 179/179, `test_steering_diag_view` 44/44,
+  `test_frame_parity_cross` 91/91).
+- Build ARM (`make`) limpio con `-Wall -Wextra -Werror`. Ambos checkers
+  (`check_effective_eps_wrapper.py`, `check_cubeide_source_exclusions.py`) OK.
+
 ## [2026-06-11] — DOBLE REFERENCIA DE CENTRADO: PB5 (primaria/seguridad) + canal Z del encoder (secundaria/precisión) (STM32 + ESP32/HMI + docs)
 
 ### Objetivo

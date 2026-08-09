@@ -109,6 +109,11 @@ struct SimEsp32 {
     // Arbitration inputs.
     bool    localSel4x4   = false;
     bool    localTank     = false;
+    // Bloque 1 (HMI absolute authority): kept only so tests can simulate what
+    // the remote (CH10/CH6) would request and assert it has NO effect on
+    // mode.  Production esp32/src/main.cpp always calls arbitrate() with
+    // remoteActive=false/remoteModeFlags=0 (mode_authority::arbitrate()'s
+    // production contract) — tick() below intentionally never reads these.
     bool    remoteActive  = false;
     uint8_t remoteMode    = 0;
 
@@ -122,9 +127,11 @@ struct SimEsp32 {
             appliedHmi = stm.heartbeatEcho();
             ms.onHeartbeatModeEcho(appliedHmi);
         }
-        // (2) SINGLE arbitration → desired → setDesired().
-        desired = mode_authority::arbitrate(remoteActive, remoteMode,
-                                            localSel4x4, localTank);
+        // (2) SINGLE arbitration → desired → setDesired().  Bloque 1: the
+        // HMI is the SOLE mode authority, mirroring main.cpp exactly.
+        desired = mode_authority::arbitrate(/*remoteActive=*/false,
+                                             /*remoteModeFlags=*/0,
+                                             localSel4x4, localTank);
         ms.setDesired(desired);
         // (3) SINGLE CMD_MODE owner: the FSM.  No other path transmits.
         if (ms.update(now, hbAlive) == Action::SEND) {
@@ -276,23 +283,27 @@ static void test_tank_turn_uses_modesync() {
     ASSERT(esp.ms.inSync());
 }
 
-// Remote authority drives the SAME ModeSync; switching LOCAL↔REMOTE recomputes
-// the desired mode and resynchronises through the single CMD_MODE owner.
-static void test_local_remote_switch_uses_modesync() {
+// Bloque 1 (HMI absolute authority): the remote NEVER owns mode anymore.
+// Toggling CH10 into REMOTE and requesting a different mode via CH6 must have
+// ZERO effect — desired/applied stay exactly the LOCAL selector's value.
+// This fixes the new contract: mode_authority no longer consumes
+// remote_control::getDriveMode(); production always forces
+// remoteActive=false/remoteModeFlags=0 (see mode_authority::arbitrate() doc).
+static void test_remote_authority_and_ch6_never_change_mode() {
     SimStm32 stm; stm.state = SimStm32::ACTIVE;
     SimEsp32 esp; esp.localSel4x4 = true;          // LOCAL desires 4x4
 
     esp.run(0, 10, 5, stm, true);
     ASSERT_EQ(stm.applied, F_4X4);
 
-    // Remote takes authority and requests 4x2 (no 4x4 bit).
+    // CH10 → REMOTE and CH6 requests 4x2 (no 4x4 bit): must be fully ignored.
     esp.remoteActive = true; esp.remoteMode = 0;
     esp.run(200, 10, 5, stm, true);
-    ASSERT_EQ(esp.desired, 0);
-    ASSERT_EQ(stm.applied, 0);
+    ASSERT_EQ(esp.desired, F_4X4);
+    ASSERT_EQ(stm.applied, F_4X4);
     ASSERT(esp.ms.inSync());
 
-    // Authority returns to LOCAL: the physical selector (still 4x4) wins again.
+    // CH10 back to LOCAL: still unchanged — mode never depended on it.
     esp.remoteActive = false;
     esp.run(400, 10, 5, stm, true);
     ASSERT_EQ(esp.desired, F_4X4);
@@ -382,20 +393,24 @@ static void test_single_owner_no_spam_when_in_sync() {
     ASSERT_EQ(esp.sendCount, sends);   // no extra frames
 }
 
-// ---- §2 kill-switch: inhibits motion but does NOT change mode authority -----
+// ---- §2 kill-switch / remote authority: inhibit MOTION only, mode is ALWAYS
+// ---- the local selector + local tank (Bloque 1: HMI absolute authority) ----
 
-// When the kill switch is active, remoteMotionAuthorityActive = remoteActive &&
-// !killActive = false.  The mode authority must stay REMOTE so desiredModeFlags
-// keeps the REMOTE value (e.g. 4x4).  Only motion/demand/gear are inhibited.
-
+// Bloque 1: mode authority is now ALWAYS local (the HMI), never REMOTE.
+// remoteMotionAuthorityActive (= remoteActive && !killActive) still governs
+// throttle/steering/gear elsewhere in main.cpp, but it has NO bearing on
+// desiredModeFlags: neither remote authority nor its kill switch can move the
+// mode away from whatever the physical selector + HMI tank toggle say.
 struct SimEsp32WithKill {
     ModeSync ms{ACK_TIMEOUT_MS, MAX_RETRIES, BACKOFF_MS};
     uint8_t desired       = 0;
     uint8_t appliedHmi    = 0;
     bool    localSel4x4   = false;
     bool    localTank     = false;
-    bool    remoteActive  = false;  // who OWNS the mode
-    bool    killActive    = false;  // inhibits motion only, NOT mode authority
+    // Kept only to simulate CH10/CH6/kill-switch inputs and prove they never
+    // reach mode arbitration below (tick() never reads them for mode).
+    bool    remoteActive  = false;
+    bool    killActive    = false;
     uint8_t remoteMode    = 0;
     int     sendCount     = 0;
     AckRes  lastAckSent   = AckRes::OK;
@@ -405,9 +420,12 @@ struct SimEsp32WithKill {
             appliedHmi = stm.heartbeatEcho();
             ms.onHeartbeatModeEcho(appliedHmi);
         }
-        // Mode authority = remoteActive (kill switch does NOT affect this).
-        desired = mode_authority::arbitrate(remoteActive, remoteMode,
-                                            localSel4x4, localTank);
+        // Mode authority is ALWAYS local (HMI) — remoteActive/remoteMode/
+        // killActive intentionally never reach this call (mirrors main.cpp's
+        // arbitrate(!hmiOwnsModeAndLights, 0, ...) production call site).
+        desired = mode_authority::arbitrate(/*remoteActive=*/false,
+                                             /*remoteModeFlags=*/0,
+                                             localSel4x4, localTank);
         ms.setDesired(desired);
         // Motion authority = remoteActive && !killActive (inhibits gear/demand).
         // (Not modelled in this test: gear / demand are separate concerns.)
@@ -426,39 +444,45 @@ struct SimEsp32WithKill {
     }
 };
 
-// REMOTE 4x4 + kill switch activated → desired stays 4x4 (mode unchanged).
-static void test_kill_active_desired_stays_remote_mode() {
+// Bloque 1: REMOTE authority + kill switch have ZERO effect on mode — it is
+// ALWAYS the local selector + local tank.  Regression test for the old
+// "REMOTE 4x4 + kill switch stays 4x4" behavior: now mode stays at the LOCAL
+// selector's value (4x2, since localSel4x4 defaults false) throughout.
+static void test_kill_active_desired_stays_local_mode() {
     SimStm32 stm; stm.state = SimStm32::ACTIVE;
     SimEsp32WithKill esp;
     esp.remoteActive = true;
-    esp.remoteMode   = F_4X4;
+    esp.remoteMode   = F_4X4;   // remote requests 4x4 — must be ignored
 
-    // Settle in 4x4 under REMOTE authority.
+    // Settle: mode follows the LOCAL selector (2WD, localSel4x4 unset), NOT
+    // the remote's requested 4x4.
     esp.run(0, 10, 5, stm, true);
-    ASSERT_EQ(esp.desired, F_4X4);
-    ASSERT_EQ(stm.applied, F_4X4);
+    ASSERT_EQ(esp.desired, 0);
+    ASSERT_EQ(stm.applied, 0);
     ASSERT(esp.ms.inSync());
 
     int sendsBefore = esp.sendCount;
-    // Activate kill switch — motion/demand is inhibited, but mode authority
-    // remains REMOTE.  Desired must still be 4x4.
+    // Activate kill switch — motion/demand is inhibited elsewhere; mode must
+    // stay exactly as-is (still the LOCAL value).
     esp.killActive = true;
     esp.run(200, 10, 10, stm, true);
-    ASSERT_EQ(esp.desired, F_4X4);       // mode intent unchanged
-    ASSERT_EQ(stm.applied, F_4X4);       // STM32 mode unchanged
+    ASSERT_EQ(esp.desired, 0);           // mode intent unchanged
+    ASSERT_EQ(stm.applied, 0);           // STM32 mode unchanged
     ASSERT(esp.ms.inSync());             // no unnecessary resync
     ASSERT_EQ(esp.sendCount, sendsBefore); // no extra CMD_MODE frames
 }
 
-// Releasing the kill switch while REMOTE authority holds → no new mode
-// oscillation, desired remains 4x4.
+// Releasing the kill switch while REMOTE authority holds → still no mode
+// oscillation; mode was never tied to either the kill switch or REMOTE.
 static void test_kill_released_no_mode_oscillation() {
     SimStm32 stm; stm.state = SimStm32::ACTIVE;
     SimEsp32WithKill esp;
+    esp.localSel4x4  = true;    // LOCAL desires 4x4
     esp.remoteActive = true;
-    esp.remoteMode   = F_4X4;
+    esp.remoteMode   = 0;       // remote requests 2WD — must be ignored
     esp.run(0, 10, 5, stm, true);
     ASSERT(esp.ms.inSync());
+    ASSERT_EQ(esp.desired, F_4X4);
 
     esp.killActive = true;
     esp.run(200, 10, 5, stm, true);
@@ -472,25 +496,27 @@ static void test_kill_released_no_mode_oscillation() {
     ASSERT(esp.ms.inSync());
 }
 
-// Abandoning REMOTE authority (selector CH10 moves out of REMOTE) → desired
-// is recomputed from LOCAL selector.  A kill is irrelevant here.
-static void test_abandon_remote_adopts_local_selector() {
+// Toggling CH10 (remoteActive) in and out of REMOTE must not change mode
+// either — it was never the mode source; only the physical selector +
+// local tank matter, always.
+static void test_remote_authority_toggle_does_not_affect_mode() {
     SimStm32 stm; stm.state = SimStm32::ACTIVE;
     SimEsp32WithKill esp;
     esp.remoteActive  = true;
-    esp.remoteMode    = F_4X4;
-    esp.localSel4x4   = false; // selector at 4x2
+    esp.remoteMode    = F_4X4;   // remote "wants" 4x4 — irrelevant
+    esp.localSel4x4   = false;   // selector at 4x2
 
     esp.run(0, 10, 5, stm, true);
-    ASSERT_EQ(esp.desired, F_4X4); // remote authority wins
+    ASSERT_EQ(esp.desired, 0);   // LOCAL selector (4x2), remote value ignored
 
-    // CH10 leaves REMOTE → remoteActive becomes false.
+    // CH10 leaves REMOTE → remoteActive becomes false: still no change.
     esp.remoteActive = false;
     esp.run(200, 10, 5, stm, true);
-    ASSERT_EQ(esp.desired, 0);   // LOCAL selector 4x2 adopted
+    ASSERT_EQ(esp.desired, 0);
     ASSERT_EQ(stm.applied, 0);
     ASSERT(esp.ms.inSync());
 }
+
 
 int main() {
     test_arbitrate_local_selector();
@@ -500,16 +526,16 @@ int main() {
     test_standby_blocked_then_applies_when_safe();
     test_block_diagnostics_visible();
     test_tank_turn_uses_modesync();
-    test_local_remote_switch_uses_modesync();
+    test_remote_authority_and_ch6_never_change_mode();
     test_stm32_restart_resyncs();
     test_can_loss_and_recovery();
     test_lost_ack_confirmed_by_heartbeat();
     test_hmi_shows_applied_not_desired();
     test_single_owner_no_spam_when_in_sync();
-    // Kill-switch / authority isolation tests.
-    test_kill_active_desired_stays_remote_mode();
+    // Kill-switch / authority isolation tests (Bloque 1: mode is ALWAYS local).
+    test_kill_active_desired_stays_local_mode();
     test_kill_released_no_mode_oscillation();
-    test_abandon_remote_adopts_local_selector();
+    test_remote_authority_toggle_does_not_affect_mode();
 
     std::printf("\n--- mode_authority tests: %d run, %d failed ---\n",
                 g_tests_run, g_tests_failed);

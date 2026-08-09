@@ -119,6 +119,17 @@ typedef struct SteeringCenteringDiag {
     bool     module_disabled;                   /* Disabled in Service Mode    */
     bool     fault_latched;                     /* SAFETY_ERROR_CENTERING set  */
 
+    /* Bloque 2 (P1 audit fix): true while the fast CH5 current-based end-stop
+     * guard (endstop_pressure_detected() in steering_centering_patched.c) can
+     * actually observe end-of-travel pressure — i.e. CH5 is ACKing, the shunt
+     * read is valid, the sample is fresh AND classified genuinely healthy
+     * (INA226_CH_OK).  INA226_CH_PRESENT_NO_SHUNT still ACKs and reads the
+     * shunt register successfully but always reports ~0 A, so the guard is
+     * inert even though it "looks" alive — this flag makes that inert state
+     * observable instead of silent.  The base (non-wrapped) FSM has no CH5
+     * guard at all and always reports this false.                          */
+    bool     current_guard_armed;
+
     SteerDiagReason_t abort_reason;             /* Filled by classifier        */
 } SteeringCenteringDiag;
 

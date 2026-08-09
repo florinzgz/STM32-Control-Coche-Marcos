@@ -1631,8 +1631,25 @@ void loop() {
         stm32IsAlive &&
         remote_control::isRemoteSelected() &&
         remote_control::getState() == remote_control::State::ACTIVE;
+    // The remote keeps authority ONLY over motion (throttle / steering / gear);
+    // its kill switch inhibits motion here exactly as before.
     const bool remoteMotionAuthorityActive =
         remoteAuthorityActive && !remote_control::isKillSwitchActive();
+    // The touchscreen HMI is ALWAYS the sole authority over drive mode
+    // (4x4/2x4 + 360 tank turn) and over the front/rear LED relays, regardless
+    // of remote state.  This is a fixed policy, not a runtime condition — kept
+    // as a named constant so every call site documents *why* it never reads
+    // remoteAuthorityActive for mode/lights.
+    constexpr bool hmiOwnsModeAndLights = true;
+
+    // UX only: let the drive screen show a discreet "RC" indicator whenever
+    // the remote currently governs motion.  Never consulted by arbitration.
+    {
+        vehicle::RemoteAuthorityData rad;
+        rad.motionActive = remoteMotionAuthorityActive;
+        rad.timestampMs  = now;
+        vehicleData.setRemoteAuthority(rad);
+    }
 
     // ---- Shifter gear update ----
     // Poll shifter + RC CH7 and send CAN 0x102 on authoritative source change.
@@ -1677,37 +1694,31 @@ void loop() {
         traction_sw::update(swSpeedKmh);
 
         // ---- §2 Single desired-mode arbitration → ModeSync ----------------
-        // Selector, remote and tank-turn all converge here.  arbitrate() picks
-        // the authoritative source.
+        // Selector and tank-turn converge here.  arbitrate() picks the
+        // authoritative source.
         //
-        // Mode authority is controlled by remoteAuthorityActive (who OWNS the
-        // mode).  The kill switch (isKillSwitchActive) inhibits motion/demand
-        // only — it must NOT transfer mode ownership to LOCAL, because that
-        // would silently flip desired from REMOTE 4x4 to LOCAL 4x2 every time
-        // the kill switch is pressed, creating an unexpected mode oscillation
-        // when it is released.
+        // The HMI is the sole mode authority (hmiOwnsModeAndLights): the
+        // physical 4x4 selector + the local tank-turn toggle ALWAYS decide
+        // desiredModeFlags, never remote_control::getDriveMode().  The remote
+        // kill switch (isKillSwitchActive) keeps inhibiting motion/demand only
+        // — it has never affected mode ownership here.
         {
-            // LOCAL selector edge → audio + log feedback only (no CAN here).
-            if (!remoteAuthorityActive) {
-                if (traction_sw::hasChanged()) {
-                    if (traction_sw::is4WD()) {
-                        audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
-                    } else {
-                        audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
-                    }
-                    Serial.printf("[TRACTION] Switch → %s\n",
-                                  traction_sw::is4WD() ? "4WD" : "2WD");
-                    traction_sw::clearChanged();
+            // Selector edge → audio + log feedback only (no CAN here).  The
+            // HMI owns mode unconditionally now, so this always runs.
+            if (traction_sw::hasChanged()) {
+                if (traction_sw::is4WD()) {
+                    audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
+                } else {
+                    audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
                 }
-            } else {
-                // Under remote authority the physical selector is ignored; drop
-                // any latched edge so it does not fire stale audio on return.
+                Serial.printf("[TRACTION] Switch → %s\n",
+                              traction_sw::is4WD() ? "4WD" : "2WD");
                 traction_sw::clearChanged();
             }
 
             desiredModeFlags = mode_authority::arbitrate(
-                remoteAuthorityActive,          // mode authority (kill switch does NOT change this)
-                remote_control::getDriveMode(),
+                !hmiOwnsModeAndLights,          // mode is always LOCAL (HMI authority)
+                /*remoteModeFlags=*/0,
                 traction_sw::is4WD(),
                 localTankTurn);
             g_modeSync.setDesired(desiredModeFlags);
@@ -1797,7 +1808,8 @@ void loop() {
         while (xQueueReceive(touchActionQueue, &act, 0) == pdTRUE) {
             switch (act) {
                 case TouchAction::FRONT_LED_TOGGLE:
-                    if (remoteAuthorityActive) break;
+                    // hmiOwnsModeAndLights: the touchscreen is the sole LED
+                    // authority; the remote can no longer inhibit this.
                     frontLedLocalState = !frontLedLocalState;
                     requestLedRelaySync();
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
@@ -1810,7 +1822,8 @@ void loop() {
                     break;
 
                 case TouchAction::REAR_LED_TOGGLE:
-                    if (remoteAuthorityActive) break;
+                    // hmiOwnsModeAndLights: the touchscreen is the sole LED
+                    // authority; the remote can no longer inhibit this.
                     rearLedLocalState = !rearLedLocalState;
                     requestLedRelaySync();
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
@@ -1823,39 +1836,21 @@ void loop() {
                     break;
 
                 case TouchAction::TANK_MODE_TOGGLE:
-                    if (!remoteAuthorityActive) {
-                        // §2: tank turn only changes the DESIRED mode; it goes
-                        // through the same ModeSync path (arbitrated + sent by
-                        // the FSM above), never a direct CMD_MODE send.  The HMI
-                        // icon updates only after the STM32 confirms via the
-                        // heartbeat echo (appliedModeFlags).
-                        localTankTurn = !localTankTurn;
-                        audio::play(audio::Sound::BEEP, audio::Priority::LO);
-                        Serial.printf("[MODE] Tank toggle requested → tank=%u\n",
-                                      localTankTurn ? 1u : 0u);
-                    }
+                    // hmiOwnsModeAndLights: the touchscreen is the sole mode
+                    // authority; the remote can no longer inhibit 360/tank turn.
+                    // §2: tank turn only changes the DESIRED mode; it goes
+                    // through the same ModeSync path (arbitrated + sent by
+                    // the FSM above), never a direct CMD_MODE send.  The HMI
+                    // icon updates only after the STM32 confirms via the
+                    // heartbeat echo (appliedModeFlags).
+                    localTankTurn = !localTankTurn;
+                    audio::play(audio::Sound::BEEP, audio::Priority::LO);
+                    Serial.printf("[MODE] Tank toggle requested → tank=%u\n",
+                                  localTankTurn ? 1u : 0u);
                     break;
             }
         }
 
-    }
-
-    // ---- Remote lights (CH8) ----
-    // In REMOTE authority mode, CH8 owns both front/rear light relays.
-    if (remoteAuthorityActive) {
-        bool lightsOn = remote_control::isLightsOn();
-        if (frontLedLocalState != lightsOn || rearLedLocalState != lightsOn) {
-            frontLedLocalState = lightsOn;
-            rearLedLocalState  = lightsOn;
-            requestLedRelaySync();
-            sendLedCommand(frontLedLocalState, rearLedLocalState);
-            config_store::setFrontLedEnabled(frontLedLocalState);
-            config_store::setRearLedEnabled(rearLedLocalState);
-            audio::play(lightsOn ? audio::Sound::LIGHTS_ON
-                                 : audio::Sound::LIGHTS_OFF,
-                        audio::Priority::LO);
-            Serial.printf("[REMOTE] Lights(CH8) → %s\n", lightsOn ? "ON" : "OFF");
-        }
     }
 
     // ---- Remote audio volume (CH9) ----

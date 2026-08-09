@@ -474,6 +474,7 @@ static void test_hard_current_cuts_while_encoder_moves(void)
     g_ch5.signed_current_ma = 0;
     main_cycle();
     CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+    CHECK(SteeringCentering_GetDiag()->current_guard_armed);  /* CH5 healthy */
 
     /* First hard-current acquisition while encoder moves: reject as a lone spike. */
     set_encoder(10);
@@ -508,6 +509,101 @@ static void test_hard_current_cuts_while_encoder_moves(void)
     CHECK(!s_last_steer_reverse);  /* base right-sweep convention */
 }
 
+/* Mirrors HOMING_PWM_REDUCED_COUNTS in steering_centering_patched.c
+ * (HOMING_PWM_COUNTS=4249 * HOMING_PWM_REDUCED_PERCENT=55 / 100), the same way
+ * this file already hardcodes the full-authority literal 4249U above instead
+ * of sharing a private macro across translation units. */
+#define EXPECT_HOMING_PWM_REDUCED_COUNTS ((uint16_t)((4249U * 55U) / 100U))
+
+/* ==================================================================
+ *  Test 5 (Bloque 2, P1 audit fix): CH5 unarmed (INA226_CH_PRESENT_NO_SHUNT)
+ *  makes homing fall back to the reduced-authority PWM immediately, and the
+ *  0x316 telemetry reports the current guard as disarmed.
+ * ================================================================== */
+static void test_ch5_unarmed_uses_reduced_pwm_and_reports_disarmed(void)
+{
+    bring_up_standby_healthy();
+
+    /* CH5 ACKs and the shunt read is reported OK, but the classifier says
+     * "present, no shunt": current will structurally read ~0 A forever, so
+     * the fast current guard can never observe end-of-travel pressure. */
+    g_ch5.fault_reason = INA226_CH_PRESENT_NO_SHUNT;
+
+    advance_to_left_sweep();
+
+    CHECK(s_last_steer_pwm == EXPECT_HOMING_PWM_REDUCED_COUNTS);
+    CHECK(s_last_steer_pwm > 0U);
+    CHECK(s_last_steer_pwm < 4249U);
+    CHECK(SteeringCentering_GetDiag()->pwm_requested == EXPECT_HOMING_PWM_REDUCED_COUNTS);
+    CHECK(!SteeringCentering_GetDiag()->current_guard_armed);
+
+    /* d) INA226_CH_PRESENT_NO_SHUNT must stay a diagnostic-only condition: the
+     * steering assist keeps working mechanically, never isolated by this. */
+    CHECK(!Steering_IsMechanicalOnly());
+    CHECK(!Steering_IsElectricalHazard());
+}
+
+/* ==================================================================
+ *  Test 6 (Bloque 2, P1 audit fix): with CH5 unarmed AND a continuously
+ *  jittering encoder (small counts changing well under 300 ms, net
+ *  displacement never leaving the safety range), neither the old CH5 current
+ *  guard, the base FSM's own encoder-stall fallback, nor Centering_RangeExceeded
+ *  can ever fire -- exactly the audit's "homing a 100% PWM sin guarda
+ *  efectiva" scenario.  The NEW wall-clock HOMING_SWEEP_TIMEOUT_MS guard must
+ *  still cut power and start the LEFT->RIGHT reversal, well inside the
+ *  mandated 600-1000 ms band and far short of the 10 s TOTAL_TIMEOUT_MS.
+ * ================================================================== */
+static void test_ch5_unarmed_jitter_defeated_by_sweep_leg_timeout(void)
+{
+    bring_up_standby_healthy();
+    g_ch5.fault_reason = INA226_CH_PRESENT_NO_SHUNT;
+    g_ch5.signed_current_ma = 0;
+
+    advance_to_left_sweep();
+    CHECK(s_last_steer_pwm == EXPECT_HOMING_PWM_REDUCED_COUNTS);
+
+    int cycles = 0;
+    bool cut_seen = false;
+    for (; cycles < 150; ++cycles) {
+        /* Bounce the encoder by a few counts every 10 ms cycle: enough to
+         * look "moving" to Centering_IsStalled() (300 ms window) and to
+         * endstop_pressure_detected()'s own no-motion timer, yet it never
+         * nets more than 3 counts away from the sweep origin, so
+         * Centering_RangeExceeded() (6000-count range) never trips either.
+         * Current stays 0 A the whole time (CH5 unarmed), so the fast
+         * current guard never observes end-of-travel pressure. */
+        set_encoder((cycles % 2 == 0) ? 3 : 0);
+        main_cycle();
+
+        /* Must never escalate to full authority while unarmed. */
+        CHECK(s_last_steer_pwm == 0U || s_last_steer_pwm == EXPECT_HOMING_PWM_REDUCED_COUNTS);
+
+        if (s_last_steer_pwm == 0U) {
+            cut_seen = true;
+            break;
+        }
+    }
+
+    CHECK(cut_seen);                 /* the new guard actually fired          */
+    CHECK(cycles < 110);              /* inside ~1000 ms (100 cycles) + margin */
+    CHECK(cycles >= 95);              /* not earlier than ~950 ms              */
+    CHECK(!s_last_steer_reverse);     /* PWM=0 first, direction unchanged yet  */
+
+    /* Reversal dead-time: PWM must stay at 0 until it completes, then the
+     * right sweep begins -- identical behaviour to the CH5 hard-current path. */
+    for (int i = 0; i < 9; ++i) {
+        set_encoder((i % 2 == 0) ? 3 : 0);
+        main_cycle();
+        CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_LEFT);
+        CHECK(s_last_steer_pwm == 0U);
+    }
+    set_encoder(50);
+    main_cycle();
+    CHECK(SteeringCentering_GetState() == CENTERING_SWEEP_RIGHT);
+    CHECK(s_last_steer_pwm == EXPECT_HOMING_PWM_REDUCED_COUNTS);  /* still unarmed */
+    CHECK(!s_last_steer_reverse);     /* base right-sweep convention           */
+}
+
 int main(void)
 {
     test_homing_keeps_pc12_on_and_completes();
@@ -516,6 +612,8 @@ int main(void)
     if (effective_wrapper_present()) {
         test_pb5_level_ignores_optional_service_disable();
         test_hard_current_cuts_while_encoder_moves();
+        test_ch5_unarmed_uses_reduced_pwm_and_reports_disarmed();
+        test_ch5_unarmed_jitter_defeated_by_sweep_leg_timeout();
     } else {
         printf("SKIP wrapper-specific PB5/CH5 cases (base FSM linkage)\n");
     }
