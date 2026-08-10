@@ -63,6 +63,18 @@ void Traction_SetAxisRotation(bool enable);
 void Traction_SetGear(GearPosition_t gear);
 GearPosition_t Traction_GetGear(void);
 
+/** Hito 2 (PR #445) — wheel-equality self-test RAW actuation feed.  Called
+ * once per cycle by can_handler.c's CAN_WheelEqualityTick() to report which
+ * wheel(s) the self-test wants driven this cycle (bit i: 0=FL,1=FR,2=RL,
+ * 3=RR), at what raw PWM (0-100 %, applied IDENTICALLY/unequalized to every
+ * masked wheel) and direction.  When active=true, Traction_Update()
+ * bypasses gear/pedal/ABS/TCS/Ackermann/ramp AND
+ * TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear() — see the
+ * bypass block at the top of Traction_Update() for the full rationale.
+ * active=false immediately releases control back to the normal pipeline. */
+void Traction_SetWheelEqActuation(uint8_t wheel_mask, uint8_t pwm_pct,
+                                  bool forward, bool active);
+
 /* ---- Runtime-configurable gear power limits (R-2) ----
  * Per-gear traction power limits expressed as integer percentages
  * (0..100).  Defaults equal the historic compile-time values
@@ -138,6 +150,13 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg);
  * verify the differential is exactly 1.000 on all four wheels when the
  * steering wheel is centred, without recomputing it independently. */
 float Traction_GetAckermannDiff(uint8_t wheel);
+
+/** Steering-centre deadband (degrees) below which compute_ackermann_differential()
+ * applies no correction (ACKERMANN_DEADBAND_DEG, motor_control.c — private
+ * #define).  Exposed read-only so callers (Hito 2 wheel-equality self-test)
+ * can build their own "steering centred" precondition without duplicating
+ * the literal. */
+float Traction_GetAckermannDeadbandDeg(void);
 
 /* Steering Functions */
 void Steering_Init(void);

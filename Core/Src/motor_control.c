@@ -466,6 +466,21 @@ static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*
  * is the strictest fail-safe boot state.                                */
 static GearPosition_t current_gear = GEAR_NEUTRAL;
 
+/* ---- Hito 2 (PR #445) wheel-equality self-test RAW actuation feed ----
+ * Written once per cycle by can_handler.c's CAN_WheelEqualityTick() via
+ * Traction_SetWheelEqActuation() (mirrors the existing Traction_SetDemand()
+ * cross-module wiring pattern), consumed at the very top of
+ * Traction_Update().  wheeleq_active gates a raw-PWM bypass path that
+ * skips gear/pedal/ABS/TCS/Ackermann/ramp AND, critically,
+ * TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear() — see the
+ * bypass block inside Traction_Update() for the full rationale. Defaults
+ * to inactive/all-zero so normal driving is byte-for-byte unaffected
+ * whenever the self-test is not running.                                 */
+static uint8_t wheeleq_wheel_mask = 0U;
+static uint8_t wheeleq_pwm_pct    = 0U;
+static bool    wheeleq_forward    = true;
+static bool    wheeleq_active     = false;
+
 /* ---- Runtime-configurable gear power limits (R-2) ----
  * Stored as percent (0..100) for an exact match with the Engineering-menu
  * UI and the CAN/flash representation; converted to a fraction at the
@@ -1381,6 +1396,29 @@ float Traction_GetBrakeReleasePct(void)
     return sanitize_float(brake_release_pct, 0.0f);
 }
 
+/* Hito 2 (PR #445) — wheel-equality self-test RAW actuation feed.  See the
+ * static wheeleq_* declarations above and the bypass block at the top of
+ * Traction_Update() for the full rationale.  Called once per cycle by
+ * can_handler.c's CAN_WheelEqualityTick(); mirrors the existing
+ * Traction_SetDemand() cross-module wiring pattern (can_handler.c calls a
+ * setter, motor_control.c's static state is consumed inside
+ * Traction_Update()).  wheel_mask bit i: 0=FL,1=FR,2=RL,3=RR.  pwm_pct is
+ * clamped to 0..100 defensively (the real ceiling is enforced by the pure
+ * wheel_equality_test.c decision core against SVCDIAG_PWM_ABS_MAX_PCT;
+ * this clamp is only a last-resort guard against a corrupt caller value).
+ * active=false forces an immediate release to the normal pipeline: the
+ * very next Traction_Update() call runs its ordinary gear/pedal/ABS/TCS
+ * logic, no residual raw PWM survives. */
+void Traction_SetWheelEqActuation(uint8_t wheel_mask, uint8_t pwm_pct,
+                                  bool forward, bool active)
+{
+    if (pwm_pct > 100U) pwm_pct = 100U;
+    wheeleq_wheel_mask = wheel_mask & 0x0FU;
+    wheeleq_pwm_pct    = pwm_pct;
+    wheeleq_forward    = forward;
+    wheeleq_active     = active;
+}
+
 void Traction_Update(void)
 {
     /* --- Power-ready gate ---
@@ -1406,6 +1444,18 @@ void Traction_Update(void)
             return;  /* Relays not yet settled — suppress all motor output */
         }
     }
+
+    /* NOTE — Hito 2 (PR #445) wheel-equality RAW actuation bypass:
+     * this base function (Traction_Update_Base() once macro-renamed by
+     * motor_control_patched.c) is NOT the right place for the bypass,
+     * because the wrapper's REAL Traction_Update() unconditionally calls
+     * TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear() AFTER
+     * this function returns (using its own shadow-register readback),
+     * which would re-equalize anything decided here.  The actual bypass
+     * lives in motor_control_patched.c's Traction_Update(), BEFORE it
+     * calls this function — see wheeleq_active there for the full
+     * rationale.  wheeleq_wheel_mask/pwm_pct/forward/active above are
+     * shared (via #include) with that wrapper.                         */
 
     /* --- Gear P: Park Hold ---
      * Apply a PASSIVE electromagnetic brake via the H-bridge to simulate a
@@ -2655,6 +2705,11 @@ float Traction_GetAckermannDiff(uint8_t wheel)
 {
     if (wheel >= 4U) return 1.0f;
     return acker_diff_snapshot[wheel];
+}
+
+float Traction_GetAckermannDeadbandDeg(void)
+{
+    return ACKERMANN_DEADBAND_DEG;
 }
 
 /* ==================================================================
