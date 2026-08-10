@@ -37,6 +37,8 @@
 #include "steering_service_store.h"
 #include "service_diag_session.h"
 #include "service_diag_frame.h"
+#include "wheel_equality_test.h"
+#include "wheel_equality_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include "can_rx_policy.h"
@@ -3600,6 +3602,15 @@ static uint8_t              svcdiag_last_step_pwm_pct = 0U;
 static uint16_t             svcdiag_last_current_ma   = 0U;
 static uint16_t             svcdiag_last_pulses_ps     = 0U;
 
+/* Hito 2 (PR #445) wheel-equality self-test object.  Declared here (rather
+ * than only where the full CAN wiring is added) so svcdiag_build_conds()'s
+ * grounded-wheel-pulse exemption below can see which wheel(s) it is
+ * actuating — see WheelEqTest_ActiveWheelMask().  Zero-initialised by the
+ * compiler (state==WHEQ_STATE_IDLE==0), which is already the safe default;
+ * CAN_WheelEqualityInit() (full wiring) still calls WheelEqTest_Init()
+ * explicitly for defensive clarity, matching every sibling module.        */
+static WheelEqTest wheeleq_test;
+
 static void svcdiag_lazy_init(void)
 {
     if (svcdiag_ready) return;
@@ -3664,11 +3675,26 @@ static void svcdiag_build_conds(ServiceDiagConds *c)
     /* Grounded-wheel-pulse: any wheel OTHER than the active channel showing
      * movement means the vehicle is not genuinely suspended (or something
      * else is spinning it).  Checked against ALL 4 wheels when the active
-     * channel is steering or none (nothing to exempt).                    */
+     * channel is steering or none (nothing to exempt).
+     *
+     * Hito 2 (PR #445) extension: the wheel-equality self-test drives its
+     * own wheel(s) through this SAME suspended-vehicle session, using a
+     * separate FSM (WheelEqTest) with its own wheel_mask — Hito 1's
+     * ActiveChannel() alone never sees it (stays SVCDIAG_CH_NONE), so
+     * without this the first wheel Hito 2 spins would immediately read
+     * back as a "grounded wheel pulse" and abort the session.  The
+     * exemption below tracks ONLY the wheel(s) WheelEqTest is actually
+     * commanding THIS cycle (never a global permission): a single bit in
+     * Fase 1, all four only while Fase 2 is actually running, and zero the
+     * instant the test is idle/aborted/blocked/between steps/done — see
+     * WheelEqTest_ActiveWheelMask().  Outside any wheel-equality session
+     * this mask is always 0, so the guard behaves exactly as before.      */
     ServiceDiagChannel_t active = ServiceDiagSession_ActiveChannel(&svcdiag_session);
+    uint8_t wheeleq_exempt_mask = WheelEqTest_ActiveWheelMask(&wheeleq_test);
     bool grounded = false;
     for (uint8_t i = 0; i < 4U; i++) {
         if ((ServiceDiagChannel_t)i == active) continue;
+        if ((wheeleq_exempt_mask & (1U << i)) != 0U) continue;
         if (fabsf(speeds[i]) >= SVCDIAG_WHEEL_STATIONARY_KMH) { grounded = true; break; }
     }
     c->grounded_wheel_pulse = grounded;

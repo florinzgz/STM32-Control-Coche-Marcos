@@ -665,6 +665,95 @@ static void test_null_safety(void)
     CHECK(!WheelEqTest_Phase1AllPass(NULL));
 }
 
+/* ======================================================================
+ * 16. WheelEqTest_ActiveWheelMask() — the exact accessor can_handler.c's
+ *     svcdiag_build_conds() uses to exempt the wheel(s) Hito 2 is actuating
+ *     from the Hito 1 grounded-wheel-pulse abort guard (P2, PR #445).
+ *
+ *     This must prove two things:
+ *       a) The mask exempts ONLY the wheel(s) genuinely being driven THIS
+ *          cycle (a single bit in Fase 1, all four only while Fase 2 is
+ *          actually running) and is 0 at every other time (idle, between
+ *          steps, done, aborted) — never a blanket/global permission.
+ *       b) Re-deriving can_handler.c's grounded_wheel_pulse loop verbatim
+ *          with this mask still flags movement on a wheel that is NOT
+ *          exempt — i.e. a real fault on an unrelated wheel still aborts
+ *          the session, exactly as test_grounded_wheel_pulse_aborts() in
+ *          test_service_diag_session.c already proves for Hito 1 alone.
+ * ====================================================================== */
+
+/* Bit-for-bit copy of the exemption loop in can_handler.c's
+ * svcdiag_build_conds() (kept in sync manually — can_handler.c itself is
+ * never compiled in a host test, so this is the only way to exercise the
+ * exact boolean it produces). `active` mirrors ServiceDiagSession_ActiveChannel()
+ * (SVCDIAG_CH_NONE == 5 when nothing from Hito 1 is stepping). */
+static bool grounded_wheel_pulse_replica(const float speeds[4], int active,
+                                          uint8_t wheeleq_exempt_mask)
+{
+    bool grounded = false;
+    for (uint8_t i = 0; i < 4U; i++) {
+        if ((int)i == active) continue;
+        if ((wheeleq_exempt_mask & (1U << i)) != 0U) continue;
+        if (fabsf(speeds[i]) >= 0.5f) { grounded = true; break; }
+    }
+    return grounded;
+}
+
+static void test_active_wheel_mask_exemption(void)
+{
+    WheelEqTest t;
+    WheelEqTest_Init(&t);
+    WheelEqConds c = base_conds(18000U);
+
+    /* IDLE: no exemption at all. */
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == 0U);
+
+    /* Fase 1, step 0 (FL): exactly one bit, matching GetActuation(). */
+    CHECK(WheelEqTest_Begin(&t, &c));
+    CHECK(WheelEqTest_State(&t) == WHEQ_STATE_PHASE1_RUNNING);
+    WheelEqActuation_t a = WheelEqTest_GetActuation(&t);
+    CHECK(a.wheel_mask == 0x01U);   /* WHEQ_WHEEL_FL bit                    */
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == a.wheel_mask);
+
+    /* --- (a) exemption is per-wheel, never global -------------------- */
+    /* Only FL (bit0, exempt) moving, active channel NONE (Hito1 idle):
+     * must NOT be flagged as a grounded-wheel-pulse. */
+    float speeds_fl_only[4] = { 5.0f, 0.0f, 0.0f, 0.0f };
+    CHECK(!grounded_wheel_pulse_replica(speeds_fl_only, (int)SVCDIAG_CH_NONE,
+                                         WheelEqTest_ActiveWheelMask(&t)));
+
+    /* --- (b) a NON-exempt wheel (RL, bit2) moving must still trip the
+     * guard -- proves the fix does not silence real grounded-wheel
+     * faults on wheels Hito 2 is not driving. */
+    float speeds_rl_faulted[4] = { 5.0f, 0.0f, 3.0f, 0.0f };
+    CHECK(grounded_wheel_pulse_replica(speeds_rl_faulted, (int)SVCDIAG_CH_NONE,
+                                        WheelEqTest_ActiveWheelMask(&t)));
+
+    /* Run Fase 1 to completion: PHASE1_DONE must exempt nobody (matches
+     * GetActuation()'s own zero-mask "coast" contract at rest). */
+    WheelEqState_t st = drive_until(&t, &c, sample_healthy, PHASE1_MAX_TICKS);
+    CHECK(st == WHEQ_STATE_PHASE1_DONE);
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == 0U);
+
+    /* Fase 2: all four wheels simultaneously, only while running. */
+    CHECK(WheelEqTest_BeginPhase2(&t, &c));
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == 0x0FU);
+    float speeds_all_moving[4] = { 5.0f, 5.0f, 5.0f, 5.0f };
+    CHECK(!grounded_wheel_pulse_replica(speeds_all_moving, (int)SVCDIAG_CH_NONE,
+                                         WheelEqTest_ActiveWheelMask(&t)));
+
+    st = drive_until(&t, &c, sample_healthy, PHASE2_MAX_TICKS);
+    CHECK(st == WHEQ_STATE_PHASE2_DONE);
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == 0U);   /* done: no exemption   */
+
+    /* Aborted: no exemption either. */
+    WheelEqTest_Abort(&t, WHEQ_REASON_OPERATOR);
+    CHECK(WheelEqTest_ActiveWheelMask(&t) == 0U);
+
+    /* NULL-safety: must not crash, must return 0 (no exemption). */
+    CHECK(WheelEqTest_ActiveWheelMask(NULL) == 0U);
+}
+
 /* ---- Text accessors: every enum value must resolve to a non-"?" label. --*/
 static void test_text_accessors_cover_every_enum_value(void)
 {
@@ -698,6 +787,7 @@ int main(void)
     test_tcs_abs_interference_persistent_aborts();
     test_begin_rejected_while_already_active();
     test_null_safety();
+    test_active_wheel_mask_exemption();
     test_text_accessors_cover_every_enum_value();
 
     printf("wheel_equality_test: %d run, %d failed\n", tests_run, tests_failed);

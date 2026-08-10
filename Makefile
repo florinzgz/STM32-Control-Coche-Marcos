@@ -54,6 +54,7 @@ C_SOURCES = \
   $(CORE_SRC)/steering_service_store.c \
   $(CORE_SRC)/wheel_sensor_store.c \
   $(CORE_SRC)/service_diag_session.c \
+  $(CORE_SRC)/wheel_equality_test.c \
   $(CORE_SRC)/loop_diag.c \
   $(CORE_SRC)/math_safety.c \
   $(CORE_SRC)/standby_mode_sync_policy.c \

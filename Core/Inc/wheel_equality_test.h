@@ -377,6 +377,24 @@ static inline bool WheelEqTest_Phase2Ran(const WheelEqTest *t)
     return t->phase2_ran;
 }
 
+/* Bitmask (bit i = wheel i, 0=FL..3=RR) of the wheel(s) THIS module is
+ * actively commanding right now — 0 whenever WheelEqTest_Active() is false
+ * (IDLE/ABORTED/BLOCKED_*) or the FSM is between steps (PHASE1_DEADTIME) or
+ * awaiting an operator decision (PHASE1_DONE/PHASE2_DONE), matching
+ * WheelEqTest_GetActuation()'s own "zero mask => coast all four" contract.
+ *
+ * Pure convenience so can_handler.c's SERVICE_DIAG grounded-wheel-pulse
+ * guard (svcdiag_build_conds()) can OR this into its own single-channel
+ * exemption without duplicating this module's actuation-mask logic — the
+ * exemption always tracks exactly which wheel(s) are really being driven,
+ * never a global permission, and automatically covers all four during
+ * Fase 2 only while that phase is actually running. */
+static inline uint8_t WheelEqTest_ActiveWheelMask(const WheelEqTest *t)
+{
+    if (t == NULL || !WheelEqTest_Active(t)) return 0U;
+    return WheelEqTest_GetActuation(t).wheel_mask;
+}
+
 /* Human-readable label for a state / reason / verdict / cause (HMI). */
 const char *WheelEqTest_StateText(WheelEqState_t st);
 const char *WheelEqTest_ReasonText(WheelEqReason_t r);
