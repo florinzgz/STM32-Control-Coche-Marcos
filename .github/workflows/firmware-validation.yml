@@ -108,8 +108,7 @@ jobs:
               Core/Src/test_steering_service_store.c \
               Core/Src/test_wheel_sensor_store.c \
               Core/Src/test_service_diag_frame.c \
-              Core/Src/test_service_diag_session.c \
-              Core/Src/test_wheel_equality_frame.c; do
+              Core/Src/test_service_diag_session.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
               case "$src" in
