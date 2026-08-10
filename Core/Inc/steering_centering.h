@@ -96,8 +96,17 @@ typedef enum {
 #define HOMING_PWM_REDUCED_COUNTS \
     ((uint16_t)(((uint32_t)HOMING_PWM_COUNTS * HOMING_PWM_REDUCED_PERCENT) / 100U))
 
+/* Guarded for __cplusplus: this header is pulled in transitively by
+ * steering_centering_frame.h -> steering_centering_diag.h (frame headers
+ * are consumed as raw C++ translation units by ESP32 host tests, e.g.
+ * test_frame_parity_cross.cpp — see service_diag_frame.h's file banner for
+ * the documented convention). C11 `_Static_assert` is not valid C++
+ * (static_assert is), so it must not be evaluated when __cplusplus is
+ * defined; the ARM/C11 host-test builds still get the compile-time check. */
+#ifndef __cplusplus
 _Static_assert(HOMING_PWM_COUNTS == 4249U,
                "homing full authority must match TIM3 period");
+#endif
 
 /* ---- Public API ---- */
 

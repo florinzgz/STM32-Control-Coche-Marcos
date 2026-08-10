@@ -1,13 +1,14 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.20
-**Status:** ACTIVE — Added DIAG_TRACTION_LIMITS 0x31A post-demand limiter observability (additive)
-**Date:** 2026-07-31
+**Revision:** 1.21
+**Status:** ACTIVE — Added SERVICE_DIAG self-test session telemetry 0x31B/0x31C + SERVICE_CMD action 0xFC (additive)
+**Date:** 2026-08-10
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
 
 **Change log:**
+- **1.21** (2026-08-10): Hito 1 (T6) close. Added `SERVICE_CMD` action `0xFC` (`SERVICE_ACTION_SELF_TEST`, sub-opcodes `SVCDIAG_OP_START/NEXT/ABORT/QUERY`) driving the guided single-actuator self-test session (`service_diag_session.c`), and its two telemetry frames: `DIAG_SERVICE_SESSION` (0x31B, DLC 8, 10 Hz while a session is active, silent otherwise) and `DIAG_TEST_RESULT` (0x31C, DLC 8, once per step close). See §4.22 for the full byte layout, enums and sub-opcode table. Purely additive, bidirectional (command 0x110, telemetry STM32→ESP32) — drives no actuator in Hito 1 (Bloque B wires the real PWM output in a later milestone); no existing CAN ID, DLC or payload changed (backward-compatible). STM32/ESP32 symbol parity (IDs, DLC, byte offsets, enums, sub-opcodes, confirm token) re-verified byte-for-byte this revision — see the parity table in `PROJECT_CHANGELOG.md` (Hito 1 close entry); no discrepancy found.
 - **1.20** (2026-07-31): Added `DIAG_TRACTION_LIMITS` (0x31A, DLC 4, 1000 ms): byte0 obstacle_scale %, byte1 degraded traction_cap %, byte2 brake-release ramp %, byte3 `ObstacleState_t`. ESP32 uses a 3000 ms slow-diagnostic stale timeout and shows O/T/B + obstacle FSM on MOTION INHIBIT DIAG. Purely additive, diagnostic-only; no control or safety path consumes it.
 - **1.0** (2025-06-15): Initial frozen contract. Baseline safety system.
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
@@ -135,6 +136,8 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x317 | DIAG_RELAY_HEALTH | 8 | 1000 ms | **Traction relay / current-sense health** — evidence-graded cause so the HMI shows CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED (with the numbers behind the verdict) instead of a bare "RELAY OPEN". byte0=diag reason (`RELAY_DIAG_*` 0..10: OK, OPEN_CONFIRMED, OPEN_SUSPECTED, CURRENT_SENSE_INVALID, SHUNT_OPEN, SHUNT_BYPASSED, POLARITY_REVERSED, DATA_STALE, INA_MISSING, SCALE_INVALID, INCONCLUSIVE), byte1=flags (bit0 relay commanded, bit1 relay sequence complete, bit2 power ready, bit3 any wheel moving, bit4 current reading valid, bit5 current sample stale [age ≥ 300 ms], bit6 expected wheel INA missing, bit7 polarity reversed), byte2-3=sum \|CH0..3\| current in centi-amps (u16 LE, saturating), byte4=throttle % (0..100), byte5=final PWM/traction demand % (0..100), byte6-7=current sample age ms (u16 LE, saturating). Classification is the pure host-tested `Relay_ClassifyHealth()`; the snapshot is built by `Safety_UpdateRelayHealthDiag()`, packed by `RelayHealth_PackFrame()` (shared `relay_health_frame.h`), emitted by `CAN_SendRelayHealthDiag()`; ESP32 `decodeRelayHealthDiag()` via `relay_health_view::decode()` accepts DLC≥8. Because this HW has NO post-relay voltage/contact feedback, the firmware downgrades any classifier `OPEN_CONFIRMED` to `OPEN_SUSPECTED` (never claims confirmation without independent evidence). **Instrumentation only** — the legacy `Safety_CheckRelayHealth()` latch is unchanged; drives no relay/PWM. | `can_handler.c`, `safety_system.c`, `relay_health_diag.c` |
 | 0x318 | DIAG_INA_CH5 | 8 | 1000 ms | **Steering INA226 (CH5) channel diagnostic** — separates a genuinely MISSING chip (no I2C ACK) from a transport gap ("n/d" = ABSENCE of this frame), a lost config, an open/bypassed shunt, or reversed-polarity wiring, and carries a **SIGNED** shunt so a negative steering current is never flattened to zero. byte0=fault reason (`INA_CH5_*` 0..9: OK, PRESENT_NO_SHUNT, POLARITY_REVERSED, STALE, MUX_SELECT_FAIL, MISSING, WRONG_ID, CONFIG_LOST, READ_FAIL, UNKNOWN), byte1=flags (bit0 mux select ok, bit1 i2c ack, bit2 identity ok [MFG 0x5449 & DIE 0x2260], bit3 config readback ok, bit4 shunt read ok, bit5 bus read ok, bit6 channel powered, bit7 stale [age ≥ 500 ms]), byte2-3=raw shunt register (int16 LE, signed two's complement; µV = raw×2.5, mA = µV/1.5 mΩ — both derived signed, never zeroed), byte4-5=bus voltage mV (u16 LE, saturating), byte6-7=sample age ms (u16 LE, 0xFFFF = never sampled). Probe + classification via the pure host-tested `Ina226_ClassifyChannel()`; the snapshot is built each cycle by `Sensor_UpdateChannel5Diag()` (full identity/config/shunt/bus sequence, report-only — rolls back its own I2C fail count), packed by `Ina226Ch5_PackFrame()` (shared `ina226_ch5_frame.h`), emitted by `CAN_SendIna226Ch5Diag()`; ESP32 `decodeIna226Ch5Diag()` via `ina226_ch5_view::decode()` accepts DLC≥8, HMI shows CH5 MISSING / WRONG ADDRESS / CONFIG FAIL / PRESENT NO SHUNT / POLARITY REVERSED / STALE / OK on the INA226 LIVE DIAG page. **Instrumentation only** — never gates control; the probe's failures never trip the bus-fault/Error-Code-11 recovery. | `can_handler.c`, `sensor_manager.c`, `ina226_channel_diag.c` |
 | 0x31A | DIAG_TRACTION_LIMITS | 4 | 1000 ms | Post-demand traction limiter observability: byte0=`obstacle_scale` %, byte1=`Safety_GetTractionCapFactor()` %, byte2 brake-to-drive `brake_release_pct`, byte3 obstacle FSM state (0 NO_SENSOR, 1 NORMAL, 2 CONFIRMING, 3 ACTIVE, 4 CLEARING, 5 SENSOR_FAULT). ESP32 classifies stale after 3000 ms. Instrumentation-only; no control/safety path consumes it. | `can_handler.c`, `motor_control.c`, `safety_system.c` |
+| 0x31B | DIAG_SERVICE_SESSION | 8 | 10 Hz while active, silent otherwise | **SERVICE_DIAG self-test session status** (Bloque A, Hito 1). byte0=session state (`ServiceDiagState_t` 0..5: IDLE/ENTERING/ARMED/STEPPING/DEADTIME/ABORTED), byte1=step_index (count of NEXT steps so far), byte2=active_channel (`ServiceDiagChannel_t` 0..5: FL/FR/RL/RR/STEERING/NONE; NONE unless actually STEPPING), byte3=progress_pct (0..100, 0 unless STEPPING), byte4=abort/reject reason (`ServiceDiagReason_t` 0..15, single highest-priority cause), byte5=origin_state_raw (opaque `SystemState_t` snapshot at session entry, forwarded as-is), byte6=elapsed_sec (session age, saturating), byte7=active_pwm_pct (0..100, the PWM actually applied this cycle; 0 unless STEPPING). See §4.22. | `can_handler.c`, `service_diag_session.c`, `service_diag_frame.h` |
+| 0x31C | DIAG_TEST_RESULT | 8 | Once per step close | **SERVICE_DIAG per-step self-test result** (Bloque A, Hito 1), emitted the instant STEPPING exits to DEADTIME/ABORTED. byte0=channel (`ServiceDiagChannel_t` 0..5), byte1=pwm_step_pct (0..100, the clamped PWM commanded for the step), byte2-3=current_ma (u16 LE, saturating), byte4-5=pulses_per_sec (u16 LE, saturating; 0 for the steering channel), byte6=verdict (`ServiceDiagStepVerdict_t` 0..3: NONE/RUNNING/PASS/FAIL_OVERCURRENT), byte7=step_index (correlates with the 0x31B step_index active when this result was produced). See §4.22. | `can_handler.c`, `service_diag_session.c`, `service_diag_frame.h` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -705,6 +708,128 @@ Source: `battlim_handle_service_cmd()` + `CAN_BatteryLimitsBurstUpdate()` in
 
 ---
 
+### 4.22 SERVICE_CMD SELF_TEST (0x110 action 0xFC) / DIAG_SERVICE_SESSION (0x31B) / DIAG_TEST_RESULT (0x31C) — Bidirectional (rev 1.21, additive)
+
+Guided, single-actuator engineering self-test session (Bloque A, PR #445 Hito 1).
+Lets a technician command ONE actuator (one wheel channel or steering) at a
+bounded, reduced PWM while the vehicle is suspended (all four wheels off the
+ground), without clearing or masking any latched fault and without touching the
+real vehicle safety state machine (`Safety_GetState()`/`Safety_SetState()`). The
+session is its own orthogonal FSM (`ServiceDiagState_t`) layered on top of
+whichever `SystemState_t` the vehicle is already in — entry snapshots the state
+opaquely, exit simply stops commanding the test actuator.
+
+**Hito 1 scope:** this milestone wires the FSM, its safety envelope (PWM
+ceiling, single-actuator structural guarantee, plateau/step/session timeouts,
+watchdog, dead-time-coast, battery/gear/CAN/state aborts) and CAN telemetry
+end-to-end over real hardware, but does **not** yet drive any actuator —
+`active_channel`/`active_pwm_pct`/`active_direction` are read only to populate
+0x31B/0x31C telemetry; no PWM register or motor driver is written from this
+module. Applying the commanded PWM to the real motor is Bloque B (later
+milestone). Consequently current/pulses reported on 0x31C read ~0 during Hito 1
+because nothing is actually being driven — this is expected, not a defect.
+
+**Command — SERVICE_CMD SELF_TEST (0x110, byte0 = 0xFC), ESP32 → STM32:**
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xFC` = `SERVICE_ACTION_SELF_TEST` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+| 2 | confirm_token / channel | uint8 | START: operator confirm token (`SVCDIAG_CONFIRM_TOKEN` = `0xA5`, required). NEXT: `ServiceDiagChannel_t` wire value (0..4; `SVCDIAG_CH_NONE`=5 rejected) |
+| 3 | direction | uint8 | NEXT only: `ServiceDiagDirection_t` (0 FORWARD, 1 REVERSE) |
+| 4 | pwm_pct | uint8 | NEXT only: requested PWM % (clamped to the safety envelope before being applied) |
+| 5-6 | plateau_ms | uint16 LE | NEXT only: requested plateau duration in ms (clamped to `SVCDIAG_STEP_PLATEAU_MIN_MS`..`SVCDIAG_STEP_PLATEAU_MAX_MS`) |
+
+**Sub-opcodes (byte 1):**
+
+| Op | Name | DLC | Effect |
+|----|------|-----|--------|
+| 0x01 | SVCDIAG_OP_START | ≥3 | Begin a session (entry gates: not BOOT, gear P/N, all 4 wheels stationary ≥1 s, confirm token, battery above cutoff). Rejected → `ACK_BLOCKED_BY_SAFETY` (vehicle-state blocks) or `ACK_INVALID` (bad/missing confirm token) |
+| 0x02 | SVCDIAG_OP_NEXT | ≥7 | Command one step on one channel (only accepted from ARMED or DEADTIME-elapsed, never while STEPPING — structural "one actuator at a time") |
+| 0x03 | SVCDIAG_OP_ABORT | ≥2 | Abort the session (idempotent no-op if none running); always `ACK_OK` |
+| 0x04 | SVCDIAG_OP_QUERY | ≥2 | Read-only, always-safe: emits a single immediate 0x31B reply without starting the periodic 10 Hz stream |
+
+Every op replies with exactly one `CMD_ACK` (0x103, cmd_id_low = 0x10).
+
+**Telemetry — DIAG_SERVICE_SESSION (0x31B), DLC 8, STM32 → ESP32, 10 Hz while a session is active, SILENT otherwise:**
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | state | uint8 | `ServiceDiagState_t` (see enum table) |
+| 1 | step_index | uint8 | Count of accepted NEXT steps so far |
+| 2 | active_channel | uint8 | `ServiceDiagChannel_t` (see enum table); `NONE` (5) unless actually STEPPING |
+| 3 | progress_pct | uint8 | 0..100, saturating; 0 unless actually STEPPING |
+| 4 | reason | uint8 | `ServiceDiagReason_t` (see enum table); single highest-priority abort/reject cause |
+| 5 | origin_state_raw | uint8 | Opaque `SystemState_t` snapshot at `Begin()` time; never interpreted by this frame, forwarded as-is for the HMI's own state table |
+| 6 | elapsed_sec | uint8 | Session age in whole seconds, saturating at 255 |
+| 7 | active_pwm_pct | uint8 | 0..100, saturating; the PWM actually applied THIS cycle, 0 unless actually STEPPING |
+
+**Telemetry — DIAG_TEST_RESULT (0x31C), DLC 8, STM32 → ESP32, once per step close (STEPPING → DEADTIME/ABORTED):**
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | channel | uint8 | `ServiceDiagChannel_t` (see enum table) |
+| 1 | pwm_step_pct | uint8 | 0..100, saturating; the clamped PWM commanded for the step |
+| 2-3 | current_ma | uint16 LE | Peak/measured current in mA, saturating at 0xFFFF |
+| 4-5 | pulses_per_sec | uint16 LE | Wheel pulse rate during the step, saturating at 0xFFFF; 0 for the steering channel |
+| 6 | verdict | uint8 | `ServiceDiagStepVerdict_t` (see enum table) |
+| 7 | step_index | uint8 | Correlates with the 0x31B step_index that was active when this result was produced |
+
+**Enums (STM32 `service_diag_session.h` / ESP32 `can_ids.h` — MUST mirror exactly):**
+
+| Value | ServiceDiagState_t (0x31B byte0) | ServiceDiagChannel_t (0x31B byte2 / 0x31C byte0) | ServiceDiagStepVerdict_t (0x31C byte6) |
+|-------|-----------------------------------|--------------------------------------------------|------------------------------------------|
+| 0 | IDLE (no session) | FL | NONE |
+| 1 | ENTERING (transient: entry accepted, arming) | FR | RUNNING |
+| 2 | ARMED (session live, no actuator commanded) | RL | PASS |
+| 3 | STEPPING (one channel commanded at a clamped PWM) | RR | FAIL_OVERCURRENT |
+| 4 | DEADTIME (PWM 0, mandatory coast dead-time) | STEERING | — |
+| 5 | ABORTED (terminal until a new START) | NONE | — |
+
+| Value | ServiceDiagReason_t (0x31B byte4) | Value | ServiceDiagReason_t (0x31B byte4) |
+|-------|--------------------------------------|-------|--------------------------------------|
+| 0 | NONE (no abort/reject) | 8 | ALREADY_ACTIVE (entry block: session already running) |
+| 1 | OPERATOR (explicit ABORT incl. HMI touch/exit) | 9 | STATE_CHANGED (mid-session: origin state no longer holds) |
+| 2 | BOOT_STATE (entry block: system in BOOT) | 10 | CAN_LOSS (mid-session: CAN heartbeat > 500 ms) |
+| 3 | GEAR (entry block or mid-session: not P/N) | 11 | GROUNDED_WHEEL (mid-session: pulses on a non-driven wheel) |
+| 4 | WHEELS_MOVING (entry block: not stationary ≥ 1 s) | 12 | OVERCURRENT (mid-session: test overcurrent, 1 sample) |
+| 5 | NOT_CONFIRMED (entry block: confirm token missing/wrong) | 13 | SESSION_TIMEOUT (mid-session: 10 minute session ceiling) |
+| 6 | BATTERY_LOW (entry block: battery ≤ cutoff) | 14 | STEP_TIMEOUT (mid-session: 4000 ms per-step hard cap) |
+| 7 | BATTERY_WARN (mid-session: battery < warning threshold) | 15 | WATCHDOG (mid-session: stale Update() tick detected) |
+
+Direction (`ServiceDiagDirection_t`, SVCDIAG_OP_NEXT byte3): 0 FORWARD, 1 REVERSE.
+Operator confirm token (`SVCDIAG_CONFIRM_TOKEN`): `0xA5`.
+
+**Validation & safety (STM32-side, enforced unconditionally every tick):**
+- PWM ceiling: `SVCDIAG_PWM_DEFAULT_CEILING_PCT` (50%) by default; hard absolute
+  ceiling `SVCDIAG_PWM_ABS_MAX_PCT` (60%) that nothing requested can exceed.
+- Exactly one actuator active at a time — structural (single `active_channel`
+  field, not an array).
+- Plateau ≤ `SVCDIAG_STEP_PLATEAU_MAX_MS` (2000 ms); per-step hard timeout
+  `SVCDIAG_STEP_TIMEOUT_MS` (4000 ms); session timeout `SVCDIAG_SESSION_TIMEOUT_MS`
+  (10 min).
+- Test overcurrent (active channel current > `SVCDIAG_TEST_OVERCURRENT_FACTOR`
+  = 60% of its NORMAL limit) coasts the channel, marks the step
+  `FAIL_OVERCURRENT`, and ABORTS the session — never calls
+  `Safety_SetError()`/`Safety_SetState(SAFE)`.
+- Stops are always coast; a fixed `SVCDIAG_DEAD_TIME_MS` (300 ms) elapses
+  before the next step may begin.
+- Watchdog: a stale `Update()` gap > `SVCDIAG_WATCHDOG_MAX_GAP_MS` (100 ms)
+  forces `active_pwm_pct` to 0 and aborts (`WATCHDOG`) instead of resuming.
+- The PIN gate is enforced by the ESP32's PIN-gated engineering menu before
+  `SERVICE_ACTION_SELF_TEST` is ever sent — not part of this CAN contract.
+- **Instrumentation/dry-run only in Hito 1** — this milestone drives no
+  actuator; the FSM's own guard logic is fully exercised over real CAN even
+  though no PWM is applied.
+
+Source: `ServiceDiagSession_*()` in `Core/Src/service_diag_session.c` (pure
+decision core), `svcdiag_handle_service_cmd()` + `svcdiag_send_session_status()`
+in `Core/Src/can_handler.c`, `ServiceDiagSessionFrame_Pack/Unpack` +
+`ServiceDiagTestResultFrame_Pack/Unpack` in `Core/Inc/service_diag_frame.h`,
+`esp32/src/service_diag_view.h` (ESP32 decode + text).
+
+---
+
 ## 5. Requested vs. Actual Signals
 
 | Signal | Requested (ESP32 → STM32) | Actual (STM32 → ESP32) |
@@ -912,15 +1037,15 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.20 adds the diagnostic-only 0x31A frame while preserving every existing CAN ID and payload layout.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.21 adds the SERVICE_DIAG self-test session command (0x110 action 0xFC) and its two telemetry frames (0x31B, 0x31C) while preserving every existing CAN ID and payload layout.
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.20 |
-| Previous revision | 1.19 |
+| Contract revision | 1.21 |
+| Previous revision | 1.20 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.20 is additive and backward-compatible: legacy nodes silently ignore 0x31A; no existing frame ID, DLC, timing or payload changes. |
+| Backward compatibility | Revision 1.21 is additive and backward-compatible: legacy nodes silently ignore 0x31B/0x31C and never send action 0xFC; no existing frame ID, DLC, timing or payload changes. |
 
 The source files that define this contract are:
 
