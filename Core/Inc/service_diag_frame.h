@@ -29,7 +29,7 @@
   *   b2 : active_channel    (ServiceDiagChannel_t wire value, 0..5;
   *                           SVCDIAG_CH_NONE unless actually STEPPING)
   *   b3 : progress_pct      (0..100, 0 unless actually STEPPING)
-  *   b4 : reason            (ServiceDiagReason_t wire value, 0..14 — single
+  *   b4 : reason            (ServiceDiagReason_t wire value, 0..15 — single
   *                           highest-priority abort/reject cause)
   *   b5 : origin_state_raw  (opaque SystemState_t snapshot at Begin() time;
   *                           never interpreted by this header, forwarded

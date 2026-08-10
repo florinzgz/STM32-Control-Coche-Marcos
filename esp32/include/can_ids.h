@@ -188,10 +188,12 @@ enum class AckResult : uint8_t {
 // Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.14)
 // -------------------------------------------------------------------------
 enum class DiagSubsystem : uint8_t {
-    GLOBAL  = 0,
-    MOTOR   = 1,
-    SENSOR  = 2,
-    CAN_BUS = 3
+    GLOBAL      = 0,
+    MOTOR       = 1,
+    SENSOR      = 2,
+    CAN_BUS     = 3,
+    SERVICE_DIAG = 4  // SERVICE_DIAG self-test session ENTER/EXIT pseudo-events
+                       // (SVCDIAG_DTC_CODE_ENTER/_EXIT, see error_log.h on STM32)
 };
 
 // -------------------------------------------------------------------------
