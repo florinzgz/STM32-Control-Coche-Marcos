@@ -76,7 +76,8 @@ private:
         BATTERY_LIMITS,    // Battery voltage thresholds: warn/limit/cutoff/recovery/filter (0xFB/0x311)
         DRIVE_BATT_DIAG,   // Read-only drive/battery live diagnostic (N/A where not transmitted)
         LED_MODE,          // Decorative LED mode selector (private/demo use only)
-        MOTION_INHIBIT_DIAG // Read-only 0x315 MOTION_INHIBIT telemetry viewer
+        MOTION_INHIBIT_DIAG, // Read-only 0x315 MOTION_INHIBIT telemetry viewer
+        SERVICE_AUTOTEST   // SERVICE_DIAG lifted-vehicle actuator self-test (0x31B/0x31C, 0xFC)
     };
 
     void drawMainMenu();
@@ -111,6 +112,20 @@ private:
     // the value zones that changed (called every frame from draw()).
     void drawMotionInhibitDiag();
     void refreshMotionInhibitDiag(bool force);
+
+    // SERVICE_DIAG lifted-vehicle self-test submenu (Bloque A, PR #445
+    // Hito 1).  drawServiceAutotest() paints the static chrome + the
+    // permanent "VEHICULO SUSPENDIDO" warning banner once; the value zones
+    // (status line + per-channel table) are repainted every frame from
+    // draw() using the same opaque partial-redraw technique as the other
+    // live diagnostic viewers.
+    void drawServiceAutotest();
+    void refreshServiceAutotest(bool force);
+    // Send SERVICE_CMD (0x110) byte0=SERVICE_ACTION_SELF_TEST (0xFC),
+    // byte1=op (SVCDIAG_OP_*).  channel/direction/pwmPct/plateauMs are only
+    // meaningful for SVCDIAG_OP_NEXT and ignored otherwise.
+    void sendServiceDiagOp(uint8_t op, uint8_t channel = 0, uint8_t direction = 0,
+                            uint8_t pwmPct = 0, uint16_t plateauMs = 0);
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -593,6 +608,44 @@ private:
     uint32_t      miPrevAgeMs_     = 0xFFFFFFFFu;
     uint32_t      miPrevLimitSignature_ = 0xFFFFFFFFu; // 0x31A O/T/B/state/freshness
     bool          miPrevValid_     = false;
+
+    // ---- SERVICE_DIAG lifted-vehicle self-test (SERVICE_AUTOTEST) ----------
+    // EJECUTAR starting a session (state IDLE/ABORTED) needs a *deliberate*
+    // second tap on the SAME button within SVCDIAG_CONFIRM_TIMEOUT_MS — same
+    // double-tap-confirm idiom as MODULE_CONTROL/FACTORY_DEFAULTS below —
+    // backed by the permanent "VEHICULO SUSPENDIDO" warning banner drawn on
+    // this page.  Any other touch, page navigation or timeout cancels.  Time
+    // transitions happen in update() (frame-time contract): the touch
+    // handler only latches intent via svcDiagStartArm_.
+    bool          svcDiagStartPending_  = false;  // awaiting the confirming 2nd tap
+    bool          svcDiagStartArm_      = false;  // stamp svcDiagStartPendingMs_ next update()
+    unsigned long svcDiagStartPendingMs_ = 0;
+    static constexpr unsigned long SVCDIAG_CONFIRM_TIMEOUT_MS = 5000;
+    // Fixed, conservative dry-run step parameters for the Hito 1 EJECUTAR
+    // action while ARMED: FORWARD only, no editor (single source of truth
+    // for both the touch handler that sends SVCDIAG_OP_NEXT and any future
+    // reference — Hito 1 does not drive any actuator; see can_handler.c).
+    static constexpr uint8_t  SVCDIAG_STEP_PWM_PCT    = 30;
+    static constexpr uint16_t SVCDIAG_STEP_PLATEAU_MS = 1000;
+    // Next channel EJECUTAR will step while ARMED: fixed round-robin
+    // FL->FR->RL->RR->STEERING, reset to FL on screen entry, advanced only
+    // once the STM32 confirms the PREVIOUS step actually closed (a new
+    // 0x31C step_index observed) — never optimistically on send.
+    uint8_t       svcDiagCursorChannel_ = can::SVCDIAG_CH_FL;
+    int16_t       svcDiagLastResultStepIndex_ = -1;  // last 0x31C step_index consumed; -1=none yet
+    unsigned long svcDiagLastQueryMs_   = 0;          // throttles the periodic QUERY on entry
+    static constexpr unsigned long SVCDIAG_QUERY_INTERVAL_MS = 500;  // mirrors EPS/DRV/BAT polling
+    bool          svcDiagForcePaint_    = false;
+    // Previous displayed values (partial-redraw diffing, mirrors miPrev*_).
+    uint8_t       svcDiagPrevState_     = 0xFFu;
+    uint8_t       svcDiagPrevReason_    = 0xFFu;
+    uint8_t       svcDiagPrevProgress_  = 0xFFu;
+    uint8_t       svcDiagPrevChannel_   = 0xFFu;
+    uint8_t       svcDiagPrevPwm_       = 0xFFu;
+    uint8_t       svcDiagPrevElapsed_   = 0xFFu;
+    bool          svcDiagPrevValid_     = false;
+    uint32_t      svcDiagPrevTableSig_[vehicle::ServiceDiagResultData::CHANNEL_COUNT] = {
+        0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
 };
 
 #endif // ENGINEERING_SCREEN_H

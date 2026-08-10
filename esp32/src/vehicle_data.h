@@ -28,6 +28,7 @@
 #include "relay_health_view.h"
 #include "ina226_ch5_view.h"
 #include "traction_limit_diag_view.h"
+#include "service_diag_view.h"
 
 namespace vehicle {
 
@@ -456,6 +457,31 @@ struct Ina226Ch5DiagData {
 };
 
 // -------------------------------------------------------------------------
+// 0x31B DIAG_SERVICE_SESSION — SERVICE_DIAG self-test session status
+// (Bloque A, PR #445 Hito 1).  See esp32/src/service_diag_view.h and
+// Core/Inc/service_diag_frame.h.
+// -------------------------------------------------------------------------
+struct ServiceDiagSessionData {
+    service_diag_view::SessionView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x31C DIAG_TEST_RESULT — latest per-channel SERVICE_DIAG step result.
+// Indexed by ServiceDiagChannel_t wire value (can::SVCDIAG_CH_FL..STEERING).
+// Each slot holds only the MOST RECENT result for that channel — this is a
+// per-channel status TABLE, not a chronological log — and is overwritten in
+// place whenever a fresh 0x31C names that channel.
+// -------------------------------------------------------------------------
+struct ServiceDiagResultData {
+    static constexpr uint8_t CHANNEL_COUNT = 5;  // FL,FR,RL,RR,STEERING
+    service_diag_view::TestResultView view[CHANNEL_COUNT]{};
+    bool          valid[CHANNEL_COUNT]       = {false, false, false, false, false};
+    unsigned long timestampMs[CHANNEL_COUNT] = {0, 0, 0, 0, 0};
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -722,6 +748,14 @@ public:
     void setEpsParams(const EpsParamsData& d)       { epsParams_ = d; }
     void setDriveTuning(const DriveTuningData& d)   { driveTuning_ = d; }
     void setBatteryLimits(const BatteryLimitsData& d) { batteryLimits_ = d; }
+    void setServiceDiagSession(const ServiceDiagSessionData& d) { serviceDiagSession_ = d; }
+    void setServiceDiagResult(uint8_t channel, const service_diag_view::TestResultView& v,
+                              unsigned long ts) {
+        if (channel >= ServiceDiagResultData::CHANNEL_COUNT) return;
+        serviceDiagResult_.view[channel]       = v;
+        serviceDiagResult_.valid[channel]      = true;
+        serviceDiagResult_.timestampMs[channel] = ts;
+    }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -767,6 +801,8 @@ public:
     const EpsParamsData&    epsParams()    const { return epsParams_; }
     const DriveTuningData&  driveTuning()  const { return driveTuning_; }
     const BatteryLimitsData& batteryLimits() const { return batteryLimits_; }
+    const ServiceDiagSessionData& serviceDiagSession() const { return serviceDiagSession_; }
+    const ServiceDiagResultData&  serviceDiagResult()  const { return serviceDiagResult_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -813,6 +849,8 @@ private:
     EpsParamsData    epsParams_;
     DriveTuningData  driveTuning_;
     BatteryLimitsData batteryLimits_;
+    ServiceDiagSessionData serviceDiagSession_;
+    ServiceDiagResultData  serviceDiagResult_;
 };
 
 } // namespace vehicle

@@ -44,7 +44,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 24;  // +1 for MOTION INHIBIT DIAG (item 23)
+static constexpr int     NUM_MAIN_ITEMS = 25;  // +1 for SERVICE AUTOTEST (item 24)
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -61,7 +61,7 @@ static constexpr int     TILE_COLS   = 3;
 
 static constexpr int     PAGE1_ITEM_COUNT = 9;   // tiles per page (3×3 grid)
 // Total number of main-menu pages, derived from the item count so adding
-// functions never overflows a page.  23 items → 3 pages (9 + 9 + 5).
+// functions never overflows a page.  25 items → 3 pages (9 + 9 + 7).
 static constexpr uint8_t MAIN_PAGE_COUNT =
     (uint8_t)((NUM_MAIN_ITEMS + PAGE1_ITEM_COUNT - 1) / PAGE1_ITEM_COUNT);
 
@@ -72,14 +72,14 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
     "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT",
-    "LED", "MOTION"
+    "LED", "MOTION", "SERVICE"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
     "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG",
-    "MODE", "INHIBIT"
+    "MODE", "INHIBIT", "AUTOTEST"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -111,7 +111,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_BLUE,    // 20 Battery Limits      — configuration
     ui::COL_CYAN,    // 21 Drive/Battery Diag  — diagnostic
     ui::COL_CYAN,    // 22 LED Mode selector   — configuration
-    ui::COL_CYAN     // 23 Motion Inhibit Diag — diagnostic
+    ui::COL_CYAN,    // 23 Motion Inhibit Diag — diagnostic
+    ui::COL_RED      // 24 Service Autotest    — destructive / actuates wheels
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -503,6 +504,42 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             (frameTimeMs - factoryPendingMs_) >= FACTORY_CONFIRM_TIMEOUT_MS) {
             factoryPendingIdx_ = -1;
             needsRedraw_ = true;
+        }
+    }
+
+    // SERVICE AUTOTEST (0x31B/0x31C, SERVICE_CMD 0xFC) — EJECUTAR START
+    // confirmation window, same deterministic-timeout technique as above.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST) {
+        if (svcDiagStartArm_) {
+            svcDiagStartArm_ = false;
+            svcDiagStartPendingMs_ = frameTimeMs;
+        }
+        if (svcDiagStartPending_ &&
+            (frameTimeMs - svcDiagStartPendingMs_) >= SVCDIAG_CONFIRM_TIMEOUT_MS) {
+            svcDiagStartPending_ = false;
+            needsRedraw_ = true;
+        }
+        // Advance the round-robin test cursor only once the STM32 confirms
+        // the PREVIOUS step actually closed (a new 0x31C step_index for the
+        // channel the cursor was pointing at) — never optimistically on
+        // send, avoiding drift if a NEXT command is lost/rejected.
+        const auto& res = data.serviceDiagResult();
+        if (res.valid[svcDiagCursorChannel_]) {
+            const int16_t seen = res.view[svcDiagCursorChannel_].stepIndex;
+            if (seen != svcDiagLastResultStepIndex_) {
+                svcDiagLastResultStepIndex_ = seen;
+                svcDiagCursorChannel_ =
+                    (svcDiagCursorChannel_ + 1U) % vehicle::ServiceDiagResultData::CHANNEL_COUNT;
+            }
+        }
+        // 0x31B is SILENT while IDLE (no session active), so ESTADO/MOTIVO
+        // would otherwise freeze at whatever the entry QUERY showed even if
+        // the blocking condition changes (gear, wheels, battery...).  Poll
+        // like EPS_TUNING/DRIVE_TUNING/BATTERY_LIMITS so a legible, CURRENT
+        // rejection reason is always on screen, not just a stale snapshot.
+        if ((frameTimeMs - svcDiagLastQueryMs_) >= SVCDIAG_QUERY_INTERVAL_MS) {
+            sendServiceDiagOp(can::SVCDIAG_OP_QUERY);
+            svcDiagLastQueryMs_ = frameTimeMs;
         }
     }
 
@@ -1251,6 +1288,7 @@ void EngineeringScreen::draw() {
             case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
             case SubMenu::LED_MODE:         drawLedMode();             break;
             case SubMenu::MOTION_INHIBIT_DIAG: drawMotionInhibitDiag(); break;
+            case SubMenu::SERVICE_AUTOTEST: drawServiceAutotest();     break;
             default:
                 // Unknown/unexpected submenu: fall back to the Engineering
                 // main menu instead of leaving the screen blank.
@@ -2394,6 +2432,12 @@ void EngineeringScreen::draw() {
         miForcePaint_ = false;
     }
 
+    // Partial redraw for SERVICE AUTOTEST (0x31B/0x31C) — same technique.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST) {
+        refreshServiceAutotest(svcDiagForcePaint_);
+        svcDiagForcePaint_ = false;
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 // -------------------------------------------------------------------------
@@ -2436,6 +2480,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         batSaveWait_    = false;
         batRestoreArm_  = false;
         batLocalInvalid_ = false;
+        svcDiagStartPending_ = false;  // cancel any pending EJECUTAR start confirm
         if (currentMenu_ == SubMenu::BRIGHTNESS && brightnessDirty_) {
             config_store::flush();
             brightnessDirty_ = false;
@@ -2740,6 +2785,35 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             miPrevLimitSignature_ = 0xFFFFFFFFu;
                             miPrevValid_    = false;
                             currentMenu_ = SubMenu::MOTION_INHIBIT_DIAG;
+                            break;
+                        case 24:
+                            // Open SERVICE AUTOTEST (0x31B/0x31C, 0xFC).
+                            // Reset all session-scoped UI state: the test
+                            // cursor always restarts at FL, no confirmation
+                            // is pending, and every cached field is primed to
+                            // force a full first paint.  svcDiagLastQueryMs_=0
+                            // makes update()'s poll loop fire on the very
+                            // next frame (same convention as EPS_TUNING/
+                            // DRIVE_TUNING/BATTERY_LIMITS above) so a
+                            // re-entered session shows its real state
+                            // immediately instead of stale "INACTIVO".
+                            svcDiagStartPending_   = false;
+                            svcDiagStartArm_       = false;
+                            svcDiagCursorChannel_  = can::SVCDIAG_CH_FL;
+                            svcDiagLastResultStepIndex_ = -1;
+                            svcDiagLastQueryMs_    = 0;
+                            svcDiagForcePaint_     = true;
+                            svcDiagPrevState_      = 0xFFu;
+                            svcDiagPrevReason_     = 0xFFu;
+                            svcDiagPrevProgress_   = 0xFFu;
+                            svcDiagPrevChannel_    = 0xFFu;
+                            svcDiagPrevPwm_        = 0xFFu;
+                            svcDiagPrevElapsed_    = 0xFFu;
+                            svcDiagPrevValid_      = false;
+                            for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+                                svcDiagPrevTableSig_[i] = 0xFFFFFFFFu;
+                            }
+                            currentMenu_ = SubMenu::SERVICE_AUTOTEST;
                             break;
                         default:
                             break;
@@ -3532,6 +3606,63 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 needsRedraw_ = true;
                 return true;
             }
+        }
+        return false;
+    }
+
+    // SERVICE AUTOTEST: EJECUTAR / ABORTAR (SVCDIAG_OP_*, 0x31B/0x31C, 0xFC).
+    // Both buttons are fixed in position; only their fill colour/label state
+    // (painted by refreshServiceAutotest()) changes.  Geometry is duplicated
+    // locally (mirrors the LM_TEST_X-style per-function constants elsewhere
+    // in this file) because drawServiceAutotest()'s anonymous-namespace
+    // constants are declared later in the translation unit.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST) {
+        static constexpr int16_t SD_BTN_Y   = 280;
+        static constexpr int16_t SD_BTN_H   = 30;
+        static constexpr int16_t SD_EXEC_X  = 170;
+        static constexpr int16_t SD_ABORT_X = 330;
+        static constexpr int16_t SD_BTN_W   = 140;
+
+        const uint8_t state = (data_ != nullptr && data_->serviceDiagSession().valid)
+                                   ? data_->serviceDiagSession().view.state
+                                   : can::SVCDIAG_STATE_IDLE;
+
+        if (x >= SD_ABORT_X && x <= SD_ABORT_X + SD_BTN_W &&
+            y >= SD_BTN_Y && y <= SD_BTN_Y + SD_BTN_H) {
+            // ABORTAR: always tappable, idempotent per the FSM's own
+            // contract; also cancels any pending EJECUTAR start confirm.
+            svcDiagStartPending_ = false;
+            sendServiceDiagOp(can::SVCDIAG_OP_ABORT);
+            needsRedraw_ = true;
+            return true;
+        }
+
+        if (x >= SD_EXEC_X && x <= SD_EXEC_X + SD_BTN_W &&
+            y >= SD_BTN_Y && y <= SD_BTN_Y + SD_BTN_H) {
+            if (state == can::SVCDIAG_STATE_IDLE || state == can::SVCDIAG_STATE_ABORTED) {
+                if (svcDiagStartPending_) {
+                    // Second deliberate tap within the timeout: confirmed.
+                    svcDiagStartPending_ = false;
+                    sendServiceDiagOp(can::SVCDIAG_OP_START);
+                } else {
+                    svcDiagStartPending_ = true;
+                    svcDiagStartArm_     = true;  // stamp the timeout in update()
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+            if (state == can::SVCDIAG_STATE_ARMED) {
+                // Step the round-robin-cursored channel with fixed
+                // conservative parameters (dry run only — Hito 1 does not
+                // drive any actuator; see can_handler.c).
+                sendServiceDiagOp(can::SVCDIAG_OP_NEXT, svcDiagCursorChannel_,
+                                  can::SVCDIAG_DIR_FORWARD, SVCDIAG_STEP_PWM_PCT,
+                                  SVCDIAG_STEP_PLATEAU_MS);
+                needsRedraw_ = true;
+                return true;
+            }
+            // STEPPING / ENTERING / DEADTIME: grayed out, consumed as a no-op.
+            return true;
         }
         return false;
     }
@@ -6455,6 +6586,292 @@ void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
     }
 
     miPrevValid_ = mi.valid;
+}
+
+// =========================================================================
+// SERVICE AUTOTEST (0x31B/0x31C, SERVICE_CMD 0xFC) — lifted-vehicle
+// actuator self-test submenu (Bloque A, PR #445 Hito 1).
+//
+// EJECUTAR and ABORTAR are two fixed, always-visible buttons (never hidden
+// or relabeled to anything else): ABORTAR is unconditionally tappable,
+// idempotent per the FSM's own contract (ServiceDiagSession_Abort() is a
+// safe no-op outside a session).  EJECUTAR's action depends on the current
+// 0x31B state:
+//   IDLE/ABORTED : first tap arms a *deliberate* confirmation (button shows
+//                  "CONFIRMAR?" for SVCDIAG_CONFIRM_TIMEOUT_MS) — the same
+//                  double-tap idiom as MODULE_CONTROL/FACTORY_DEFAULTS —
+//                  backed by the permanent "VEHICULO SUSPENDIDO" banner;
+//                  the second tap sends START with SVCDIAG_CONFIRM_TOKEN.
+//   ARMED        : sends one NEXT step for the round-robin test cursor
+//                  (FL->FR->RL->RR->STEERING) with fixed conservative
+//                  parameters — Hito 1 is a dry run only (can_handler.c
+//                  svcdiag_handle_service_cmd does not drive any actuator
+//                  yet; Bloque B completes real actuation).
+//   STEPPING/ENTERING/DEADTIME : EJECUTAR is grayed out (no-op).
+//
+// The table (fed by 0x31C) shows the MOST RECENT result per channel — a
+// status table, not a scrolling log — read from vehicle::ServiceDiagResultData
+// (indexed by channel).  Status (state/reason/progress) comes from 0x31B via
+// vehicle::ServiceDiagSessionData.  No editors, no graphics/gauges, per the
+// explicit T5 scope.
+// =========================================================================
+namespace {
+constexpr int16_t SD_LX         = 8;    // status label x
+constexpr int16_t SD_VX         = 90;   // status value x
+constexpr int16_t SD_STAT_Y     = 60;   // ESTADO row y
+constexpr int16_t SD_REASON_Y   = 78;   // MOTIVO row y
+constexpr int16_t SD_PROG_Y     = 96;   // PROGRESO row y
+constexpr int16_t SD_WARN_Y     = 32;   // warning banner y
+constexpr int16_t SD_WARN_H     = 24;   // warning banner height
+constexpr int16_t SD_TBL_HDR_Y  = 122;  // table header y
+constexpr int16_t SD_TBL_ROW0_Y = 140;  // first table row y
+constexpr int16_t SD_TBL_RH     = 18;   // table row pitch
+constexpr int16_t SD_COL_CH_X   = 8;    // channel column x
+constexpr int16_t SD_COL_PWM_X  = 90;   // pwm% column x
+constexpr int16_t SD_COL_CUR_X  = 170;  // current(mA) column x
+constexpr int16_t SD_COL_PPS_X  = 280;  // pulses/s column x
+constexpr int16_t SD_COL_VRD_X  = 380;  // verdict column x
+constexpr int16_t SD_BTN_Y      = 280;  // aligned with the global BACK row
+constexpr int16_t SD_BTN_H      = 30;
+constexpr int16_t SD_EXEC_X     = 170;
+constexpr int16_t SD_ABORT_X    = 330;
+constexpr int16_t SD_BTN_W      = 140;
+
+const char* const SD_CHANNEL_LABELS[vehicle::ServiceDiagResultData::CHANNEL_COUNT] = {
+    "FL", "FR", "RL", "RR", "DIR"
+};
+} // namespace
+
+void EngineeringScreen::drawServiceAutotest() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header band
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("SERVICE AUTOTEST", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    // Permanent warning banner — always visible regardless of session
+    // state: the mandatory precondition for every channel of this test.
+    tft.fillRect(0, SD_WARN_Y, ui::SCREEN_W, SD_WARN_H, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("VEHICULO SUSPENDIDO - 4 RUEDAS EN EL AIRE",
+                   ui::SCREEN_W / 2, SD_WARN_Y + SD_WARN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Static status labels (values painted by refreshServiceAutotest()).
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("ESTADO:",   SD_LX, SD_STAT_Y);
+    tft.drawString("MOTIVO:",   SD_LX, SD_REASON_Y);
+    tft.drawString("PROGRESO:", SD_LX, SD_PROG_Y);
+
+    tft.drawFastHLine(0, SD_PROG_Y + 16, ui::SCREEN_W, ui::COL_DARK_GRAY);
+
+    // Static table header + channel labels (result columns painted by
+    // refreshServiceAutotest()).
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("CANAL",     SD_COL_CH_X,  SD_TBL_HDR_Y);
+    tft.drawString("PWM%",      SD_COL_PWM_X, SD_TBL_HDR_Y);
+    tft.drawString("MA",        SD_COL_CUR_X, SD_TBL_HDR_Y);
+    tft.drawString("P/S",       SD_COL_PPS_X, SD_TBL_HDR_Y);
+    tft.drawString("RESULTADO", SD_COL_VRD_X, SD_TBL_HDR_Y);
+    for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(SD_CHANNEL_LABELS[i], SD_COL_CH_X, SD_TBL_ROW0_Y + i * SD_TBL_RH);
+    }
+
+    // BACK button (existing global convention).
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // EJECUTAR / ABORTAR outlines — fixed position, ALWAYS drawn.  Fill
+    // colour + label are repainted every frame by refreshServiceAutotest().
+    tft.drawRect(SD_EXEC_X,  SD_BTN_Y, SD_BTN_W, SD_BTN_H, ui::COL_GRAY);
+    tft.drawRect(SD_ABORT_X, SD_BTN_Y, SD_BTN_W, SD_BTN_H, ui::COL_GRAY);
+
+    svcDiagForcePaint_ = true;
+}
+
+void EngineeringScreen::refreshServiceAutotest(bool force) {
+    namespace sdv = service_diag_view;
+    if (data_ == nullptr) {
+        return;
+    }
+
+    const vehicle::ServiceDiagSessionData& sess = data_->serviceDiagSession();
+    const vehicle::ServiceDiagResultData&  res  = data_->serviceDiagResult();
+    const uint32_t now   = (uint32_t)lastFrameTimeMs_;
+    const uint32_t stamp = (uint32_t)sess.timestampMs;
+    const sdv::Freshness fresh = sdv::freshness(sess.valid, now, stamp);
+    const bool have = sess.valid && fresh != sdv::Freshness::STALE;
+    const uint8_t state  = have ? sess.view.state  : can::SVCDIAG_STATE_IDLE;
+    const uint8_t reason = have ? sess.view.reason : can::SVCDIAG_REASON_NONE;
+
+    if (sess.valid != svcDiagPrevValid_) {
+        force = true;
+    }
+
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    char b[40];
+    auto putVal = [&](int16_t x, int16_t y, const char* s, uint16_t col) {
+        tft.setTextColor(col, ui::COL_BG);   // opaque bg overwrites in place
+        tft.drawString(s, x, y);
+    };
+
+    // ---- ESTADO ----
+    if (force || state != svcDiagPrevState_) {
+        uint16_t c = !have ? ui::COL_GRAY
+                   : sdv::isActive(state) ? ui::COL_GREEN
+                   : (state == can::SVCDIAG_STATE_ABORTED ? ui::COL_AMBER : ui::COL_WHITE);
+        snprintf(b, sizeof(b), "%-24s", !have ? "SIN DATOS" : sdv::stateText(state));
+        putVal(SD_VX, SD_STAT_Y, b, c);
+        svcDiagPrevState_ = state;
+    }
+
+    // ---- MOTIVO ----
+    if (force || reason != svcDiagPrevReason_) {
+        snprintf(b, sizeof(b), "%-30s", !have ? "---" : sdv::reasonText(reason));
+        putVal(SD_VX, SD_REASON_Y, b,
+               (have && reason != can::SVCDIAG_REASON_NONE) ? ui::COL_AMBER : ui::COL_WHITE);
+        svcDiagPrevReason_ = reason;
+    }
+
+    // ---- PROGRESO (progress% + active channel + PWM + elapsed) ----
+    const uint8_t progress = have ? sess.view.progressPct   : 0;
+    const uint8_t channel  = have ? sess.view.activeChannel : can::SVCDIAG_CH_NONE;
+    const uint8_t pwm      = have ? sess.view.activePwmPct  : 0;
+    const uint8_t elapsed  = have ? sess.view.elapsedSec    : 0;
+    if (force || progress != svcDiagPrevProgress_ || channel != svcDiagPrevChannel_ ||
+        pwm != svcDiagPrevPwm_ || elapsed != svcDiagPrevElapsed_) {
+        if (!have) {
+            snprintf(b, sizeof(b), "%-30s", "---");
+        } else {
+            snprintf(b, sizeof(b), "%3u%% %-4s PWM:%3u%% %3us",
+                     (unsigned)progress, sdv::channelText(channel),
+                     (unsigned)pwm, (unsigned)elapsed);
+        }
+        putVal(SD_VX, SD_PROG_Y, b, ui::COL_WHITE);
+        svcDiagPrevProgress_ = progress;
+        svcDiagPrevChannel_  = channel;
+        svcDiagPrevPwm_      = pwm;
+        svcDiagPrevElapsed_  = elapsed;
+    }
+    svcDiagPrevValid_ = sess.valid;
+
+    // ---- Per-channel table (fed by 0x31C) ----
+    for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+        const uint32_t sig = (res.valid[i]
+            ? (0x01UL
+               | ((uint32_t)res.view[i].pwmStepPct << 1)
+               | ((uint32_t)res.view[i].currentMa   << 9)
+               | ((uint32_t)res.view[i].verdict     << 25))
+            : 0x00UL) | (i == svcDiagCursorChannel_ ? 0x80000000UL : 0UL);
+        if (!force && sig == svcDiagPrevTableSig_[i]) {
+            continue;
+        }
+        svcDiagPrevTableSig_[i] = sig;
+
+        const int16_t y = SD_TBL_ROW0_Y + i * SD_TBL_RH;
+        // Cursor marker: the channel EJECUTAR will step next while ARMED
+        // (round robin, independent from the results already shown).
+        tft.setTextColor(i == svcDiagCursorChannel_ ? ui::COL_CYAN : ui::COL_BG, ui::COL_BG);
+        tft.drawString(i == svcDiagCursorChannel_ ? ">" : " ", 0, y);
+
+        if (!res.valid[i]) {
+            putVal(SD_COL_PWM_X, y, "  --", ui::COL_GRAY);
+            putVal(SD_COL_CUR_X, y, "   --", ui::COL_GRAY);
+            putVal(SD_COL_PPS_X, y, "  --", ui::COL_GRAY);
+            putVal(SD_COL_VRD_X, y, "--------------", ui::COL_GRAY);
+            continue;
+        }
+        const auto& v = res.view[i];
+        snprintf(b, sizeof(b), "%4u", (unsigned)v.pwmStepPct);
+        putVal(SD_COL_PWM_X, y, b, ui::COL_WHITE);
+        snprintf(b, sizeof(b), "%5u", (unsigned)v.currentMa);
+        putVal(SD_COL_CUR_X, y, b, ui::COL_WHITE);
+        if (i == can::SVCDIAG_CH_STEERING) {
+            snprintf(b, sizeof(b), "%4s", "--");
+        } else {
+            snprintf(b, sizeof(b), "%4u", (unsigned)v.pulsesPerSec);
+        }
+        putVal(SD_COL_PPS_X, y, b, ui::COL_WHITE);
+        uint16_t vc = (v.verdict == can::SVCDIAG_STEP_PASS) ? ui::COL_GREEN
+                    : (v.verdict == can::SVCDIAG_STEP_FAIL_OVERCURRENT) ? ui::COL_RED
+                    : (v.verdict == can::SVCDIAG_STEP_RUNNING) ? ui::COL_AMBER
+                                                               : ui::COL_GRAY;
+        snprintf(b, sizeof(b), "%-14s", sdv::verdictText(v.verdict));
+        putVal(SD_COL_VRD_X, y, b, vc);
+    }
+
+    // ---- EJECUTAR / ABORTAR fill + label (cheap: repainted every frame) ---
+    const bool idleOrAborted = (state == can::SVCDIAG_STATE_IDLE ||
+                               state == can::SVCDIAG_STATE_ABORTED);
+    const bool armed  = (state == can::SVCDIAG_STATE_ARMED);
+
+    const char* execLabel;
+    uint16_t execFill, execText;
+    if (!idleOrAborted && !armed) {
+        // STEPPING / ENTERING / DEADTIME: grayed out, non-functional.
+        execLabel = "EJECUTAR"; execFill = ui::COL_DARK_GRAY; execText = ui::COL_GRAY;
+    } else if (idleOrAborted && svcDiagStartPending_) {
+        execLabel = "CONFIRMAR?"; execFill = ui::COL_AMBER; execText = ui::COL_BLACK;
+    } else if (armed) {
+        execLabel = "EJECUTAR"; execFill = ui::COL_GREEN; execText = ui::COL_BLACK;
+    } else {
+        execLabel = "EJECUTAR"; execFill = ui::COL_BLUE; execText = ui::COL_WHITE;
+    }
+    tft.fillRect(SD_EXEC_X + 1, SD_BTN_Y + 1, SD_BTN_W - 2, SD_BTN_H - 2, execFill);
+    tft.setTextColor(execText, execFill);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(execLabel, SD_EXEC_X + SD_BTN_W / 2, SD_BTN_Y + SD_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // ABORTAR: always tappable/idempotent — a steady, unambiguous red.
+    tft.fillRect(SD_ABORT_X + 1, SD_BTN_Y + 1, SD_BTN_W - 2, SD_BTN_H - 2, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("ABORTAR", SD_ABORT_X + SD_BTN_W / 2, SD_BTN_Y + SD_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// SERVICE_CMD (0x110) byte0=SERVICE_ACTION_SELF_TEST (0xFC), byte1=op.  See
+// Core/Src/can_handler.c svcdiag_handle_service_cmd for the exact DLC each
+// op requires (START>=3, NEXT>=7, ABORT/QUERY>=2) — this helper always
+// sends the maximal, fully-populated DLC for the given op so it is never
+// short.  The STM32 validates, applies (or rejects with a reason) and
+// replies with CMD_ACK (0x103) plus the 0x31B/0x31C telemetry frames; this
+// only transmits, it never assumes success.
+void EngineeringScreen::sendServiceDiagOp(uint8_t op, uint8_t channel,
+                                          uint8_t direction, uint8_t pwmPct,
+                                          uint16_t plateauMs) {
+    CanFrame frame = {};
+    frame.identifier = can::SERVICE_CMD;
+    frame.extd       = 0;
+    frame.data[0]    = can::SERVICE_ACTION_SELF_TEST;
+    frame.data[1]    = op;
+    if (op == can::SVCDIAG_OP_START) {
+        frame.data_length_code = 3;
+        frame.data[2] = can::SVCDIAG_CONFIRM_TOKEN;
+    } else if (op == can::SVCDIAG_OP_NEXT) {
+        frame.data_length_code = 7;
+        frame.data[2] = channel;
+        frame.data[3] = direction;
+        frame.data[4] = pwmPct;
+        frame.data[5] = (uint8_t)(plateauMs & 0xFFu);
+        frame.data[6] = (uint8_t)((plateauMs >> 8) & 0xFFu);
+    } else {
+        frame.data_length_code = 2;   // ABORT / QUERY: no payload
+    }
+    ESP32Can.writeFrame(frame, 0);
 }
 
 // =========================================================================

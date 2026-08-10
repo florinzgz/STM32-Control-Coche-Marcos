@@ -484,6 +484,31 @@ static void decodeTractionLimitDiag(const CanFrame& f,
     data.setTractionLimitDiag(d);
 }
 
+// 0x31B DIAG_SERVICE_SESSION — SERVICE_DIAG self-test session status
+// (DLC 8, 10 Hz while a session is active, silent otherwise).  Frame layout
+// mirrors Core/Inc/service_diag_frame.h; decoded by the shared pure helper
+// so the HMI and host test share one deserialiser.
+static void decodeServiceDiagSession(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::ServiceDiagSessionData sd;
+    if (!service_diag_view::decodeSession(f.data, f.data_length_code, sd.view)) {
+        return;
+    }
+    sd.valid       = true;
+    sd.timestampMs = millis();
+    data.setServiceDiagSession(sd);
+}
+
+// 0x31C DIAG_TEST_RESULT — one closed SERVICE_DIAG step result (DLC 8, once
+// per STEPPING -> DEADTIME/ABORTED transition).  Overwrites only the row for
+// the reported channel — this is a per-channel status table, not a log.
+static void decodeServiceDiagResult(const CanFrame& f, vehicle::VehicleData& data) {
+    service_diag_view::TestResultView v;
+    if (!service_diag_view::decodeTestResult(f.data, f.data_length_code, v)) {
+        return;
+    }
+    data.setServiceDiagResult(v.channel, v, millis());
+}
+
 // 0x316 DIAG_STEERING_CENTERING — steering homing telemetry (DLC 8).
 // Frame layout mirrors Core/Inc/steering_centering_frame.h; decoded by the
 // shared pure helper so the HMI and host test share one deserialiser.
@@ -816,6 +841,8 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_EPS_PARAMS:      decodeEpsParams(frame, data);         break;
             case can::DIAG_DRIVE_TUNING:    decodeDriveTuning(frame, data);       break;
             case can::DIAG_BATTERY_LIMITS:  decodeBatteryLimits(frame, data);     break;
+            case can::DIAG_SERVICE_SESSION: decodeServiceDiagSession(frame, data); break;
+            case can::DIAG_TEST_RESULT:     decodeServiceDiagResult(frame, data);  break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;
