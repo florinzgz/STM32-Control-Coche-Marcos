@@ -48,6 +48,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "steering_centering.h"
 
 #define STEER_SVC_SEARCH_PWM_MIN         100U
 #define STEER_SVC_SEARCH_PWM_MAX         1200U
@@ -62,6 +63,26 @@ extern "C" {
 /* Hard, non-negotiable ceiling -- see safety invariant above. */
 #define STEER_SVC_STOP_CURRENT_MA_MIN    200U
 #define STEER_SVC_STOP_CURRENT_MA_MAX    1500U
+
+/* ---- V2 audit fix (Bloque A, PR #445) -----------------------------------
+ * "steering_service_store estrena consumidor de producción": the service-
+ * diagnostic session (service_diag_session.c) is the FIRST production code
+ * to actually drive an actuator from this store's staged/effective value.
+ * Until now STEER_SVC_SEARCH_PWM_MAX (1200) being under the homing reduced-
+ * authority floor (HOMING_PWM_REDUCED_COUNTS = 2336) was true only "by
+ * construction" -- nobody verified it, and nothing would fail loudly if a
+ * future edit broke the relationship.
+ *
+ * This is a SAFETY GUARD, not a convenience limit: STEER_SVC_SEARCH_PWM_MAX
+ * bounds the only PWM a human-confirmed diagnostic session may ever command
+ * on the steering motor outside the production homing FSM.  Raising it
+ * requires re-validating against the homing CH5 overcurrent guard
+ * (ENDSTOP_HARD_CURRENT_MA / ENDSTOP_STALL_CURRENT_MA in
+ * steering_centering_patched.c) -- do not bump this constant without also
+ * re-checking the homing end-stop pressure detector still fires in time. */
+_Static_assert(STEER_SVC_SEARCH_PWM_MAX <= HOMING_PWM_REDUCED_COUNTS,
+               "steering_service_store PWM ceiling must not exceed the "
+               "homing reduced-authority safety floor");
 
 typedef struct {
     uint16_t search_pwm_counts;
@@ -103,8 +124,29 @@ void SteeringServiceStore_Revert(void);
 void SteeringServiceStore_ResetToDefaults(void);
 bool SteeringServiceStore_Save(void);
 
+/**
+ * @brief  V2 audit (Bloque A): defense-in-depth CLAMPED accessor.
+ *
+ *         Returns the same staged/effective parameters as
+ *         SteeringServiceStore_GetEffective(), but additionally re-clamps
+ *         search_pwm_counts to HOMING_PWM_REDUCED_COUNTS at the point of
+ *         USE.  SteeringServiceStore_Stage()/_ValidateValues() already
+ *         reject anything above STEER_SVC_SEARCH_PWM_MAX (<= the floor by
+ *         the _Static_assert above), so under normal operation this clamp
+ *         is a no-op; it only engages if RAM/flash were ever corrupted in
+ *         a way that bypassed the type-safe staging API (e.g. a stray
+ *         write), guaranteeing the service session NEVER commands the
+ *         steering motor above the homing safety floor no matter what the
+ *         stored struct contains.  Any production consumer of
+ *         search_pwm_counts (currently service_diag_session.c) MUST call
+ *         this accessor, not SteeringServiceStore_GetEffective(), when the
+ *         value is about to be applied to the motor.
+ */
+void SteeringServiceStore_GetEffectiveClamped(SteeringServiceParams_t *out);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* STEERING_SERVICE_STORE_H */
+

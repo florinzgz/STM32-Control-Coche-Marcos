@@ -31,8 +31,10 @@
 #include <stddef.h>
 #include <limits.h>
 
-/* TIM3 ARR=4249. */
-#define HOMING_PWM_COUNTS                4249U
+/* HOMING_PWM_COUNTS/HOMING_PWM_REDUCED_PERCENT/HOMING_PWM_REDUCED_COUNTS now
+ * live in steering_centering.h (Bloque A / V2 audit, PR #445) so
+ * steering_service_store.h can _Static_assert against the true safety floor
+ * instead of a duplicated magic number.  Values/semantics unchanged.       */
 #define CENTER_RAW_CONFIRM_CYCLES        3U
 #define REVERSE_DEADTIME_MS              100U
 #define ENDSTOP_NO_MOTION_MS             100U
@@ -68,13 +70,8 @@
  *       SteeringSupervisor_Ch5ToEpsFault() (steering_supervisor.c) — the
  *       manual/mechanical steering path must keep working; only the homing
  *       PWM policy and its diagnostics change here.                       */
-#define HOMING_PWM_REDUCED_PERCENT       55U
-#define HOMING_PWM_REDUCED_COUNTS \
-    ((uint16_t)(((uint32_t)HOMING_PWM_COUNTS * HOMING_PWM_REDUCED_PERCENT) / 100U))
 #define HOMING_SWEEP_TIMEOUT_MS         1000U
 
-_Static_assert(HOMING_PWM_COUNTS == 4249U,
-               "homing full authority must match TIM3 period");
 _Static_assert(CENTER_RAW_CONFIRM_CYCLES >= 2U,
                "PB5 level fallback must debounce EMI");
 _Static_assert(ENDSTOP_CONFIRM_SAMPLES >= 2U,

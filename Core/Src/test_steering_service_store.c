@@ -21,9 +21,15 @@
   *            - V2: STEER_SVC_SEARCH_PWM_MAX (1200) is a hard
   *              validation ceiling -- Stage()/Validate() REJECT (do not
   *              clamp) any candidate above it, so search_pwm_counts can
-  *              never be set to a value anywhere near HOMING_PWM_COUNTS'
-  *              reduced-cap floor (~2336 = 4249 * 55%), regardless of
-  *              whether the CH5 current guard is armed.
+  *              never be set to a value anywhere near
+  *              HOMING_PWM_REDUCED_COUNTS (steering_centering.h, the true
+  *              homing reduced-authority safety floor, ~2336 = 4249 *
+  *              55%), regardless of whether the CH5 current guard is
+  *              armed.  A _Static_assert in steering_service_store.h ties
+  *              STEER_SVC_SEARCH_PWM_MAX to that floor at compile time, and
+  *              SteeringServiceStore_GetEffectiveClamped() re-clamps at the
+  *              point of use as defense-in-depth against a corrupted
+  *              staged value bypassing Stage()'s validation.
   *            - Validate()/Stage() reject out-of-range values instead of
   *              silently clamping (audit V6c).  All 6 fields are uint16_t,
   *              so there is no NaN/Inf surface to test here (audit V6d
@@ -106,9 +112,13 @@ int main(void)
     /* ---- V2: STEER_SVC_SEARCH_PWM_MAX is a hard validation ceiling that
      * REJECTS (never clamps) any candidate above it -- structurally this
      * makes it impossible for search_pwm_counts to reach anywhere near the
-     * production reduced-PWM floor (4249 * 55% ~= 2336), regardless of
-     * whether the CH5 current guard is armed. ---- */
-    ASSERT_TRUE(STEER_SVC_SEARCH_PWM_MAX < 2336U);
+     * true homing reduced-PWM safety floor (HOMING_PWM_REDUCED_COUNTS,
+     * steering_centering.h), regardless of whether the CH5 current guard
+     * is armed.  This asserts against the REAL constant, not a duplicated
+     * magic number, so it fails loudly if the relationship is ever broken
+     * (the header's _Static_assert catches the same thing at compile
+     * time). ---- */
+    ASSERT_TRUE(STEER_SVC_SEARCH_PWM_MAX < HOMING_PWM_REDUCED_COUNTS);
     /* Establish a known RAM-staged baseline first (Init() is intentionally
      * never called in this host test: it dereferences the raw flash
      * address, unmapped on a host process). ResetToDefaults() is RAM-only
@@ -178,6 +188,28 @@ int main(void)
     SteeringServiceParams_t eff;
     SteeringServiceStore_GetEffective(&eff);
     ASSERT_TRUE(eff.search_pwm_counts == 600U);
+
+    /* ---- V2(a): GetEffectiveClamped() is the RUNTIME accessor production
+     * code (service_diag_session.c) must use -- prove it returns the same
+     * value as GetEffective() for every legitimately staged value (the
+     * clamp is a no-op under normal operation because Stage() already
+     * rejects anything above STEER_SVC_SEARCH_PWM_MAX, which is itself
+     * below HOMING_PWM_REDUCED_COUNTS per the _Static_assert), and that the
+     * returned value NEVER exceeds the true homing safety floor. ---- */
+    SteeringServiceParams_t clamped;
+    SteeringServiceStore_GetEffectiveClamped(&clamped);
+    ASSERT_TRUE(clamped.search_pwm_counts == eff.search_pwm_counts);
+    ASSERT_TRUE(clamped.search_pwm_counts <= HOMING_PWM_REDUCED_COUNTS);
+
+    /* Stage the maximum legitimate value and confirm the clamped accessor
+     * passes it through unmodified (it must not over-clamp legitimate
+     * values, only defend against out-of-band corruption). */
+    SteeringServiceParams_t at_ceiling = d;
+    at_ceiling.search_pwm_counts = STEER_SVC_SEARCH_PWM_MAX;
+    ASSERT_TRUE(SteeringServiceStore_Stage(&at_ceiling));
+    SteeringServiceStore_GetEffectiveClamped(&clamped);
+    ASSERT_TRUE(clamped.search_pwm_counts == STEER_SVC_SEARCH_PWM_MAX);
+    ASSERT_TRUE(STEER_SVC_SEARCH_PWM_MAX <= HOMING_PWM_REDUCED_COUNTS);
 
     /* ---- V6b: Revert() discards unsaved staged edits and falls back to
      * the last SAVED value. ---- */

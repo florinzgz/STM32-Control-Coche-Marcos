@@ -2275,6 +2275,15 @@ void Safety_UpdateCANRxTime(void)
     last_can_rx_time = HAL_GetTick();
 }
 
+/* Bloque A (PR #445): read-only age-of-last-CAN-frame getter for the
+ * service-diagnostic session, which applies its OWN stricter heartbeat
+ * timeout (500 ms) independent of CAN_TIMEOUT_MS above. Purely additive,
+ * no behaviour change to the existing CAN timeout state machine. */
+uint32_t Safety_GetCanRxAgeMs(void)
+{
+    return HAL_GetTick() - last_can_rx_time;
+}
+
 /* ---- Sensor plausibility checks ---------------------------------- */
 
 void Safety_CheckSensors(void)

@@ -334,6 +334,7 @@ void Safety_ClearError(Safety_Error_t error);
 Safety_Error_t Safety_GetError(void);
 bool Safety_IsError(void);
 void Safety_UpdateCANRxTime(void);
+uint32_t Safety_GetCanRxAgeMs(void);
 
 /* State machine */
 SystemState_t Safety_GetState(void);

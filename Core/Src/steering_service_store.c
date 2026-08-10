@@ -124,6 +124,18 @@ void SteeringServiceStore_GetEffective(SteeringServiceParams_t *out)
     if (out) *out = stsvc_staged;
 }
 
+void SteeringServiceStore_GetEffectiveClamped(SteeringServiceParams_t *out)
+{
+    if (!out) return;
+    *out = stsvc_staged;
+    /* V2 audit defense-in-depth: see header doc comment. Never let a
+     * corrupted staged value exceed the homing reduced-authority floor,
+     * independent of the Stage()-time validation. */
+    if (out->search_pwm_counts > HOMING_PWM_REDUCED_COUNTS) {
+        out->search_pwm_counts = HOMING_PWM_REDUCED_COUNTS;
+    }
+}
+
 bool SteeringServiceStore_Stage(const SteeringServiceParams_t *p)
 {
     if (!p) return false;

@@ -72,6 +72,33 @@ typedef enum {
     STEER_OWNER_NONE            /* Assist isolated — motor unowned/mech.   */
 } SteeringMotorOwner_t;
 
+/* ---- Homing PWM authority constants ----
+ *
+ * Moved here from steering_centering_patched.c (previously file-local) so
+ * OTHER modules can reference the true, single-source-of-truth safety floor
+ * at compile time instead of duplicating it as a magic number.
+ *
+ * Bloque A / V2 audit finding (PR #445): steering_service_store's
+ * STEER_SVC_SEARCH_PWM_MAX was safe only "by construction" (1200 < 2336)
+ * because nothing tied the two constants together or verified it at build
+ * time.  steering_service_store.h now carries a _Static_assert against
+ * HOMING_PWM_REDUCED_COUNTS so any future change that would break the
+ * invariant fails the build instead of silently drifting.
+ *
+ * HOMING_PWM_REDUCED_COUNTS is the SAFETY FLOOR: full 100 % (HOMING_PWM_COUNTS)
+ * authority is only ever applied while the CH5 current guard is confirmed
+ * armed and healthy; whenever that guard is not trustworthy, homing falls
+ * back to HOMING_PWM_REDUCED_PERCENT (55 %) of full scale.  Anything that
+ * must stay below "reduced-authority homing" (e.g. the service-diagnostic
+ * steering search PWM) must never exceed HOMING_PWM_REDUCED_COUNTS.        */
+#define HOMING_PWM_COUNTS                4249U   /* TIM3 ARR (100 % authority) */
+#define HOMING_PWM_REDUCED_PERCENT       55U      /* fallback when CH5 guard is not armed */
+#define HOMING_PWM_REDUCED_COUNTS \
+    ((uint16_t)(((uint32_t)HOMING_PWM_COUNTS * HOMING_PWM_REDUCED_PERCENT) / 100U))
+
+_Static_assert(HOMING_PWM_COUNTS == 4249U,
+               "homing full authority must match TIM3 period");
+
 /* ---- Public API ---- */
 
 /**
