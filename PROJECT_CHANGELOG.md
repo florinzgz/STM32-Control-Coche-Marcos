@@ -3,12 +3,19 @@
 ## [2026-08-10] — HITO 1 CERRADO (T6): documentación CAN, paridad STM32/ESP32 y verificación final combinada
 
 Cierre del Hito 1 (T1-T6, Bloque A, PR #445 — sesión guiada SERVICE_DIAG
-self-test de un solo actuador). T1-T5 (FSM pura `service_diag_session.c`,
-wiring CAN `svcdiag_handle_service_cmd()`/`svcdiag_send_session_status()` en
-`can_handler.c`, integración Makefile/CI, submenú ESP32 SERVICE AUTOTEST)
-estaban implementados y con tests host en verde de sesiones anteriores; esta
-sesión ejecuta el T6 (documentación) y la verificación final combinada exigida
-antes de declarar el hito cerrado.
+self-test de un solo actuador). T1-T5 (FSM pura `service_diag_session.c`
+con su envolvente de seguridad — techo de PWM, un solo actuador a la vez,
+timeouts de plateau/paso/sesión, watchdog, coast+dead-time, abortos por
+batería/marcha/CAN/cambio de estado —, wiring CAN
+`svcdiag_handle_service_cmd()`/`svcdiag_send_session_status()` en
+`can_handler.c` con la acción de servicio `SERVICE_ACTION_SELF_TEST` (0xFC,
+sub-opcodes START/NEXT/ABORT/QUERY), registro DTC de entrada/salida de sesión
+(`ErrorLog_Record(SVCDIAG_DTC_CODE_ENTER/_EXIT, ...)`, subsistema
+`SERVICE_DIAG`=4, ver `can_handler.c:3569-3571,3770,3810` y `error_log.h`),
+integración Makefile/CI, submenú ESP32 SERVICE AUTOTEST) estaban
+implementados y con tests host en verde de sesiones anteriores; esta sesión
+ejecuta el T6 (documentación) y la verificación final combinada exigida antes
+de declarar el hito cerrado.
 
 ### T6 — Documentación
 
@@ -26,37 +33,76 @@ antes de declarar el hito cerrado.
   compatibilidad).
 - **`PROJECT_CHANGELOG.md`**: esta entrada.
 
+### Corrección de alcance: reversión de trabajo de Hito 2
+
+Al reanudar la PR #445 en esta sesión, la punta de la rama (`4301c73`,
+posterior al cierre de T6 en `7de3791`) ya contenía un commit **"Hito 2 (in
+progress): 0x31D DIAG_WHEEL_EQUALITY..."** que añadía
+`Core/Inc/wheel_equality_frame.h` y `Core/Src/test_wheel_equality_frame.c`
+(paridad de ruedas / BTS7960) — trabajo del Hito 2, explícitamente fuera del
+alcance de esta sesión ("NO empieces el Hito 2"). Se revirtió con
+`git revert --no-edit 4301c73`, confirmando que el árbol vuelve exactamente al
+estado de `7de3791` (T6 completo) en los tres ficheros afectados
+(`Core/Inc/wheel_equality_frame.h`, `Core/Src/test_wheel_equality_frame.c`,
+`.github/workflows/firmware-validation.yml`). Ningún fichero del Hito 2
+permanece en el árbol.
+
 ### Paridad STM32/ESP32 — verificación sistemática (punto débil conocido)
 
 Los símbolos nuevos del ESP32 (T5) se habían verificado a mano en una sesión
 anterior porque el sandbox no permite compilar PlatformIO (confirmado de
-nuevo esta sesión, ver más abajo). Se repite la comprobación byte a byte,
-enum a enum, contrastando directamente el código fuente de ambos lados
-(no solo la documentación):
+nuevo esta sesión, ver más abajo). Esta sesión **repite la comprobación de
+forma independiente**, byte a byte, enum a enum, contrastando directamente el
+código fuente de ambos lados (no solo la documentación ni el informe de la
+sesión anterior):
 
-| Elemento | STM32 (fuente de verdad) | ESP32 (espejo) | Resultado |
-|----------|--------------------------|-----------------|-----------|
-| CAN ID 0x31B | `can_handler.h:173 CAN_ID_DIAG_SERVICE_SESSION` | `can_ids.h:653 DIAG_SERVICE_SESSION` | ✅ idéntico |
-| CAN ID 0x31C | `can_handler.h:178 CAN_ID_DIAG_TEST_RESULT` | `can_ids.h:654 DIAG_TEST_RESULT` | ✅ idéntico |
-| DLC 0x31B/0x31C | `service_diag_frame.h:69-70` `SERVICE_DIAG_SESSION_FRAME_DLC`/`_TEST_RESULT_FRAME_DLC` = 8/8 | `service_diag_view.h:34-35` `SESSION_FRAME_DLC`/`TEST_RESULT_FRAME_DLC` = 8/8 | ✅ idéntico |
-| Cadencia 0x31B | 10 Hz activa / silenciosa en IDLE (`can_handler.c:3552-3553 SVCDIAG_SESS_PERIOD_MS=100`) | `service_diag_view.h:36-41 SESSION_FRAME_PERIOD_MS=100`, stale a 3×periodo=300 ms | ✅ idéntico (stale timeout es tolerancia ESP32, no parte del contrato) |
-| Acción SERVICE_CMD | `can_handler.h:203 SERVICE_ACTION_SELF_TEST=0xFC` | `can_ids.h:656 SERVICE_ACTION_SELF_TEST=0xFC` | ✅ idéntico |
-| Sub-opcodes | `can_handler.h:389-392 SVCDIAG_OP_START/NEXT/ABORT/QUERY = 0x01/02/03/04` | `can_ids.h:659-662` mismos valores | ✅ idéntico |
-| Token de confirmación | `service_diag_session.h:101 SVCDIAG_CONFIRM_TOKEN=0xA5` | `can_ids.h:671 SVCDIAG_CONFIRM_TOKEN=0xA5` | ✅ idéntico |
-| 0x31B byte offsets | `service_diag_frame.h:122-129` b0 state,b1 step_index,b2 active_channel,b3 progress_pct,b4 reason,b5 origin_state_raw,b6 elapsed_sec,b7 active_pwm_pct | `service_diag_view.h:71-78 decodeSession()` mismo orden exacto | ✅ idéntico |
-| 0x31C byte offsets | `service_diag_frame.h:174-181` b0 channel,b1 pwm_step_pct,b2-3 current_ma LE,b4-5 pulses_per_sec LE,b6 verdict,b7 step_index | `service_diag_view.h:84-90 decodeTestResult()` mismo orden y endianness (LE por `data[n] \| data[n+1]<<8`) | ✅ idéntico |
-| Enum `ServiceDiagState_t` (0-5) | `service_diag_session.h:111-118` IDLE,ENTERING,ARMED,STEPPING,DEADTIME,ABORTED | `can_ids.h:674-679` mismos 6 valores en el mismo orden | ✅ idéntico |
-| Enum `ServiceDiagChannel_t` (0-5) | `service_diag_session.h:121-128` FL,FR,RL,RR,STEERING,NONE | `can_ids.h:682-687` mismos 6 valores | ✅ idéntico |
-| Enum `ServiceDiagDirection_t` (0-1) | `service_diag_session.h:130-133` FORWARD,REVERSE | `can_ids.h:690-691` mismos 2 valores | ✅ idéntico |
-| Enum `ServiceDiagStepVerdict_t` (0-3) | `service_diag_session.h:135-140` NONE,RUNNING,PASS,FAIL_OVERCURRENT | `can_ids.h:694-697` mismos 4 valores | ✅ idéntico |
-| Enum `ServiceDiagReason_t` (0-15, 16 valores) | `service_diag_session.h:144-161` NONE..WATCHDOG | `can_ids.h:701-716` mismos 16 valores en el mismo orden | ✅ idéntico |
-| Textos de estado/motivo (HMI) | `service_diag_session.c:256-289 StateText()/ReasonText()` (español) | `service_diag_view.h:118-150 stateText()/reasonText()` | ✅ idéntico carácter a carácter |
-| Escalado de unidades | pwm_pct/progress_pct 0-100 sin escalar; current_ma/pulses_per_sec u16 LE sin escalar (mA y pulsos/s directos, saturando) | mismos campos, mismo tipo, sin escalado | ✅ idéntico (no hay factor de escala en 0x31B/0x31C) |
+| Elemento | STM32 (fuente de verdad) | ESP32 (espejo) | ¿Coincide? | Discrepancia |
+|----------|--------------------------|-----------------|------------|--------------|
+| CAN ID 0x31B | `can_handler.h:173 CAN_ID_DIAG_SERVICE_SESSION` | `can_ids.h:655 DIAG_SERVICE_SESSION` | ✅ Sí | Ninguna |
+| CAN ID 0x31C | `can_handler.h:178 CAN_ID_DIAG_TEST_RESULT` | `can_ids.h:656 DIAG_TEST_RESULT` | ✅ Sí | Ninguna |
+| Acción SERVICE_CMD 0xFC | `can_handler.h:203 SERVICE_ACTION_SELF_TEST=0xFC` | `can_ids.h:658 SERVICE_ACTION_SELF_TEST=0xFC` | ✅ Sí | Ninguna |
+| DLC 0x31B | `service_diag_frame.h:69 SERVICE_DIAG_SESSION_FRAME_DLC=8`, `Unpack()` rechaza `len != 8` | `service_diag_view.h:34 SESSION_FRAME_DLC=8` | ✅ Sí | Ninguna |
+| DLC 0x31C | `service_diag_frame.h:70 SERVICE_DIAG_TEST_RESULT_FRAME_DLC=8`, `Unpack()` rechaza `len != 8` | `service_diag_view.h:35 TEST_RESULT_FRAME_DLC=8` | ✅ Sí | Ninguna |
+| DLC comando START | `can_handler.c:3786-3789` guarda común `len<2→ACK_INVALID` (aplica a todos los sub-opcodes); `can_handler.c:3805` token leído solo si `len>=3` (si no, `confirm_token_ok=false` → `ACK_REJECTED` vía el camino `safety_block`, nunca `ACK_INVALID`) | `engineering_screen.cpp:6861-6863 sendServiceDiagOp()` DLC=3 fijo | ✅ Sí (ESP32 siempre manda el DLC máximo; STM32 tolera DLC=2 sin romper) | Ninguna funcional. Nota: doc §4.22 dice DLC "≥3" para START — STM32 no lo fuerza como `ACK_INVALID`, ver nota debajo |
+| DLC comando NEXT | `can_handler.c:3832-3835` exige `len>=7`, si no `ACK_INVALID` | `engineering_screen.cpp:6864-6865` DLC=7 fijo | ✅ Sí | Ninguna |
+| DLC comando ABORT/QUERY | `can_handler.c:3786-3789` (guarda común `len<2`, antes del switch en `3793`) | `engineering_screen.cpp:6871-6872` DLC=2 fijo | ✅ Sí | Ninguna |
+| Sub-opcodes | `can_handler.h:389-392 SVCDIAG_OP_START/NEXT/ABORT/QUERY = 0x01/02/03/04` | `can_ids.h:661-664` mismos valores | ✅ Sí | Ninguna |
+| Token de confirmación | `service_diag_session.h:101 SVCDIAG_CONFIRM_TOKEN=0xA5` | `can_ids.h:673 SVCDIAG_CONFIRM_TOKEN=0xA5` | ✅ Sí | Ninguna |
+| 0x31B offsets (b0-b7) | `service_diag_frame.h:122-129` b0 state,b1 step_index,b2 active_channel,b3 progress_pct,b4 reason,b5 origin_state_raw,b6 elapsed_sec,b7 active_pwm_pct — anchura 1 byte cada campo | `service_diag_view.h:71-78 decodeSession()` mismo orden y anchura exacta | ✅ Sí | Ninguna |
+| 0x31C offsets (b0-b7) | `service_diag_frame.h:174-181` b0 channel(1B),b1 pwm_step_pct(1B),b2-3 current_ma(2B),b4-5 pulses_per_sec(2B),b6 verdict(1B),b7 step_index(1B) | `service_diag_view.h:84-90 decodeTestResult()` mismo orden y anchura | ✅ Sí | Ninguna |
+| Comando NEXT offsets | `can_handler.c:3836-3839` b2 channel(1B),b3 direction(1B),b4 pwm_pct(1B),b5-6 plateau_ms(2B) | `engineering_screen.cpp:6866-6870` mismos offsets/anchuras | ✅ Sí | Ninguna |
+| Endianness current_ma/pulses_per_sec (0x31C) | `service_diag_frame.h:201-202 Unpack()` LE explícito: `data[2]\|data[3]<<8`, `data[4]\|data[5]<<8` (mismo patrón en `Pack()` líneas 176-179) | `service_diag_view.h:86-87` mismo patrón LE | ✅ Sí | Ninguna |
+| Endianness plateau_ms (comando NEXT) | `can_handler.c:3839` LE: `payload[5] \| payload[6]<<8` | `engineering_screen.cpp:6869-6870` LE: `plateauMs & 0xFF`, `(plateauMs>>8) & 0xFF` | ✅ Sí | Ninguna |
+| Enum `ServiceDiagState_t` (0-5) | `service_diag_session.h:111-118` IDLE,ENTERING,ARMED,STEPPING,DEADTIME,ABORTED | `can_ids.h:676-681` mismos 6 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `ServiceDiagChannel_t` (0-5) | `service_diag_session.h:121-128` FL,FR,RL,RR,STEERING,NONE | `can_ids.h:684-689` mismos 6 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagDirection_t` (0-1) | `service_diag_session.h:130-133` FORWARD,REVERSE | `can_ids.h:692-693` mismos 2 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagStepVerdict_t` (0-3) | `service_diag_session.h:135-140` NONE,RUNNING,PASS,FAIL_OVERCURRENT | `can_ids.h:696-699` mismos 4 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagReason_t` (0-15, motivo de aborto) | `service_diag_session.h:144-161` NONE..WATCHDOG (16 valores, WATCHDOG=15) | `can_ids.h:703-718` mismos 16 valores en el mismo orden, `WATCHDOG=15` | ✅ Sí (tras la corrección) | **Encontrada y corregida**: `service_diag_frame.h:32` (comentario de layout de b4) decía `0..14` (15 valores), omitiendo `WATCHDOG=15` que sí viaja realmente por el cable (fijado en `enter_aborted()`, `service_diag_session.c:122`, y alcanzable desde el FSM). CAN_CONTRACT_FINAL.md §4.22 y §3.3 ya documentaban correctamente 0-15; solo el comentario interno de `service_diag_frame.h` estaba desactualizado. Causa raíz: comentario no actualizado cuando se añadió `SVCDIAG_REASON_WATCHDOG` como último valor del enum. Corregido a `0..15`. Sin impacto funcional (el pack/unpack es un passthrough `uint8_t` sin máscara de rango). |
+| Enum DTC subsistema `SERVICE_DIAG`=4 (registro DTC entrada/salida) | `error_log.h:55-56` `subsystem` 0=GLOBAL,1=MOTOR,2=SENSOR,3=CAN,**4=SERVICE_DIAG**; usado por `ErrorLog_Record(SVCDIAG_DTC_CODE_ENTER/_EXIT, SVCDIAG_DTC_SUBSYSTEM=4, ...)` en `can_handler.c:3770,3810` | `error_screen.cpp:71-80 diagSubsystemName()` YA tenía `case 4: return "SVC_DIAG"` correcto (funcional, sin bug); pero el enum de referencia `can_ids.h:190-195 DiagSubsystem` (no usado en lógica, solo documental) se quedaba en 0-3, y el comentario de `config_store.h:41` también | ✅ Sí (tras la corrección) | **Encontrada y corregida**: `esp32/include/can_ids.h:190-195` (enum `DiagSubsystem`) no tenía el valor `SERVICE_DIAG=4` que sí existe y se usa en el lado STM32 (`error_log.h`) y que el propio ESP32 ya sabe mostrar (`error_screen.cpp` `case 4`). Causa raíz: el enum de documentación no se actualizó cuando T3 introdujo el subsistema SERVICE_DIAG para el registro DTC de entrada/salida de este hito; no es una regresión de T6. Sin impacto funcional (el campo se transporta como `uint8_t` puro, nunca se castea a `DiagSubsystem`), pero es una discrepancia real de paridad documental. Corregido: añadido `SERVICE_DIAG = 4` al enum y actualizado el comentario de `config_store.h:41` a `4=ServiceDiag`. |
+| DTC pseudo-códigos 0x40/0x41 (ENTER/EXIT) | `can_handler.c:3569-3570 SVCDIAG_DTC_CODE_ENTER=0x40`, `_EXIT=0x41`; documentados en `error_log.h:48-54` como fuera del rango 0-16 de `Safety_Error_t` | `error_screen.cpp:64-65` `case 0x40: "SVC-DIAG ENTER"`, `case 0x41: "SVC-DIAG EXIT"` | ✅ Sí | Ninguna (ya eran correctos en la sesión anterior; solo el enum documental `DiagSubsystem` estaba incompleto, ver fila anterior) |
+| Textos de estado/motivo (HMI) | `service_diag_session.c:256-289 StateText()/ReasonText()` (español) | `service_diag_view.h:118-150 stateText()/reasonText()` | ✅ Sí | Ninguna, carácter a carácter |
+| Escalado/unidades current_ma | u16 LE, mA directos, sin escalar, saturado a 0xFFFF por `ServiceDiagFrame_SatU16()` **en el productor** (`can_handler.c:3691`, no dentro de `Pack()`) | mismo campo, mismo tipo, mismo factor (1:1), sin escalado | ✅ Sí | Ninguna |
+| Escalado/unidades pulses_per_sec | u16 LE, pulsos/s directos, sin escalar, saturado a 0xFFFF por `ServiceDiagFrame_SatU16()` **en el productor** (`can_handler.c:3698`, no dentro de `Pack()`) | mismo campo, mismo tipo, mismo factor (1:1), sin escalado | ✅ Sí | Ninguna |
+| Escalado/unidades progress_pct / pwm_step_pct / active_pwm_pct | u8 0-100 %, sin escalar, saturado por `ServiceDiagFrame_SatPct()` (`service_diag_frame.h:95`, llamado dentro de `Pack()` en líneas 125/129/175) | mismo campo, mismo tipo, mismo rango | ✅ Sí | Ninguna |
 
-**Discrepancias encontradas: ninguna.** Los 918 bytes añadidos en el commit T5
-(`esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`,
-`esp32/src/service_diag_view.h`, `esp32/src/screens/engineering_screen.{h,cpp}`)
-reproducen exactamente el contrato definido en
+**Discrepancias encontradas: 2, ambas de documentación/enum de referencia (sin
+impacto funcional en el binario ARM ni en el firmware ESP32 ya compilado
+históricamente), ambas corregidas en esta sesión:**
+1. `Core/Inc/service_diag_frame.h:32` — comentario de rango del campo `reason`
+   decía `0..14`, debía decir `0..15` (falta `WATCHDOG`=15). **Corregido.**
+2. `esp32/include/can_ids.h:190-195` (enum `DiagSubsystem`) y
+   `esp32/src/config_store.h:41` (comentario) no incluían el valor
+   `SERVICE_DIAG=4` ya usado por el registro DTC de entrada/salida de este
+   hito y ya soportado por la lógica de presentación
+   (`error_screen.cpp:77` ya mostraba `SVC_DIAG` correctamente). **Corregido**
+   (enum + comentario actualizados a 0-4).
+
+Fuera de estas dos, no se ha encontrado ninguna otra discrepancia: las 918
+líneas añadidas en el commit T5 (`git show --stat 8d67c29`: 9 ficheros, 918
+inserciones) — principalmente
+`esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`,
+`esp32/src/service_diag_view.h`, `esp32/src/screens/engineering_screen.{h,cpp}`
+— reproducen exactamente el contrato definido en
 `Core/Inc/service_diag_frame.h`/`service_diag_session.h`.
 
 ### Bug encontrado y corregido durante la verificación
@@ -87,62 +133,133 @@ reproducen exactamente el contrato definido en
   tests host en C; solo se oculta para C++. Verificado sin impacto en el
   tamaño del build ARM (idéntico antes/después: ver más abajo).
 
-### Verificación final combinada (una sola pasada)
+### Verificación final combinada (una sola pasada, repetida de forma independiente esta sesión)
 
-- **Build ARM** (`make clean && make -j2`, con todos los ficheros
-  `service_diag_session.c`/`.h`, `service_diag_frame.h` enlazados): **OK**.
-  `text=107440, data=316, bss=18488` (`dec=126244`). Tamaño idéntico antes y
-  después del fix de `steering_centering.h` (confirma que el fix es
-  exclusivamente de visibilidad C++, sin efecto en el binario ARM).
-- **Tests host STM32**: 65 ficheros/bloques de test ejecutados vía
-  `gcc`/generic loop + **11 builds especiales** de EPS/steering/relay
-  (`test_relay_seq_eps` 1317 aserciones, `test_eps_boot_traction` 315,
-  `test_steering_outputs` 14, `test_centering_boot_traction` 94,
-  `test_centering_pc12_gate` 91, `test_steering_supervisor` 178 ×2
-  variantes STEERING_Z_REQUIRED=0/1, `test_steering_supervisor_io` 52/57
-  variantes calibrado/no calibrado, etc.), replicando exactamente los pasos de
-  `.github/workflows/firmware-validation.yml`. Incluye
-  `test_service_diag_session.c` (226 aserciones) y
-  `test_service_diag_frame.c` (pack/unpack puro). **0 fallos.**
-- **Tests host ESP32**: 47 ficheros `g++` ejecutados, incluyendo
-  `test_frame_parity_cross.cpp` (91 aserciones, tras el fix) y
-  `test_service_diag_view.cpp` (decode 0x31B/0x31C). **0 fallos.**
+- **Build ARM** (`make clean && make -j$(nproc)`, con todos los ficheros
+  `service_diag_session.c`/`.h`, `service_diag_frame.h` enlazados): **OK**, sin
+  warnings (`-Wall -Wextra -Werror`) y sin símbolos sin resolver
+  (`arm-none-eabi-nm build/STM32G474RE.elf | grep " U "` vacío).
+  `text=107440, data=316, bss=18488` (`dec=126244` = `0x1ed24`). Repetido
+  después de las 3 correcciones de paridad de esta sesión (comentario
+  `service_diag_frame.h` + enum/comentario ESP32): **tamaño idéntico**, como
+  se esperaba (solo comentarios y un enum C++ de solo documentación, ninguno
+  compilado en el firmware ARM).
+- **Tests host STM32**: réplica exacta de `.github/workflows/firmware-validation.yml`
+  (extraído los pasos `run:` del job `tests` con un script Python/PyYAML para
+  garantizar fidelidad byte a byte con CI). 54 invocaciones de test, **0
+  fallos**, incluidas 20 invocaciones EPS/steering/relay/centering
+  (`test_eps_params`, `test_steering_cal_store`, `test_steering_z`,
+  `test_steering_eps`, `test_steering_centering`,
+  `test_steering_centering_diag`, `test_steering_centering_frame`,
+  `test_relay_degraded`, `test_relay_health_diag`, `test_relay_health_frame`,
+  `test_steering_service_store`, `test_relay_seq_eps` 1317 aserciones,
+  `test_eps_boot_traction` 315, `test_steering_outputs` 14,
+  `test_centering_boot_traction` 94, `test_centering_pc12_gate` 91,
+  `test_steering_supervisor` 178 ×2 variantes STEERING_Z_REQUIRED=0/1,
+  `test_steering_supervisor_io` 52/57 variantes calibrado/no calibrado — nota:
+  la sesión anterior había citado "11", recuento corregido a 20 tras
+  enumeración exhaustiva esta sesión). Incluye `test_service_diag_session.c`
+  (226 aserciones) y `test_service_diag_frame.c` (todas las aserciones PASS).
+  Re-ejecutado dos veces tras las correcciones de esta sesión (fixes de
+  paridad + fixes de citas del propio changelog): **recuento de tests
+  idéntico, 0 fallos** en las tres pasadas (confirmado por diff).
+- **Tests host ESP32**: 41 invocaciones `g++`, **0 fallos**, incluyendo
+  `test_frame_parity_cross.cpp` (91 aserciones) y `test_service_diag_view.cpp`
+  (decode 0x31B/0x31C). Re-ejecutado tras añadir `SERVICE_DIAG=4` al enum
+  `DiagSubsystem` de `can_ids.h`: **recuento de tests idéntico, 0 fallos**
+  (confirmado por diff contra la primera pasada).
 - **`scripts/check_effective_eps_wrapper.py`**: PASS ("power gate, reversal
   coast, damped assist and observer-preserving coast OK").
 - **`scripts/check_cubeide_source_exclusions.py`**: PASS (implementaciones
   base y puntos de entrada requeridos intactos).
-- **Static analysis** (`scripts/run_static_analysis.sh`): `cppcheck` (recién
-  instalado en el sandbox, dependencia ya declarada por el script) y
-  `clang-tidy` (preinstalado) ejecutados sobre firmware STM32+ESP32 y tests
-  host. 19 warnings de clang-tidy, todos preexistentes y ajenos a los ficheros
-  tocados (`can_rx_policy.h`, `can_handler.c`, `eps_params.c`, `main.c`,
-  `motor_control.c`, `pedal_cal_session.c`, `rc_arbiter.c`, `safety_system.c`,
-  `shunt_store.c`, `steering_supervisor.c`, `wheel_sensor_store.c` — ninguno
-  toca `service_diag_*`, `steering_centering.h` ni ningún fichero de esta
-  sesión). `flawfinder`/`lizard`/`scan-build` no instalados en el sandbox →
-  SKIP explícito del propio script (no se han añadido herramientas nuevas al
-  proyecto). `semgrep` deshabilitado intencionadamente por el propio
-  repositorio (nota en el script, decisión previa, no relacionada con esta
-  sesión).
+- **Static analysis** (`scripts/run_static_analysis.sh`), ejecutado en esta
+  sesión con **todas** las herramientas instaladas (a diferencia de la
+  sesión anterior, que no tenía `flawfinder`/`lizard`/`scan-build`
+  disponibles y los omitió):
+  - `cppcheck`: 0 errores; 51 style + 13 performance + 7 information (todas
+    preexistentes, ninguna en `service_diag_*`/`steering_centering*`).
+  - `clang-tidy`: 19 warnings, todos `bugprone-branch-clone` /
+    `bugprone-suspicious-memory-comparison` /
+    `clang-analyzer-optin.performance.Padding` /
+    `readability-redundant-control-flow` preexistentes en
+    `can_rx_policy.h`, `can_handler.c`, `eps_params.c`, `main.c`,
+    `motor_control.c`, `pedal_cal_session.c`, `rc_arbiter.c`,
+    `safety_system.c`, `shunt_store.c`, `steering_supervisor.c`,
+    `wheel_sensor_store.c`. Nota de honestidad: uno de ellos
+    (`can_handler.c:3893`, dentro de `CAN_ServiceDiagTick()`) está
+    físicamente dentro del código SERVICE_DIAG, pero es un patrón
+    intencionado preexistente de **T3** (dos ramas de un `if/else if` con el
+    mismo cuerpo pero condiciones de disparo distintas: cambio de estado vs.
+    reenvío periódico) — confirmado con `git diff 8d67c29 7de3791` que T6 no
+    tocó `can_handler.c`; no es una regresión de esta sesión y T3 ya está
+    cerrado/verificado, así que no se ha tocado (fuera del alcance de esta
+    sesión, que es solo T6 + verificación).
+  - `flawfinder`: **"No hits found"** a nivel de riesgo mínimo 3 (0 hits en
+    los niveles 3-5; 954 hits de nivel 0-2, todos de bajo riesgo, ninguno en
+    `service_diag_*`/`steering_centering*` — confirmado con grep dirigido).
+  - `lizard`: informe de complejidad ciclomática generado; las únicas
+    funciones SERVICE_DIAG que aparecen
+    (`ServiceDiagSession_Update` CCN 18, `ServiceDiagSession_ReasonText`/
+    `service_diag_view::reasonText` CCN 17) son *switch* de 16 ramas
+    (una por `ServiceDiagReason_t`), la complejidad esperada para un
+    despachador de texto — no señalan ningún defecto.
+  - `scan-build` (Clang Static Analyzer, STM32): **"No bugs found."** ESP32
+    scan-build sigue diferido a un contexto de compilación PlatformIO (ver
+    más abajo).
+  - `semgrep`: SKIP intencionado, decisión previa del propio repositorio (no
+    relacionada con esta sesión).
 - **PlatformIO build** (`pio run -e esp32s3`): **BLOQUEADO por el sandbox** —
   `Platform Manager: Installing espressif32` falla con `HTTPClientError`;
   confirmado que es una restricción de red (DNS no resuelve
-  `api.registry.platformio.org` / `dl.registry.platformio.org`), no un
-  problema del código. **No se da por verificado.**
-- **CodeQL** (`codeql_checker`): `actions` sin alertas. `cpp` **omitido por el
-  propio tool** ("Analysis was skipped because the database size is too
-  large") — limitación del sandbox, **no se da por verificado** el análisis
-  CodeQL C/C++ completo.
+  `api.registry.platformio.org` / `dl.registry.platformio.org` vía
+  `curl -v`/`getent hosts`), no un problema del código. **No se da por
+  verificado.**
+- **CodeQL** (`codeql_checker`): ejecutado sobre los cambios de esta sesión
+  (reversión del Hito 2 + 2 correcciones de paridad, declaradas triviales) →
+  **skip automático del propio tool por ser cambios triviales**, sin alertas
+  que investigar. No sustituye a un análisis CodeQL completo del árbol
+  (la sesión anterior ya había reportado que el análisis `cpp` completo se
+  omite por tamaño de base de datos) — **el análisis CodeQL C/C++ completo
+  del árbol sigue sin poder verificarse en este sandbox.**
+
+### Regresión — sin cambio de comportamiento (confirmado por la batería de tests host, 0 fallos)
+
+EPS (assist-only, coast de inversión, damping por magnitud —
+`test_eps_boot_traction.c`, `check_effective_eps_wrapper.py`), homing
+(`test_centering_boot_traction.c`, `test_centering_pc12_gate.c`,
+`steering_centering.h` sin cambios funcionales, solo visibilidad C++) y las
+guardas de la auditoría V2 (`test_steering_supervisor.c`,
+`test_steering_supervisor_io.c`), ABS/TCS (`safety_system.c` — `ABS_Update`/
+`TCS_Update` — sin tocar; política de slip/reducción verificada por
+`test_drive_dynamics_policy.c`, 21 aserciones), obstáculos
+(`test_obstacle_sensor.cpp` ESP32), reparto 4x4/4x2 (`test_motor_control.c`,
+incl. `test_4x2_coast_rear_stays_braked` y fases COAST 4x4/4x2), Ackermann
+(solo reduce — `ackermann.c`/`motor_control.c` sin tocar; setter de geometría
+cubierto por `test_geometry_store.c`), pedal (`test_pedal_plausibility.c`),
+los cinco stores del Bloque C (`tcs_tuning_store`, `geometry_store`,
+`shunt_store`, `steering_service_store`, `wheel_sensor_store` — mismo
+conjunto auditado el 2026-08-09 — suites host sin cambios ni fallos), el
+arbitraje HMI/mando (`test_rc_arbiter_policy.c`/`test_mode_sync.cpp` ESP32) y
+la FSM del Hito 1 (`test_service_diag_session.c`, `test_service_diag_frame.c`,
+`test_frame_parity_cross.cpp`, `test_service_diag_view.cpp`) — todos
+ejecutados en esta pasada, **0 fallos**, ninguno de estos ficheros de test
+fue modificado esta sesión.
 
 ### Declaración
 
 **HITO 1 CERRADO** (T1-T6), con dos salvedades de sandbox explícitamente no
 verificadas y declaradas como tales: el build PlatformIO real (bloqueado por
-falta de acceso de red al registro) y el análisis CodeQL C/C++ (omitido por
-tamaño de base de datos). Todo lo demás — build ARM, paridad STM32/ESP32,
-totalidad de tests host STM32+ESP32 (incluidas las 11 builds especiales
-EPS/steering/relay), los dos scripts de verificación y el análisis estático
-disponible en el sandbox — está verificado en verde.
+falta de acceso de red al registro) y el análisis CodeQL C/C++ completo del
+árbol (omitido por tamaño de base de datos; el `codeql_checker` de esta
+sesión solo confirma que los cambios propios son triviales, no sustituye un
+escaneo completo). Todo lo demás — build ARM, paridad STM32/ESP32 (verificada
+de forma sistemática e independiente, 2 discrepancias documentales
+encontradas y corregidas, 0 discrepancias funcionales), totalidad de tests
+host STM32+ESP32 (incluidas las 20 invocaciones especiales EPS/steering/
+relay/centering, ver detalle arriba), los
+dos scripts de verificación, el análisis estático disponible en el sandbox
+(cppcheck/clang-tidy/flawfinder/lizard/scan-build STM32) y la reversión del
+trabajo de Hito 2 fuera de alcance — está verificado en verde.
 
 ## [2026-08-09] — AUDITORÍA PR #445 (BLOQUE C): correcciones mínimas + tests host (STM32)
 
