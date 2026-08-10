@@ -417,6 +417,12 @@ int main(void)
     SteeringServiceStore_Init();
     WheelSensorStore_Init();
 
+    /* SERVICE_DIAG self-test session (Bloque A, PR #445 Hito 1) — resets the
+     * FSM to IDLE and its "last observed" transition-tracking statics. Does
+     * NOT touch any actuator; CAN_ServiceDiagTick() (50 ms task below) is
+     * what actually drives the FSM once a session is started over CAN.     */
+    CAN_ServiceDiagInit();
+
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
     boot_phase = 4;  /* Post-init complete, about to enter main loop */
@@ -594,6 +600,11 @@ int main(void)
 
             Pedal_Update();
             CAN_PedalCalCaptureTick();   /* R-1: cooperative pedalcal FSM */
+            CAN_ServiceDiagTick();       /* Bloque A: cooperative SERVICE_DIAG
+                                           * self-test FSM tick; <=100 ms cadence
+                                           * required by its watchdog, this 50 ms
+                                           * block gives a 2x margin. No-op while
+                                           * IDLE/ABORTED (lazy-init on first call). */
             Current_ReadAll();
             switch (temp_sm_state) {
                 case TEMP_SM_START_CONVERSION:

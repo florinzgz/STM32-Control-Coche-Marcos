@@ -58,6 +58,11 @@ const char* ErrorScreen::safetyErrorName(uint8_t code) {
         case 14: return "BATTERY OV WARN";
         case 15: return "BATTERY OV CRIT";
         case 16: return "RELAY OPEN";
+        /* SVCDIAG_DTC_CODE_ENTER/_EXIT (can_handler.c) — SERVICE_DIAG
+         * self-test session ENTER/EXIT log events, not real safety faults;
+         * deliberately outside the 0-16 Safety_Error_t range.             */
+        case 0x40: return "SVC-DIAG ENTER";
+        case 0x41: return "SVC-DIAG EXIT";
         default: return "UNKNOWN";
     }
 }
@@ -69,6 +74,7 @@ const char* ErrorScreen::diagSubsystemName(uint8_t sub) {
         case 1: return "MOTOR";
         case 2: return "SENSOR";
         case 3: return "CAN_BUS";
+        case 4: return "SVC_DIAG";
         default: return "UNKNOWN";
     }
 }

@@ -34,6 +34,9 @@
 #include "ina226_ch5_frame.h"
 #include "traction_limit_frame.h"
 #include "status_safety_frame.h"
+#include "steering_service_store.h"
+#include "service_diag_session.h"
+#include "service_diag_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include "can_rx_policy.h"
@@ -3519,6 +3522,384 @@ static void eps_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 }
 
+/* ==================================================================
+ *  SERVICE_DIAG self-test session (0xFC sub-protocol + 0x31B/0x31C telemetry)
+ *  Bloque A, PR #445 Hito 1.
+ *
+ *  Wires the pure ServiceDiagSession FSM (service_diag_session.c) to the
+ *  live safety/sensor state and to CAN, exactly like every other guided
+ *  session in this file: this module owns exactly ONE instance, populates
+ *  its per-tick ServiceDiagConds snapshot from real getters, drives the
+ *  FSM, and transports its state/results on CAN.
+ *
+ *  IMPORTANT — Hito 1 does NOT drive any actuator.  active_channel /
+ *  active_pwm_pct / active_direction are read here ONLY to populate
+ *  telemetry (0x31B/0x31C); no PWM register or motor driver is ever written
+ *  from this module.  Applying the commanded PWM to the real motor
+ *  (BTS7960 etc.) is Bloque B — steering_service_store.h already documents
+ *  service_diag_session.c as its "first production consumer... when a value
+ *  is about to be applied to the motor", which has not happened yet.
+ *  Consequently the current/pulses reported on 0x31C reflect the REAL,
+ *  pre-existing sensors, which will read ~0 during a Hito-1 "step" because
+ *  nothing is actually being driven; Hito 3 (Bloque B) completes the wiring.
+ *
+ *  The FSM's OWN guard logic (entry gates, watchdog, timeouts, dead-time,
+ *  grounded-wheel-pulse, test-overcurrent, battery/gear/CAN/state aborts) is
+ *  fully exercised over real CAN in this milestone even though no PWM is
+ *  applied — a deliberate "dry run" of the safety envelope ahead of Bloque B.
+ * ================================================================== */
+
+/* 0x31B cadence while the session is active (recommended by spec: 10 Hz). */
+#define SVCDIAG_SESS_PERIOD_MS  100U
+
+/* Cross-referenced against the two existing sources of truth so the 60%
+ * test-overcurrent threshold (SVCDIAG_TEST_OVERCURRENT_FACTOR) never
+ * silently drifts from the REAL per-channel limits:
+ *   - MAX_CURRENT_A (safety_system.c, static #define)            = 25.0 A
+ *   - STEERING_ACTIVE_OVERCURRENT_MA (steering_supervisor.h) / 1000 = 25.0 A
+ * Both currently agree, so a single constant covers every channel rather
+ * than pulling in steering_supervisor.h for one float.                    */
+#define SVCDIAG_TEST_CURRENT_NORMAL_LIMIT_A  25.0f
+
+/* DTC pseudo-codes for the session ENTER/EXIT log — see the
+ * error_log_entry_t field comments in error_log.h.  Deliberately outside
+ * the Safety_Error_t range (0-16) so they can never be confused with a real
+ * safety fault; this reuses the EXISTING ErrorLog_Record() ring buffer
+ * rather than inventing a new log.                                        */
+#define SVCDIAG_DTC_CODE_ENTER   0x40U
+#define SVCDIAG_DTC_CODE_EXIT    0x41U
+#define SVCDIAG_DTC_SUBSYSTEM    4U   /* SERVICE_DIAG — see error_log.h      */
+
+static ServiceDiagSession svcdiag_session;
+static bool               svcdiag_ready = false;
+
+/* 1 s debounce for wheels_stationary_1s: timestamp of the last cycle any
+ * wheel read >= SVCDIAG_WHEEL_STATIONARY_KMH.  Exactly like pedalcal's
+ * wheels_moving, but inverted and timed.  Initialised to "now" at lazy-init
+ * so a fresh boot needs a full confirmed second of stillness before Begin()
+ * can ever succeed.                                                       */
+static uint32_t svcdiag_last_moving_ms = 0;
+
+/* 0x31B periodic-cadence bookkeeping (mirrors pedalcal_sess_next_tx_ms). */
+static uint32_t svcdiag_sess_next_tx_ms = 0;
+
+/* Last-observed state/active, tracked across EVERY mutating call (Begin/
+ * RequestStep/Abort/Update) — NOT just within a single tick — so a step
+ * closed or a session ended by an operator CAN command (which mutates the
+ * FSM directly, outside CAN_ServiceDiagTick()) is still detected exactly
+ * once, however it happened. */
+static ServiceDiagState_t svcdiag_last_state  = SVCDIAG_STATE_IDLE;
+static bool               svcdiag_last_active = false;
+
+/* Live sample of the channel actually STEPPING, cached every cycle so the
+ * 0x31C result reflects the last real reading taken WHILE the step was
+ * still live — by the time a transition out of STEPPING is observed,
+ * ServiceDiagSession_Active*() already report NONE/0. */
+static ServiceDiagChannel_t svcdiag_last_step_channel = SVCDIAG_CH_NONE;
+static uint8_t              svcdiag_last_step_pwm_pct = 0U;
+static uint16_t             svcdiag_last_current_ma   = 0U;
+static uint16_t             svcdiag_last_pulses_ps     = 0U;
+
+static void svcdiag_lazy_init(void)
+{
+    if (svcdiag_ready) return;
+    ServiceDiagSession_Init(&svcdiag_session, NULL);
+    uint32_t now = HAL_GetTick();
+    svcdiag_last_moving_ms    = now;
+    svcdiag_sess_next_tx_ms   = now;
+    svcdiag_last_state        = ServiceDiagSession_State(&svcdiag_session);
+    svcdiag_last_active       = false;
+    svcdiag_last_step_channel = SVCDIAG_CH_NONE;
+    svcdiag_last_step_pwm_pct = 0U;
+    svcdiag_last_current_ma   = 0U;
+    svcdiag_last_pulses_ps    = 0U;
+    svcdiag_ready = true;
+}
+
+/* Explicit one-time init, called from main.c's startup section —
+ * matches every sibling module's convention (SteeringServiceStore_Init(),
+ * ErrorLog_Init(), etc.).  Every other entry point (the CAN command handler,
+ * the periodic tick) ALSO calls the same guarded init defensively, so the
+ * module is safe regardless of call order; calling it twice is a no-op. */
+void CAN_ServiceDiagInit(void)
+{
+    svcdiag_lazy_init();
+}
+
+/* Populate the per-tick condition snapshot from live safety/sensor state.
+ * confirm_token_ok is always left false here; only the START handler
+ * overrides it from the received payload right before calling Begin(). */
+static void svcdiag_build_conds(ServiceDiagConds *c)
+{
+    memset(c, 0, sizeof(*c));
+    const SystemState_t  st   = Safety_GetState();
+    const GearPosition_t gear = Traction_GetGear();
+    uint32_t now = HAL_GetTick();
+
+    float speeds[4];
+    speeds[0] = sanitize_float(Wheel_GetSpeed_FL(), SANITIZE_SPEED_DEFAULT);
+    speeds[1] = sanitize_float(Wheel_GetSpeed_FR(), SANITIZE_SPEED_DEFAULT);
+    speeds[2] = sanitize_float(Wheel_GetSpeed_RL(), SANITIZE_SPEED_DEFAULT);
+    speeds[3] = sanitize_float(Wheel_GetSpeed_RR(), SANITIZE_SPEED_DEFAULT);
+    bool any_moving = (fabsf(speeds[0]) >= SVCDIAG_WHEEL_STATIONARY_KMH) ||
+                      (fabsf(speeds[1]) >= SVCDIAG_WHEEL_STATIONARY_KMH) ||
+                      (fabsf(speeds[2]) >= SVCDIAG_WHEEL_STATIONARY_KMH) ||
+                      (fabsf(speeds[3]) >= SVCDIAG_WHEEL_STATIONARY_KMH);
+    if (any_moving) svcdiag_last_moving_ms = now;
+
+    BatteryLimits_t lim;
+    Safety_GetBatteryLimits(&lim);
+    float batt_v = sanitize_float(Voltage_GetBus(INA226_CHANNEL_BATTERY), 0.0f);
+
+    c->now_ms                = now;
+    c->boot_state            = (st == SYS_STATE_BOOT);
+    c->gear_park_or_neutral  = (gear == GEAR_PARK || gear == GEAR_NEUTRAL);
+    c->wheels_stationary_1s  = (uint32_t)(now - svcdiag_last_moving_ms) >= SVCDIAG_STATIONARY_MIN_MS;
+    c->confirm_token_ok      = false;
+    c->battery_above_cutoff  = batt_v > (lim.cutoff_cv  / 100.0f);
+    c->system_state_raw      = (uint8_t)st;
+    c->battery_above_warning = batt_v > (lim.warning_cv / 100.0f);
+    c->can_rx_age_ms         = Safety_GetCanRxAgeMs();
+
+    /* Grounded-wheel-pulse: any wheel OTHER than the active channel showing
+     * movement means the vehicle is not genuinely suspended (or something
+     * else is spinning it).  Checked against ALL 4 wheels when the active
+     * channel is steering or none (nothing to exempt).                    */
+    ServiceDiagChannel_t active = ServiceDiagSession_ActiveChannel(&svcdiag_session);
+    bool grounded = false;
+    for (uint8_t i = 0; i < 4U; i++) {
+        if ((ServiceDiagChannel_t)i == active) continue;
+        if (fabsf(speeds[i]) >= SVCDIAG_WHEEL_STATIONARY_KMH) { grounded = true; break; }
+    }
+    c->grounded_wheel_pulse = grounded;
+
+    bool overcurrent = false;
+    if (active <= SVCDIAG_CH_STEERING) {
+        uint8_t ina_idx = (active == SVCDIAG_CH_STEERING)
+                              ? (uint8_t)INA226_CHANNEL_STEER : (uint8_t)active;
+        float amps = Current_GetAmps(ina_idx);
+        float thresh = SVCDIAG_TEST_CURRENT_NORMAL_LIMIT_A * SVCDIAG_TEST_OVERCURRENT_FACTOR;
+        /* NaN/Inf hardening mirrors Safety_CheckCurrent(): treat an invalid
+         * reading as an overcurrent (safe side), never as a silent 0 A.    */
+        overcurrent = isnan(amps) || isinf(amps) || fabsf(amps) > thresh;
+
+        /* Cache the live sample for the eventual 0x31C result (see the
+         * static block comment above for why this must happen here).     */
+        svcdiag_last_step_channel = active;
+        svcdiag_last_step_pwm_pct = ServiceDiagSession_ActivePwmPct(&svcdiag_session);
+        float safe_amps = (isnan(amps) || isinf(amps)) ? 0.0f : fabsf(amps);
+        svcdiag_last_current_ma = ServiceDiagFrame_SatU16((int32_t)(safe_amps * 1000.0f));
+
+        float pulses_ps = 0.0f;
+        if (active <= SVCDIAG_CH_RR) {
+            float v_ms = fabsf(speeds[(uint8_t)active]) * 1000.0f / 3600.0f;
+            pulses_ps = (v_ms / WHEEL_CIRCUMF_M) * (float)WHEEL_PULSES_REV;
+        }
+        svcdiag_last_pulses_ps = ServiceDiagFrame_SatU16((int32_t)(pulses_ps + 0.5f));
+    }
+    c->test_overcurrent = overcurrent;
+
+    /* Steering PWM ceiling as a percent of full scale.  V2 audit requires
+     * every production consumer applying this value to the motor to use
+     * the CLAMPED accessor (see steering_service_store.h) — Hito 1 never
+     * applies it to the motor, but consumes the same clamped source so the
+     * telemetry ceiling always matches what Bloque B will actually use.   */
+    SteeringServiceParams_t ssp;
+    SteeringServiceStore_GetEffectiveClamped(&ssp);
+    uint32_t pct = ((uint32_t)ssp.search_pwm_counts * 100U) / HOMING_PWM_COUNTS;
+    c->steering_pwm_ceiling_pct = (pct > 100U) ? 100U : (uint8_t)pct;
+}
+
+/* Publish the 0x31B session-status frame (current FSM state/progress). */
+static void svcdiag_send_session_status(void)
+{
+    uint32_t now = HAL_GetTick();
+    ServiceDiagSessionFrame_t f;
+    f.state            = (uint8_t)ServiceDiagSession_State(&svcdiag_session);
+    f.step_index        = ServiceDiagSession_StepIndex(&svcdiag_session);
+    f.active_channel    = (uint8_t)ServiceDiagSession_ActiveChannel(&svcdiag_session);
+    f.progress_pct      = ServiceDiagSession_ProgressPct(&svcdiag_session, now);
+    f.reason            = (uint8_t)ServiceDiagSession_Reason(&svcdiag_session);
+    f.origin_state_raw  = ServiceDiagSession_OriginState(&svcdiag_session);
+    f.elapsed_sec        = ServiceDiagSession_ElapsedSec(&svcdiag_session, now);
+    f.active_pwm_pct     = ServiceDiagSession_ActivePwmPct(&svcdiag_session);
+
+    uint8_t data[SERVICE_DIAG_SESSION_FRAME_DLC];
+    ServiceDiagSessionFrame_Pack(&f, data);
+    (void)TransmitFrame(CAN_ID_DIAG_SERVICE_SESSION, data, SERVICE_DIAG_SESSION_FRAME_DLC);
+}
+
+/* Publish the 0x31C per-step test-result frame from the cached last-known
+ * live sample of the step that just closed (see svcdiag_build_conds()). */
+static void svcdiag_send_test_result(void)
+{
+    ServiceDiagTestResultFrame_t f;
+    f.channel        = (uint8_t)svcdiag_last_step_channel;
+    f.pwm_step_pct   = svcdiag_last_step_pwm_pct;
+    f.current_ma     = svcdiag_last_current_ma;
+    f.pulses_per_sec = svcdiag_last_pulses_ps;
+    f.verdict        = (uint8_t)ServiceDiagSession_StepVerdict(&svcdiag_session);
+    f.step_index     = ServiceDiagSession_StepIndex(&svcdiag_session);
+
+    uint8_t data[SERVICE_DIAG_TEST_RESULT_FRAME_DLC];
+    ServiceDiagTestResultFrame_Pack(&f, data);
+    (void)TransmitFrame(CAN_ID_DIAG_TEST_RESULT, data, SERVICE_DIAG_TEST_RESULT_FRAME_DLC);
+}
+
+/* Single choke point: call after ANY operation that may change the FSM's
+ * state (Begin / RequestStep / Abort / Update).  Detects a genuine
+ * STEPPING-closed or active-to-inactive transition exactly once, however it
+ * happened (operator CAN command OR the periodic tick's Update()), and
+ * drives the resulting side effects:
+ *   - 0x31C test-result the instant a step closes.
+ *   - DTC exit log the instant the session goes inactive, carrying
+ *     the origin state and the concrete exit reason (operator/abort/
+ *     timeout) — see error_log.h.
+ * Returns true if the FSM state changed, so callers can decide whether an
+ * immediate 0x31B is warranted versus the periodic cadence.              */
+static bool svcdiag_process_transition(void)
+{
+    ServiceDiagState_t new_state  = ServiceDiagSession_State(&svcdiag_session);
+    bool               new_active = ServiceDiagSession_Active(&svcdiag_session);
+    bool changed = (new_state != svcdiag_last_state);
+
+    if (svcdiag_last_state == SVCDIAG_STATE_STEPPING && new_state != SVCDIAG_STATE_STEPPING) {
+        svcdiag_send_test_result();
+    }
+    if (svcdiag_last_active && !new_active) {
+        ErrorLog_Record(SVCDIAG_DTC_CODE_EXIT, SVCDIAG_DTC_SUBSYSTEM,
+                        ServiceDiagSession_OriginState(&svcdiag_session),
+                        (uint8_t)ServiceDiagSession_Reason(&svcdiag_session));
+    }
+    svcdiag_last_state  = new_state;
+    svcdiag_last_active = new_active;
+    return changed;
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_SELF_TEST.
+ * Byte 1 = sub-opcode (SVCDIAG_OP_*).  Bloque A entry preconditions are
+ * validated INSIDE ServiceDiagSession_Begin() (entry_block()) before START
+ * is ever accepted; the concrete reject reason travels on the 0x31B
+ * `reason` byte (the ACK itself only carries 4 coarse values).           */
+static void svcdiag_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    svcdiag_lazy_init();
+    uint8_t op = payload[1];
+
+    switch (op) {
+    case SVCDIAG_OP_QUERY:
+        /* Read-only, always-safe: a single immediate 0x31B reply.  Does
+         * NOT start the periodic 10 Hz stream, which stays silent whenever
+         * the session is not active (svcdiag_sess_next_tx_ms untouched). */
+        svcdiag_send_session_status();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    case SVCDIAG_OP_START: {
+        ServiceDiagConds c;
+        svcdiag_build_conds(&c);
+        c.confirm_token_ok = (len >= 3) && (payload[2] == SVCDIAG_CONFIRM_TOKEN);
+        bool ok = ServiceDiagSession_Begin(&svcdiag_session, &c);
+        svcdiag_process_transition();
+        svcdiag_send_session_status();
+        if (ok) {
+            ErrorLog_Record(SVCDIAG_DTC_CODE_ENTER, SVCDIAG_DTC_SUBSYSTEM,
+                            ServiceDiagSession_OriginState(&svcdiag_session), 0U);
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            ServiceDiagReason_t r = ServiceDiagSession_Reason(&svcdiag_session);
+            /* Vehicle-state / already-running blocks are "blocked by
+             * safety"; a missing/wrong confirmation token is instead a
+             * rejection of the request itself (nothing unsafe about the
+             * vehicle — the operator simply did not confirm).            */
+            bool safety_block = (r == SVCDIAG_REASON_BOOT_STATE)    ||
+                                 (r == SVCDIAG_REASON_GEAR)          ||
+                                 (r == SVCDIAG_REASON_WHEELS_MOVING) ||
+                                 (r == SVCDIAG_REASON_BATTERY_LOW)   ||
+                                 (r == SVCDIAG_REASON_ALREADY_ACTIVE);
+            CAN_SendCommandAck(0x10, safety_block ? ACK_BLOCKED_BY_SAFETY
+                                                  : ACK_REJECTED);
+        }
+        return;
+    }
+
+    case SVCDIAG_OP_NEXT: {
+        /* byte2=channel, byte3=direction, byte4=pwm_pct, byte5-6=plateau_ms LE */
+        if (len < 7) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        uint8_t  ch_raw  = payload[2];
+        uint8_t  dir_raw = payload[3];
+        uint8_t  pwm_pct = payload[4];
+        uint16_t plateau = (uint16_t)(payload[5] | ((uint16_t)payload[6] << 8));
+
+        if (ch_raw > (uint8_t)SVCDIAG_CH_STEERING ||
+            (dir_raw != (uint8_t)SVCDIAG_DIR_FORWARD &&
+             dir_raw != (uint8_t)SVCDIAG_DIR_REVERSE)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+
+        ServiceDiagConds c;
+        svcdiag_build_conds(&c);
+        bool ok = ServiceDiagSession_RequestStep(&svcdiag_session, &c,
+                                                  (ServiceDiagChannel_t)ch_raw,
+                                                  (ServiceDiagDirection_t)dir_raw,
+                                                  pwm_pct, plateau);
+        svcdiag_process_transition();
+        svcdiag_send_session_status();
+        CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
+        return;
+    }
+
+    case SVCDIAG_OP_ABORT:
+        /* Idempotent — a no-op (with no side effect) when no session is
+         * running; always ACK_OK, matching the always-safe reset actions
+         * (0xFF/0xF0-0xF4) elsewhere in this dispatcher.                  */
+        ServiceDiagSession_Abort(&svcdiag_session, SVCDIAG_REASON_OPERATOR);
+        svcdiag_process_transition();
+        svcdiag_send_session_status();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
+/* Drives the ServiceDiagSession FSM (Bloque A).  Call every cycle at
+ * <= SVCDIAG_WATCHDOG_MAX_GAP_MS (100 ms) — the main loop's 50 ms tick
+ * gives a 2x margin.  No-op while the session is IDLE/ABORTED (matching
+ * ServiceDiagSession_Update()'s own contract of only needing to be called
+ * "every cycle while state != IDLE").                                     */
+void CAN_ServiceDiagTick(void)
+{
+    svcdiag_lazy_init();
+    if (!ServiceDiagSession_Active(&svcdiag_session)) return;
+
+    ServiceDiagConds c;
+    svcdiag_build_conds(&c);
+    ServiceDiagSession_Update(&svcdiag_session, &c);
+
+    bool changed = svcdiag_process_transition();
+
+    uint32_t now = HAL_GetTick();
+    if (changed) {
+        svcdiag_send_session_status();
+        svcdiag_sess_next_tx_ms = now + SVCDIAG_SESS_PERIOD_MS;
+    } else if (ServiceDiagSession_Active(&svcdiag_session) &&
+               (int32_t)(now - svcdiag_sess_next_tx_ms) >= 0) {
+        svcdiag_send_session_status();
+        svcdiag_sess_next_tx_ms = now + SVCDIAG_SESS_PERIOD_MS;
+    }
+}
+
 void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
@@ -4008,6 +4389,21 @@ void CAN_ProcessMessages(void) {
                          * never touches the safety state machine.  Replies on
                          * CMD_ACK (0x103); telemetry on 0x311.             */
                         battlim_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_SELF_TEST) {
+                        /* ---- SERVICE_DIAG SELF-TEST SESSION (Bloque A) ----
+                         * Byte 1 = sub-opcode (START/NEXT/ABORT/QUERY). The
+                         * pure ServiceDiagSession FSM enforces every entry
+                         * gate/abort condition internally (BOOT, gear,
+                         * stationary wheels, confirm token, battery, one
+                         * actuator at a time, watchdog, timeouts); this
+                         * handler only supplies the live conditions and
+                         * relays the concrete reject reason on 0x31B.
+                         * Replies on CMD_ACK (0x103); telemetry on 0x31B
+                         * (10 Hz while active, silent otherwise) and 0x31C
+                         * (once per step close).  Hito 1: no actuator is
+                         * driven yet (see the block comment above
+                         * svcdiag_build_conds()).                          */
+                        svcdiag_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask

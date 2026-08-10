@@ -170,6 +170,15 @@ extern "C" {
                                          //   Byte 3: ObstacleState_t (0 NO_SENSOR,1 NORMAL,2 CONFIRMING,
                                          //           3 ACTIVE,4 CLEARING,5 SENSOR_FAULT)
                                          //   Instrumentation only; drives no control path.
+#define CAN_ID_DIAG_SERVICE_SESSION 0x31B // STM32 → ESP32 (10 Hz while a SERVICE_DIAG self-test
+                                         //   session is active; SILENT outside a session)
+                                         //   session state/progress.  See service_diag_frame.h for
+                                         //   the full byte layout (ServiceDiagSessionFrame_t /
+                                         //   *_Pack/_Unpack).
+#define CAN_ID_DIAG_TEST_RESULT     0x31C // STM32 → ESP32 (once per step close: STEPPING exits to
+                                         //   DEADTIME or ABORTED) per-step self-test result.  See
+                                         //   service_diag_frame.h for the full byte layout
+                                         //   (ServiceDiagTestResultFrame_t / *_Pack/_Unpack).
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -191,6 +200,7 @@ extern "C" {
 #define SERVICE_ACTION_EPS_PARAMS          0xF9  /* EPS runtime parameter tuning (byte1 = sub-opcode) → 0x30F        */
 #define SERVICE_ACTION_DRIVE_TUNING        0xFA  /* Drive-tuning ramp/creep config (byte1 = sub-opcode) → 0x310      */
 #define SERVICE_ACTION_BATTERY_LIMITS      0xFB  /* Battery voltage-threshold config (byte1 = sub-opcode) → 0x311    */
+#define SERVICE_ACTION_SELF_TEST           0xFC  /* SERVICE_DIAG self-test session (byte1 = sub-opcode) → 0x31B/0x31C */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- I2C service-mode scan terminal phase (0x30B byte 5) ----------------
@@ -357,6 +367,29 @@ extern "C" {
 #define BATT_LIM_FIELD_FILTER     0x05U
 #define BATT_LIM_FIELD_COUNT      5U
 
+/* ---- SERVICE_DIAG self-test sub-opcodes (byte1 when byte0 == 0xFC) ----
+ * Drives the single ServiceDiagSession FSM (service_diag_session.c, Bloque A).
+ * See docs/CAN_CONTRACT_FINAL.md and service_diag_session.h for the full
+ * entry-gate / abort-trigger contract.
+ *   0x01 START  Begin a session.  Byte2 = confirm token, MUST equal
+ *               SVCDIAG_CONFIRM_TOKEN (0xA5) — the ESP32 dedicated
+ *               "VEHICULO SUSPENDIDO" dialog, never an ordinary button.
+ *               Rejected (with the concrete reason on 0x31B) unless every
+ *               Bloque A entry gate holds; the ACK is only OK/REJECTED/
+ *               BLOCKED_BY_SAFETY, so the 0x31B reason byte is authoritative.
+ *   0x02 NEXT   Request one step.  Byte2 = channel (ServiceDiagChannel_t),
+ *               byte3 = direction (ServiceDiagDirection_t), byte4 = requested
+ *               PWM percent, byte5-6 = requested plateau_ms (uint16 LE).
+ *               Only accepted from ARMED (never while STEPPING); values are
+ *               clamped to the safety envelope by the FSM itself.
+ *   0x03 ABORT  Operator abort (also used for HMI touch/exit triggers).
+ *   0x04 QUERY  Request an immediate, single 0x31B reply — does not change
+ *               state and does NOT start the periodic 10 Hz stream, which
+ *               stays silent whenever the session is not active.          */
+#define SVCDIAG_OP_START  0x01U
+#define SVCDIAG_OP_NEXT   0x02U
+#define SVCDIAG_OP_ABORT  0x03U
+#define SVCDIAG_OP_QUERY  0x04U
 
 typedef enum {
     ACK_OK                  = 0,   /* Command accepted and applied           */
@@ -540,6 +573,24 @@ void CAN_DriveTuningBurstUpdate(void);
  * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
  * impact on backward-compatible nodes that ignore 0x311.                */
 void CAN_BatteryLimitsBurstUpdate(void);
+
+/* One-time init for the ServiceDiagSession FSM wiring (Bloque A) — resets
+ * the session to IDLE and its transition-tracking statics.  Call once from
+ * main.c's startup section, matching every sibling module's convention.
+ * Idempotent; CAN_ServiceDiagTick() and the command handler also call the
+ * same guarded init defensively, so call order is not safety-critical. */
+void CAN_ServiceDiagInit(void);
+
+/* Drives the ServiceDiagSession FSM (Bloque A, service_diag_session.c).
+ * Call every cycle at <= SVCDIAG_WATCHDOG_MAX_GAP_MS (100 ms) — the main
+ * loop's 50 ms tick gives a 2x margin.  Builds the live ServiceDiagConds from
+ * safety/sensor state, advances ServiceDiagSession_Update(), publishes the
+ * 10 Hz 0x31B session-status frame while active (silent otherwise), and the
+ * 0x31C per-step result frame the instant a step closes (STEPPING exits to
+ * DEADTIME or ABORTED).  This module drives NO actuator: active_channel /
+ * active_pwm_pct are telemetry-only in Bloque A (actual PWM application to
+ * the motor is Bloque B).  No-op while the session is IDLE.              */
+void CAN_ServiceDiagTick(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */
