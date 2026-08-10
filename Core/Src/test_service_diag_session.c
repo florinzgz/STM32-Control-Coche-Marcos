@@ -29,6 +29,30 @@ static int tests_run = 0, tests_failed = 0;
     }                                                                 \
 } while (0)
 
+/* Advance the FSM clock from c->now_ms by total_ms, ticking Update() every
+ * <= 50 ms (well under SVCDIAG_WATCHDOG_MAX_GAP_MS = 100 ms) instead of one
+ * single jump. Root cause of the original 9 failures: several tests moved
+ * c->now_ms by several hundred ms in ONE call while the channel was
+ * STEPPING; the watchdog (correctly) saw that as a stale gap and aborted
+ * with SVCDIAG_REASON_WATCHDOG instead of letting the plateau/timeout logic
+ * run. Feeding the tick at a realistic (<=50 ms) cadence, exactly like the
+ * real main loop is required to (T3.c, <=100 ms), avoids tripping it while
+ * still exercising the same code path. Returns the state after the LAST
+ * tick (total_ms == 0 returns the current state without ticking). */
+static ServiceDiagState_t advance_ms(ServiceDiagSession *s, ServiceDiagConds *c,
+                                      uint32_t total_ms)
+{
+    uint32_t target = c->now_ms + total_ms;
+    ServiceDiagState_t st = ServiceDiagSession_State(s);
+    while (c->now_ms != target) {
+        uint32_t remaining = target - c->now_ms;
+        uint32_t step = (remaining > 50U) ? 50U : remaining;
+        c->now_ms += step;
+        st = ServiceDiagSession_Update(s, c);
+    }
+    return st;
+}
+
 /* Raw SystemState_t values mirrored here (this module never includes
  * safety_system.h — it treats the state as an opaque byte). */
 #define SYS_RAW_BOOT       0U
@@ -245,9 +269,11 @@ static void test_dead_time_enforced_between_steps(void)
     CHECK(ServiceDiagSession_RequestStep(&s, &c, SVCDIAG_CH_FL, SVCDIAG_DIR_FORWARD,
                                           25U, 500U));
 
-    /* Advance time past the plateau -> should settle into DEADTIME. */
-    c.now_ms = 500U + 10U;
-    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_DEADTIME);
+    /* Advance time past the plateau in <=50 ms slices (advance_ms) -- a
+     * single 510 ms jump while STEPPING would itself be a stale gap and
+     * (correctly) trip SVCDIAG_REASON_WATCHDOG instead of letting the
+     * plateau complete normally. */
+    CHECK(advance_ms(&s, &c, 500U + 10U) == SVCDIAG_STATE_DEADTIME);
     CHECK(ServiceDiagSession_ActivePwmPct(&s) == 0U);   /* coast, not braking */
 
     /* Immediately requesting the next step (dead-time not yet elapsed) must
@@ -256,8 +282,7 @@ static void test_dead_time_enforced_between_steps(void)
                                            25U, 500U));
 
     /* After the dead-time elapses, ARMED resumes and the next step works. */
-    c.now_ms += SVCDIAG_DEAD_TIME_MS + 5U;
-    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ARMED);
+    CHECK(advance_ms(&s, &c, SVCDIAG_DEAD_TIME_MS + 5U) == SVCDIAG_STATE_ARMED);
     CHECK(ServiceDiagSession_RequestStep(&s, &c, SVCDIAG_CH_FR, SVCDIAG_DIR_FORWARD,
                                           25U, 500U));
     CHECK(ServiceDiagSession_ActiveChannel(&s) == SVCDIAG_CH_FR);
@@ -272,8 +297,7 @@ static void test_step_pass_on_plateau_elapsed(void)
     CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ARMED);
     CHECK(ServiceDiagSession_RequestStep(&s, &c, SVCDIAG_CH_RL, SVCDIAG_DIR_REVERSE,
                                           50U, 300U));
-    c.now_ms = 300U;
-    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_DEADTIME);
+    CHECK(advance_ms(&s, &c, 300U) == SVCDIAG_STATE_DEADTIME);
     CHECK(ServiceDiagSession_StepVerdict(&s) == SVCDIAG_STEP_PASS);
 }
 
@@ -383,8 +407,7 @@ static void test_step_hard_timeout_backstop(void)
     /* Simulate a stuck plateau value (defense-in-depth backstop test). */
     s.active_plateau_ms = 65535U;  /* uint16_t max, still >> STEP_TIMEOUT_MS */
 
-    c.now_ms = SVCDIAG_STEP_TIMEOUT_MS + 1U;
-    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ABORTED);
+    CHECK(advance_ms(&s, &c, SVCDIAG_STEP_TIMEOUT_MS + 1U) == SVCDIAG_STATE_ABORTED);
     CHECK(ServiceDiagSession_Reason(&s) == SVCDIAG_REASON_STEP_TIMEOUT);
     CHECK(ServiceDiagSession_ActivePwmPct(&s) == 0U);
 }
@@ -407,6 +430,43 @@ static void test_watchdog_forces_pwm_zero(void)
     c.now_ms = 5U + SVCDIAG_WATCHDOG_MAX_GAP_MS + 50U;
     CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ABORTED);
     CHECK(ServiceDiagSession_Reason(&s) == SVCDIAG_REASON_WATCHDOG);
+    CHECK(ServiceDiagSession_ActivePwmPct(&s) == 0U);
+}
+
+/* ---- The advance_ms() helper (added to fix the 9 original failures) must
+ * NEVER be read as "the watchdog got relaxed for tests". This test does the
+ * OPPOSITE of what advance_ms does: it feeds a SINGLE raw jump > 100 ms
+ * (SVCDIAG_WATCHDOG_MAX_GAP_MS) directly to Update() while a channel is
+ * STEPPING, bypassing the helper entirely -- exactly what a stalled/blocked
+ * caller task would look like. It must still abort with the watchdog
+ * reason and force the driven channel/PWM to 0, and must stay aborted
+ * (never silently resume) on the following tick. Uses the boundary value
+ * (gap == MAX_GAP_MS + 1, the smallest gap that must already be treated as
+ * stale) and a different channel/direction than test_watchdog_forces_pwm_zero
+ * for independent coverage. ------------------------------------------------ */
+static void test_watchdog_not_defeated_by_single_raw_jump(void)
+{
+    ServiceDiagSession s; ServiceDiagSession_Init(&s, NULL);
+    ServiceDiagConds c = base_conds(0U, SYS_RAW_STANDBY);
+    CHECK(ServiceDiagSession_Begin(&s, &c));
+    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ARMED);
+    CHECK(ServiceDiagSession_RequestStep(&s, &c, SVCDIAG_CH_STEERING, SVCDIAG_DIR_REVERSE,
+                                          40U, SVCDIAG_STEP_PLATEAU_MAX_MS));
+    CHECK(ServiceDiagSession_ActiveChannel(&s) == SVCDIAG_CH_STEERING);
+    CHECK(ServiceDiagSession_ActivePwmPct(&s) == 40U);
+
+    /* Single raw jump of exactly MAX_GAP_MS + 1 ms -- NOT via advance_ms --
+     * well inside the 2000 ms plateau and the 4000 ms step timeout, so only
+     * the watchdog (not the plateau/timeout logic) can explain the abort. */
+    c.now_ms += SVCDIAG_WATCHDOG_MAX_GAP_MS + 1U;
+    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ABORTED);
+    CHECK(ServiceDiagSession_Reason(&s) == SVCDIAG_REASON_WATCHDOG);
+    CHECK(ServiceDiagSession_ActiveChannel(&s) == SVCDIAG_CH_NONE);   /* every PWM -> 0 */
+    CHECK(ServiceDiagSession_ActivePwmPct(&s) == 0U);
+
+    /* Must not silently resume on a later, normal-cadence tick. */
+    c.now_ms += 10U;
+    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_ABORTED);
     CHECK(ServiceDiagSession_ActivePwmPct(&s) == 0U);
 }
 
@@ -467,8 +527,7 @@ static void test_plateau_clamped_to_max(void)
     /* Even though 65535 ms was requested, it must have been clamped to
      * SVCDIAG_STEP_PLATEAU_MAX_MS (2000), well inside the 4000 ms hard cap,
      * so it completes as PASS, not STEP_TIMEOUT. */
-    c.now_ms = SVCDIAG_STEP_PLATEAU_MAX_MS;
-    CHECK(ServiceDiagSession_Update(&s, &c) == SVCDIAG_STATE_DEADTIME);
+    CHECK(advance_ms(&s, &c, SVCDIAG_STEP_PLATEAU_MAX_MS) == SVCDIAG_STATE_DEADTIME);
     CHECK(ServiceDiagSession_StepVerdict(&s) == SVCDIAG_STEP_PASS);
 }
 
@@ -541,6 +600,7 @@ int main(void)
     test_session_timeout();
     test_step_hard_timeout_backstop();
     test_watchdog_forces_pwm_zero();
+    test_watchdog_not_defeated_by_single_raw_jump();
     test_request_step_rejects_bad_inputs();
     test_request_step_rejected_while_idle_or_aborted();
     test_plateau_clamped_to_bounds();
