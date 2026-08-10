@@ -3926,6 +3926,285 @@ void CAN_ServiceDiagTick(void)
     }
 }
 
+/* ===================================================================
+ * Hito 2 (PR #445) — wheel-equality / BTS7960 health self-test wiring.
+ * Piggybacks on Hito 1's ServiceDiagSession envelope: WheelEqTest_Begin()
+ * requires it to already be ARMED, and every WheelEqTest_Update() aborts
+ * the instant it stops being active (see wheq_build_conds() below and
+ * WHEQ_REASON_ENVELOPE_ABORT).  This module drives REAL actuators via
+ * Traction_SetWheelEqActuation() — unlike Bloque A, which is telemetry
+ * only — so wheq_process_transition() (the single choke point after every
+ * FSM-mutating call) must run synchronously right after Begin()/
+ * BeginPhase2()/Abort(), never waiting for the next periodic tick.       */
+
+static bool           wheq_ready      = false;
+static WheelEqState_t wheq_last_state = WHEQ_STATE_IDLE;
+
+static void wheq_lazy_init(void)
+{
+    if (wheq_ready) return;
+    WheelEqTest_Init(&wheeleq_test);
+    wheq_last_state = WheelEqTest_State(&wheeleq_test);
+    wheq_ready = true;
+}
+
+/* Explicit one-time init, called from main.c's startup section — matches
+ * every sibling module's convention.  CAN_WheelEqualityTick() and the
+ * command handler also call the same guarded init defensively, so call
+ * order relative to them is not safety-critical; it must still run after
+ * CAN_ServiceDiagInit() since Begin() depends on that session's state. */
+void CAN_WheelEqualityInit(void)
+{
+    wheq_lazy_init();
+}
+
+/* Populate the per-tick condition snapshot from live safety/sensor state —
+ * mirrors svcdiag_build_conds()'s exact wheel-speed/current/battery
+ * formulas so both self-tests agree on what "1 pulse/s" or "1 A" means. */
+static void wheq_build_conds(WheelEqConds *c)
+{
+    memset(c, 0, sizeof(*c));
+    uint32_t now = HAL_GetTick();
+    c->now_ms = now;
+
+    c->svc_armed  = (ServiceDiagSession_State(&svcdiag_session) == SVCDIAG_STATE_ARMED);
+    c->svc_active = ServiceDiagSession_Active(&svcdiag_session);
+
+    float angle    = sanitize_float(Steering_GetCurrentAngle(), 0.0f);
+    float deadband = Traction_GetAckermannDeadbandDeg();
+    c->steering_angle_deg = angle;
+    c->steering_centered  = fabsf(angle) <= deadband;
+
+    for (uint8_t i = 0; i < WHEQ_NUM_WHEELS; i++) {
+        c->ackermann_diff[i] = sanitize_float(Traction_GetAckermannDiff(i), 1.0f);
+    }
+
+    c->abs_or_tcs_active = ABS_IsActive() || TCS_IsActive();
+    c->battery_v = sanitize_float(Voltage_GetBus(INA226_CHANNEL_BATTERY), 0.0f);
+
+    float speeds[WHEQ_NUM_WHEELS];
+    speeds[0] = sanitize_float(Wheel_GetSpeed_FL(), SANITIZE_SPEED_DEFAULT);
+    speeds[1] = sanitize_float(Wheel_GetSpeed_FR(), SANITIZE_SPEED_DEFAULT);
+    speeds[2] = sanitize_float(Wheel_GetSpeed_RL(), SANITIZE_SPEED_DEFAULT);
+    speeds[3] = sanitize_float(Wheel_GetSpeed_RR(), SANITIZE_SPEED_DEFAULT);
+    for (uint8_t i = 0; i < WHEQ_NUM_WHEELS; i++) {
+        float v_ms = fabsf(speeds[i]) * 1000.0f / 3600.0f;
+        c->wheel_pulses_ps[i]  = (v_ms / WHEEL_CIRCUMF_M) * (float)WHEEL_PULSES_REV;
+        c->wheel_current_a[i] = fabsf(sanitize_float(Current_GetAmps(i), 0.0f));
+    }
+
+    /* DS18B20 thermal: find the physIdx (if any) mapped to this wheel's
+     * role (roles 0=FL..3=RR match WHEQ_NUM_WHEELS wheel indices exactly —
+     * see sensor_map_store.h).  temp_present stays false (never stale data
+     * from an unrelated sensor) unless one is genuinely mapped, valid, and
+     * not stale right now. */
+    const uint8_t *map = SensorMapStore_GetMap();
+    for (uint8_t w = 0; w < WHEQ_NUM_WHEELS; w++) {
+        for (uint8_t physIdx = 0; physIdx < SMAP_NUM_SENSORS; physIdx++) {
+            if (map[physIdx] != w) continue;
+            if (Temperature_IsValid(physIdx) && !Temperature_IsStale(physIdx)) {
+                c->wheel_temp_present[w] = true;
+                c->wheel_temp_c[w] = sanitize_float(Temperature_Get(physIdx), 0.0f);
+            }
+            break;
+        }
+    }
+}
+
+/* Pack and send the full 16-frame 0x31D results burst (4 field_ids x 4
+ * wheels) from the current WheelEqTest_Result() snapshot.  Synchronous
+ * loop through the same TransmitFrame() choke point / TX queue as every
+ * other frame — mirrors the existing drvtune/battlim field-stream sweeps
+ * (same pattern, just a longer list of fields).  Fires at most twice per
+ * session (Fase1-done, Fase2-done) plus on-demand via WHEQ_OP_QUERY, never
+ * periodically, so no repeated-resend reliability sweep is needed: an
+ * operator who suspects a dropped frame can just re-issue QUERY.        */
+static void wheq_send_result_burst(void)
+{
+    bool phase2_included = WheelEqTest_Phase2Ran(&wheeleq_test);
+
+    for (uint8_t wheel = 0; wheel < WHEQ_NUM_WHEELS; wheel++) {
+        const WheelEqWheelResult *r = WheelEqTest_Result(&wheeleq_test, wheel);
+
+        for (uint8_t field = 0; field < 4U; field++) {
+            WheelEqualityFrame_t f;
+            memset(&f, 0, sizeof(f));
+            f.wheel           = wheel;
+            f.field_id        = field;
+            f.phase2_included = phase2_included;
+
+            switch (field) {
+            case WHEQ_FIELD_SPEED:
+                f.pulses_per_sec_25 = WheelEqFrame_SatU16((int32_t)(r->pulses_ps_25 + 0.5f));
+                f.pulses_per_sec_50 = WheelEqFrame_SatU16((int32_t)(r->pulses_ps_50 + 0.5f));
+                f.normalized_speed_x1000 =
+                    WheelEqFrame_SatU16((int32_t)(r->normalized_speed * 1000.0f + 0.5f));
+                f.deviation_pct = WheelEqFrame_SatU8((int32_t)(r->deviation_pct + 0.5f));
+                break;
+            case WHEQ_FIELD_CURRENT: {
+                /* I25 is not stored directly — derive it exactly from the
+                 * stored I50 and slope (slope = (I50-I25)/25), the same two
+                 * quantities the HMI already receives, so no new raw field
+                 * is needed on WheelEqWheelResult. */
+                float i25_a = r->current_a - r->slope_a_per_pct * 25.0f;
+                f.current_ma_25 = WheelEqFrame_SatU16((int32_t)(i25_a * 1000.0f + 0.5f));
+                f.current_ma_50 = WheelEqFrame_SatU16((int32_t)(r->current_a * 1000.0f + 0.5f));
+                f.slope_ma_per_pct_x10 =
+                    WheelEqFrame_SatU16((int32_t)(r->slope_a_per_pct * 10000.0f + 0.5f));
+                f.probable_cause = (uint8_t)r->cause;
+                break;
+            }
+            case WHEQ_FIELD_HEALTH:
+                f.asymmetry_pct_x10 =
+                    WheelEqFrame_SatU16((int32_t)(r->halfbridge_asym_pct * 10.0f + 0.5f));
+                f.delta_temp_c_x10 =
+                    WheelEqFrame_SatU16((int32_t)(r->delta_temp_c * 10.0f + 0.5f));
+                f.halfbridge_verdict = (uint8_t)r->halfbridge_verdict;
+                f.temp_present       = r->temp_present;
+                break;
+            case WHEQ_FIELD_VERDICT:
+                f.wheel_verdict      = (uint8_t)r->wheel_verdict;
+                f.driver_verdict     = (uint8_t)r->driver_verdict;
+                f.phase2_ran         = phase2_included;
+                f.driver_reason_mask = r->driver_reason_mask;
+                break;
+            }
+
+            uint8_t data[WHEEL_EQUALITY_FRAME_DLC];
+            if (WheelEqualityFrame_Pack(&f, data) == WHEEL_EQUALITY_FRAME_DLC) {
+                (void)TransmitFrame(CAN_ID_DIAG_WHEEL_EQUALITY, data, WHEEL_EQUALITY_FRAME_DLC);
+            }
+        }
+    }
+}
+
+/* Single choke point: call after ANY operation that may change the FSM's
+ * state (Begin / BeginPhase2 / Abort / Update).  Pushes the CURRENT
+ * actuation down to motor_control.c every time — safe/idempotent (it just
+ * overwrites 4 static variables there) and critically what makes an abort
+ * release the raw-PWM bypass immediately instead of waiting up to
+ * WHEQ_WATCHDOG_MAX_GAP_MS for the next periodic tick — and fires the
+ * one-shot 0x31D results burst exactly once on each transition INTO
+ * PHASE1_DONE/PHASE2_DONE, however it happened. */
+static void wheq_process_transition(void)
+{
+    WheelEqState_t st = WheelEqTest_State(&wheeleq_test);
+
+    WheelEqActuation_t a = WheelEqTest_GetActuation(&wheeleq_test);
+    Traction_SetWheelEqActuation(a.wheel_mask, a.pwm_pct,
+                                  a.direction == WHEQ_DIR_FORWARD,
+                                  WheelEqTest_Active(&wheeleq_test));
+
+    if (st != wheq_last_state) {
+        if (st == WHEQ_STATE_PHASE1_DONE || st == WHEQ_STATE_PHASE2_DONE) {
+            wheq_send_result_burst();
+        }
+        wheq_last_state = st;
+    }
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_WHEEL_EQUALITY.
+ * Byte 1 = sub-opcode (WHEQ_OP_*).  Preconditions (Hito 1 session ARMED,
+ * steering centred, Ackermann diff) are validated INSIDE WheelEqTest_Begin()
+ * / WheelEqTest_BeginPhase2(); the concrete reject detail travels on the
+ * HMI's state/reason text, the ACK itself only carries the 4 coarse
+ * values, matching svcdiag_handle_service_cmd()'s convention exactly. */
+static void wheq_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    wheq_lazy_init();
+    uint8_t op = payload[1];
+
+    switch (op) {
+    case WHEQ_OP_QUERY:
+        /* Read-only, always-safe: resend the last completed results burst
+         * if one exists (state reached PHASE1_DONE or later) so a
+         * reconnecting/newly-opened HMI screen gets the latest data
+         * without waiting for the next natural transition.  Never mutates
+         * the FSM. */
+        if (WheelEqTest_State(&wheeleq_test) == WHEQ_STATE_PHASE1_DONE ||
+            WheelEqTest_State(&wheeleq_test) == WHEQ_STATE_PHASE2_RUNNING ||
+            WheelEqTest_State(&wheeleq_test) == WHEQ_STATE_PHASE2_DONE) {
+            wheq_send_result_burst();
+        }
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    case WHEQ_OP_BEGIN: {
+        WheelEqConds c;
+        wheq_build_conds(&c);
+        bool ok = WheelEqTest_Begin(&wheeleq_test, &c);
+        wheq_process_transition();
+        if (ok) {
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            WheelEqReason_t r = WheelEqTest_Reason(&wheeleq_test);
+            bool safety_block = (r == WHEQ_REASON_ENVELOPE_ABORT) ||
+                                 (r == WHEQ_REASON_ALREADY_ACTIVE);
+            CAN_SendCommandAck(0x10, safety_block ? ACK_BLOCKED_BY_SAFETY
+                                                   : ACK_REJECTED);
+        }
+        return;
+    }
+
+    case WHEQ_OP_BEGIN_PHASE2: {
+        WheelEqConds c;
+        wheq_build_conds(&c);
+        bool ok = WheelEqTest_BeginPhase2(&wheeleq_test, &c);
+        wheq_process_transition();
+        if (ok) {
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            WheelEqReason_t r = WheelEqTest_Reason(&wheeleq_test);
+            bool safety_block = (r == WHEQ_REASON_ENVELOPE_ABORT) ||
+                                 (r == WHEQ_REASON_ALREADY_ACTIVE);
+            CAN_SendCommandAck(0x10, safety_block ? ACK_BLOCKED_BY_SAFETY
+                                                   : ACK_REJECTED);
+        }
+        return;
+    }
+
+    case WHEQ_OP_ABORT:
+        /* Idempotent — a no-op (with no side effect) when no test is
+         * running; always ACK_OK, matching SVCDIAG_OP_ABORT's and the
+         * always-safe reset actions' convention elsewhere in this
+         * dispatcher. */
+        WheelEqTest_Abort(&wheeleq_test, WHEQ_REASON_OPERATOR);
+        wheq_process_transition();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
+/* Drives the WheelEqTest FSM.  Call every cycle at <= WHEQ_WATCHDOG_MAX_GAP_MS
+ * (100 ms) — the main loop's 50 ms tick gives a 2x margin.  Skips the
+ * (relatively expensive) sensor-snapshot + Update() while the test is
+ * genuinely idle/aborted/blocked (mirrors CAN_ServiceDiagTick()'s own
+ * optimisation) but ALWAYS calls wheq_process_transition(), so the raw-PWM
+ * actuation feed to motor_control.c is refreshed every single cycle exactly
+ * as documented at Traction_SetWheelEqActuation()'s declaration — this is
+ * what guarantees normal driving is byte-for-byte unaffected the instant
+ * the test is not running. */
+void CAN_WheelEqualityTick(void)
+{
+    wheq_lazy_init();
+
+    if (WheelEqTest_Active(&wheeleq_test)) {
+        WheelEqConds c;
+        wheq_build_conds(&c);
+        WheelEqTest_Update(&wheeleq_test, &c);
+    }
+
+    wheq_process_transition();
+}
+
 void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
@@ -4430,6 +4709,20 @@ void CAN_ProcessMessages(void) {
                          * driven yet (see the block comment above
                          * svcdiag_build_conds()).                          */
                         svcdiag_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_WHEEL_EQUALITY) {
+                        /* ---- WHEEL-EQUALITY / BTS7960 HEALTH SELF-TEST (Hito 2) ----
+                         * Byte 1 = sub-opcode (BEGIN/BEGIN_PHASE2/ABORT/QUERY).
+                         * Piggybacks on Hito 1's ServiceDiagSession envelope
+                         * (must already be ARMED; aborts with it). The pure
+                         * WheelEqTest FSM enforces its own entry gates
+                         * (steering centred, Ackermann diff) and abort
+                         * conditions (envelope, watchdog, ABS/TCS retry
+                         * bound) internally; this handler only supplies the
+                         * live conditions and drives the resulting raw-PWM
+                         * actuation via Traction_SetWheelEqActuation().
+                         * Replies on CMD_ACK (0x103); results on 0x31D (once
+                         * per phase close, or on demand via QUERY).        */
+                        wheq_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask

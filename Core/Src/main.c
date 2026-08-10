@@ -423,6 +423,13 @@ int main(void)
      * what actually drives the FSM once a session is started over CAN.     */
     CAN_ServiceDiagInit();
 
+    /* Wheel-equality / BTS7960 health self-test (PR #445 Hito 2) — resets
+     * the WheelEqTest FSM to IDLE.  Depends on the ServiceDiagSession above
+     * already being initialised (Begin() requires it ARMED); does NOT touch
+     * any actuator by itself — CAN_WheelEqualityTick() (50 ms task below)
+     * is what actually drives real PWM once a test is started over CAN.   */
+    CAN_WheelEqualityInit();
+
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
     boot_phase = 4;  /* Post-init complete, about to enter main loop */
@@ -605,6 +612,16 @@ int main(void)
                                            * required by its watchdog, this 50 ms
                                            * block gives a 2x margin. No-op while
                                            * IDLE/ABORTED (lazy-init on first call). */
+            CAN_WheelEqualityTick();     /* Hito 2: cooperative wheel-equality/
+                                           * BTS7960 health self-test FSM tick;
+                                           * <=100 ms cadence required by its own
+                                           * watchdog, this 50 ms block gives a 2x
+                                           * margin.  Placed right after the
+                                           * Bloque A tick above (same relative
+                                           * position each cycle) so both self-
+                                           * tests read the same one-cycle-old
+                                           * Current_ReadAll() snapshot below —
+                                           * lazy-init on first call. */
             Current_ReadAll();
             switch (temp_sm_state) {
                 case TEMP_SM_START_CONVERSION:
