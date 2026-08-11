@@ -30,6 +30,7 @@ C_SOURCES = \
   $(CORE_SRC)/safety_system_patched.c \
   $(CORE_SRC)/service_mode.c \
   $(CORE_SRC)/ackermann.c \
+  $(CORE_SRC)/ackermann_diff.c \
   $(CORE_SRC)/steering_centering_patched.c \
   $(CORE_SRC)/steering_centering_diag.c \
   $(CORE_SRC)/steering_eps.c \

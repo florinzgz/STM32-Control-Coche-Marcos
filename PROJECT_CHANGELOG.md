@@ -1,5 +1,145 @@
 # PROJECT_CHANGELOG
 
+## [2026-08-11] — PR #445 (BLOQUE C): cobertura de test que faltaba para el fix de Ackermann (llamapreview P2)
+
+Continuación de la PR #445: añade la cobertura de test que faltaba para el
+fix de Ackermann del Bloque C (hallazgo `llamapreview`, P2 — ver auditoría
+del 2026-08-09 más abajo). Alcance estrictamente limitado a esto: un test
+nuevo y la extracción mínima imprescindible para hacerlo posible. Sin cambio
+de comportamiento de producción.
+
+### Causa raíz del hallazgo
+
+`compute_ackermann_differential()` (`Core/Src/motor_control.c`, función
+`static`) es exactamente la función que estuvo rota en silencio durante el
+Bloque C: leía los macros de compilación `WHEELBASE_M`/`TRACK_WIDTH_M`
+(`vehicle_physics.h`) en vez de los estáticos de runtime
+`ackermann_wheelbase`/`ackermann_track` que `Ackermann_SetGeometry()`
+escribe, anulando el setter sin que ningún test fallara. Los tests de
+`geometry_store` (`Core/Src/test_geometry_store.c`) solo verifican, mediante
+un stub que graba la llamada, que el store invoca
+`Ackermann_SetGeometry()` — nadie comprobaba que el CÁLCULO consumiera esos
+valores. El comentario de `test_geometry_store.c:44-51` afirmaba
+incorrectamente que esa cobertura existía "covered by test_motor_control.c";
+`test_motor_control.c` (1673 líneas) no contiene ninguna referencia a
+"Ackermann" — el comentario era en sí mismo parte del hueco de cobertura.
+
+### a) Extracción para hacer testeable el cálculo (opción 1, preferida por la tarea)
+
+`compute_ackermann_differential()` no se podía enlazar directamente en un
+test host sin arrastrar todo el grafo de dependencias HAL/CAN/ADC de
+`motor_control.c` (confirmado: cero tests existentes enlazan
+`motor_control.c` real). Se optó por **extraer la matemática pura a un
+módulo nuevo**, en vez de una build especial de test (opción 2 del enunciado):
+
+- **`Core/Inc/ackermann_diff.h` (nuevo)** — declara `AckermannDiff_Compute(
+  steer_deg, wheelbase_m, track_m, diff_out[4])`, el enum independiente
+  `ACKERMANN_DIFF_FL/FR/RL/RR` (HAL-free, para no depender de
+  `motor_control.h`) y las macros `ACKERMANN_DEADBAND_DEG`=2.0f /
+  `ACKERMANN_MAX_DIFF`=0.15f (movidas desde `motor_control.c`).
+- **`Core/Src/ackermann_diff.c` (nuevo)** — implementación de
+  `AckermannDiff_Compute()`, matemática idéntica byte a byte a la función
+  original (guarda de deadband, guarda `tan_angle<0.001f`, fórmula de
+  corrección, clamp de solo-reducción, asignación FL/FR/RL/RR), pero
+  recibiendo `wheelbase_m`/`track_m` como parámetros explícitos en vez de
+  leer estáticos o macros — estructuralmente imposible que caiga de nuevo en
+  un valor de compilación en silencio. Sin sanitización NaN/Inf ni efectos
+  laterales (función pura; a diferencia de `sanitize_float()` de
+  `motor_control.c`, que sí tiene efecto lateral vía `Safety_SetError()`).
+- **`Core/Src/motor_control.c:10`** — añadido `#include "ackermann_diff.h"`.
+- **`Core/Src/motor_control.c:32-39`** — 4 `_Static_assert` que verifican en
+  tiempo de compilación `ACKERMANN_DIFF_FL/FR/RL/RR == MOTOR_FL/FR/RL/RR`
+  (mismo patrón defensivo que `motor_control_patched.c:61-66` para
+  `MOTOR_MODE_*`/`TRACTION_OUTPUT_MODE_*`), para que los dos enums nunca
+  diverjan en silencio.
+- **`Core/Src/motor_control.c:1236-1247`** — `compute_ackermann_differential()`
+  simplificada a un wrapper: sanitiza el ángulo de entrada → llama a
+  `AckermannDiff_Compute(steer_deg, ackermann_wheelbase, ackermann_track,
+  diff_out)` (este es el único punto donde se leen los estáticos de
+  runtime) → sanitiza las 4 salidas. Comportamiento idéntico al de antes de
+  la extracción; verificado bit a bit (ver apartado de verificación).
+- **`Core/Inc/motor_control.h`** — comentario de
+  `Traction_GetAckermannDeadbandDeg()` actualizado: ya no referencia
+  "motor_control.c — private #define" (movido a `ackermann_diff.h`).
+- **`Core/Src/test_geometry_store.c:44-51`** — corregido el comentario
+  incorrecto que afirmaba que `test_motor_control.c` cubría el cálculo;
+  ahora referencia correctamente `test_ackermann_diff.c`.
+- **`Makefile`** — añadido `$(CORE_SRC)/ackermann_diff.c` a `C_SOURCES`
+  (tras `ackermann.c`). Sin cambios en `.cproject`: CubeIDE auto-descubre
+  `Core/Src/*.c` nuevos; solo los wrappers `_patched.c` y `test_*.c` están
+  explícitamente excluidos, y `ackermann_diff.c` no es ninguno de los dos.
+
+### b) Test host nuevo — `Core/Src/test_ackermann_diff.c` (292 líneas, 17432 aserciones)
+
+Enlaza directamente `Core/Src/ackermann_diff.c` (la función real, no un
+stub). Con geometría NO por defecto (wheelbase 1.20 / track 0.50) verifica:
+
+- **Sensibilidad a la geometría staged**: a 10°, el resultado con
+  wheelbase=1.20/track=0.50 (FL=RL=0.96326524) difiere en más de 0.01 del
+  resultado con la geometría por defecto 0.95/0.70 (FL=RL=0.93503743, misma
+  función, mismo ángulo) — prueba directa de que el cálculo consume
+  `wheelbase_m`/`track_m` explícitos y no un macro. Variación aislada de
+  solo wheelbase (0.94857132) y de solo track (0.95359814) confirman que
+  ningún parámetro puede ignorarse en silencio por separado.
+- **Volante centrado (0°) ⇒ EXACTAMENTE 1.000** en las cuatro ruedas, con
+  ambas geometrías — fija además la precondición `FAIL_ACKERMANN_OFFSET`
+  del test de igualdad del Hito 2 (`wheel_equality_test.c`), que depende de
+  esta igualdad exacta.
+- **Clamp de solo reducción**: barrido de 6 combinaciones de geometría
+  (incluidas las 4 esquinas `GEOMETRY_WHEELBASE_M_MIN/MAX` ×
+  `GEOMETRY_TRACK_WIDTH_M_MIN/MAX` de `geometry_store.h`, más la
+  por-defecto y la no-por-defecto) × ángulos de -90° a 90° en pasos de
+  0.5° (722 ángulos × 6 geometrías × 4 ruedas = 17328 aserciones):
+  `diff_out[i]` nunca sale de `[0.0, 1.0]` con ninguna geometría válida ni
+  ángulo, y un flag `saw_real_reduction` confirma que el clamp reduce
+  realmente la rueda interior en algún punto del barrido (no es un no-op).
+- **Guarda de deadband**: 1.999999° y -1.9° bloquean la corrección
+  (resultado 1.0 exacto); exactamente 2.0° sí la activa
+  (FL=RL=0.99272484 &lt; 1.0) — confirma el límite estricto `<`, sin
+  desplazamiento a `<=`.
+- **Guarda `tan_angle<0.001f`**: 91° y 95° (con ambas geometrías) devuelven
+  el default 1.0 en las cuatro ruedas — solo alcanzable más allá de 90°,
+  nunca en el rango de dirección real (`MAX_STEER_DEG`=54°).
+- **Paridad con el comportamiento anterior al fix**, geometría por defecto
+  (0.95/0.70), en 5 ángulos representativos: 0° (1.0 exacto), 1.5° dentro
+  del deadband (1.0 exacto), 10° sin clamp (0.93503743), 30° con clamp
+  (0.85000002) y ±`MAX_STEER_DEG`=54° con clamp (0.85000002, mismo valor
+  que 30° porque ambos superan el umbral de clamp ~22.14° para esta
+  geometría — no es un error, es la saturación esperada).
+
+Valores esperados generados ejecutando directamente el código real
+extraído (no calculados a mano), eliminando riesgo de transcripción.
+
+### c) Registro en CI
+
+- **`Makefile`**: `ackermann_diff.c` añadido a `C_SOURCES` (build ARM, ver
+  apartado a).
+- **`.github/workflows/firmware-validation.yml`**: `test_ackermann_diff.c`
+  añadido a la lista de tests host STM32 y entrada
+  `Core/Src/test_ackermann_diff.c) extra="Core/Src/ackermann_diff.c" ;;`
+  en el case-statement de fuentes adicionales, siguiendo el mismo patrón
+  que `test_geometry_store.c`.
+
+### Verificación
+
+- **Suite host STM32 completa**: `test_ackermann_diff.c` 17432/17432 OK;
+  resto de la suite (`test_motor_control.c` incluido, 11619 aserciones) sin
+  regresiones — 0 fallos en ningún test.
+- **Suite host ESP32 completa**: sin cambios, sin regresiones (no se ha
+  tocado ningún archivo ESP32).
+- **Build ARM** (`make clean && make`): 0 warnings/errores
+  (`text=112536, data=320, bss=18960`), `ackermann_diff.o` enlazado.
+- **`scripts/check_effective_eps_wrapper.py`** y
+  **`scripts/check_cubeide_source_exclusions.py`**: ambos OK.
+- **Prueba de reversión manual** (confirma que el test realmente fija el
+  bug): se reintrodujo temporalmente el bug histórico dentro de
+  `ackermann_diff.c` (leer `WHEELBASE_M`/`TRACK_WIDTH_M` de
+  `vehicle_physics.h` en vez de los parámetros `wheelbase_m`/`track_m`) y
+  se recompiló/ejecutó `test_ackermann_diff.c`: **11 aserciones fallan**
+  (las de geometría no-por-defecto y la de 2.0° exactos), confirmando que
+  el test detecta la regresión. Revertido el archivo a su estado corregido
+  y re-confirmado 17432/17432 OK.
+
 ## [2026-08-11] — HITO 2 CERRADO (P1-P6): igualdad de ruedas / salud BTS7960 — núcleo, frame 0x31D, espejo ESP32 y verificación final
 
 Cierre del Hito 2 (P1-P6, PR #445 — auto-test de igualdad de ruedas / salud de

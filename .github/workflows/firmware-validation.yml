@@ -110,7 +110,8 @@ jobs:
               Core/Src/test_service_diag_frame.c \
               Core/Src/test_service_diag_session.c \
               Core/Src/test_wheel_equality_frame.c \
-              Core/Src/test_wheel_equality_test.c; do
+              Core/Src/test_wheel_equality_test.c \
+              Core/Src/test_ackermann_diff.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
               case "$src" in
@@ -143,6 +144,7 @@ jobs:
                 Core/Src/test_wheel_sensor_store.c) extra="Core/Src/wheel_sensor_store.c" ;;
                 Core/Src/test_service_diag_session.c) extra="Core/Src/service_diag_session.c" ;;
                 Core/Src/test_wheel_equality_test.c) extra="Core/Src/wheel_equality_test.c" ;;
+                Core/Src/test_ackermann_diff.c) extra="Core/Src/ackermann_diff.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \

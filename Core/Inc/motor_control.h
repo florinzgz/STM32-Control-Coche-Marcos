@@ -151,11 +151,11 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg);
  * steering wheel is centred, without recomputing it independently. */
 float Traction_GetAckermannDiff(uint8_t wheel);
 
-/** Steering-centre deadband (degrees) below which compute_ackermann_differential()
- * applies no correction (ACKERMANN_DEADBAND_DEG, motor_control.c — private
- * #define).  Exposed read-only so callers (Hito 2 wheel-equality self-test)
- * can build their own "steering centred" precondition without duplicating
- * the literal. */
+/** Steering-centre deadband (degrees) below which the Ackermann
+ * differential (ackermann_diff.h: ACKERMANN_DEADBAND_DEG) applies no
+ * correction.  Exposed read-only so callers (Hito 2 wheel-equality
+ * self-test) can build their own "steering centred" precondition without
+ * duplicating the literal. */
 float Traction_GetAckermannDeadbandDeg(void);
 
 /* Steering Functions */

@@ -44,8 +44,11 @@
  * motor_control.h, defined in motor_control.c) every time the staged
  * geometry changes.  Linking the real motor_control.c would pull in the
  * whole HAL/CAN/ADC dependency graph, so provide a minimal recording stub
- * instead -- this test is about geometry_store.c's own logic, not
- * Ackermann_SetGeometry()'s internals (covered by test_motor_control.c). */
+ * instead -- this test is about geometry_store.c's own logic, not whether
+ * the differential calculation itself consumes the staged values (that is
+ * test_ackermann_diff.c's job: it links the extracted pure
+ * AckermannDiff_Compute() with non-default geometry to prove the
+ * calculation -- not just the store -- is wired to runtime values). */
 static float s_last_wheelbase = -1.0f;
 static float s_last_track     = -1.0f;
 static float s_last_max_deg   = -1.0f;
