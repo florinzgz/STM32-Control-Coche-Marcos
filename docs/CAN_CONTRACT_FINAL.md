@@ -1,13 +1,14 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.21
-**Status:** ACTIVE — Added SERVICE_DIAG self-test session telemetry 0x31B/0x31C + SERVICE_CMD action 0xFC (additive)
-**Date:** 2026-08-10
+**Revision:** 1.22
+**Status:** ACTIVE — Added wheel-equality/BTS7960 health self-test telemetry 0x31D + SERVICE_CMD action 0xFD (additive)
+**Date:** 2026-08-11
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
 
 **Change log:**
+- **1.22** (2026-08-11): Hito 2 (P1-P6) close. Added `SERVICE_CMD` action `0xFD` (`SERVICE_ACTION_WHEEL_EQUALITY`, sub-opcodes `WHEQ_OP_BEGIN/BEGIN_PHASE2/ABORT/QUERY`) driving the wheel-equality/BTS7960 half-bridge health self-test (`wheel_equality_test.c`), and its results telemetry `DIAG_WHEEL_EQUALITY` (0x31D, DLC 8, on-demand 16-frame burst — 4 field_ids x 4 wheels — emitted once when Fase 1 completes and again if Fase 2 also runs, silent otherwise). See §4.23 for the full byte layout, enums and sub-opcode table. Purely additive, bidirectional (command 0x110, telemetry STM32→ESP32); no existing CAN ID, DLC or payload changed (backward-compatible). This self-test commands REAL raw PWM (unlike Hito 1's instrumentation-only Bloque A) through a dedicated bypass in `Traction_Update()` that deliberately skips `TractionOutput_Resolve4x4()`/`TractionOutput_Resolve4x2Rear()` — the ONLY intentional bypass of those two functions in production code — so wheel-to-wheel differences are revealed, never equalised away; the bypass is inactive (byte-for-byte no-op) whenever the self-test is not running. STM32/ESP32 symbol parity (ID, DLC, byte offsets/widths, every enum value, scaling factors/units, endianness) re-verified byte-for-byte this revision — see the parity table in `PROJECT_CHANGELOG.md` (Hito 2 close entry); no discrepancy found.
 - **1.21** (2026-08-10): Hito 1 (T6) close. Added `SERVICE_CMD` action `0xFC` (`SERVICE_ACTION_SELF_TEST`, sub-opcodes `SVCDIAG_OP_START/NEXT/ABORT/QUERY`) driving the guided single-actuator self-test session (`service_diag_session.c`), and its two telemetry frames: `DIAG_SERVICE_SESSION` (0x31B, DLC 8, 10 Hz while a session is active, silent otherwise) and `DIAG_TEST_RESULT` (0x31C, DLC 8, once per step close). See §4.22 for the full byte layout, enums and sub-opcode table. Purely additive, bidirectional (command 0x110, telemetry STM32→ESP32) — drives no actuator in Hito 1 (Bloque B wires the real PWM output in a later milestone); no existing CAN ID, DLC or payload changed (backward-compatible). STM32/ESP32 symbol parity (IDs, DLC, byte offsets, enums, sub-opcodes, confirm token) re-verified byte-for-byte this revision — see the parity table in `PROJECT_CHANGELOG.md` (Hito 1 close entry); no discrepancy found.
 - **1.20** (2026-07-31): Added `DIAG_TRACTION_LIMITS` (0x31A, DLC 4, 1000 ms): byte0 obstacle_scale %, byte1 degraded traction_cap %, byte2 brake-release ramp %, byte3 `ObstacleState_t`. ESP32 uses a 3000 ms slow-diagnostic stale timeout and shows O/T/B + obstacle FSM on MOTION INHIBIT DIAG. Purely additive, diagnostic-only; no control or safety path consumes it.
 - **1.0** (2025-06-15): Initial frozen contract. Baseline safety system.
@@ -138,6 +139,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x31A | DIAG_TRACTION_LIMITS | 4 | 1000 ms | Post-demand traction limiter observability: byte0=`obstacle_scale` %, byte1=`Safety_GetTractionCapFactor()` %, byte2 brake-to-drive `brake_release_pct`, byte3 obstacle FSM state (0 NO_SENSOR, 1 NORMAL, 2 CONFIRMING, 3 ACTIVE, 4 CLEARING, 5 SENSOR_FAULT). ESP32 classifies stale after 3000 ms. Instrumentation-only; no control/safety path consumes it. | `can_handler.c`, `motor_control.c`, `safety_system.c` |
 | 0x31B | DIAG_SERVICE_SESSION | 8 | 10 Hz while active, silent otherwise | **SERVICE_DIAG self-test session status** (Bloque A, Hito 1). byte0=session state (`ServiceDiagState_t` 0..5: IDLE/ENTERING/ARMED/STEPPING/DEADTIME/ABORTED), byte1=step_index (count of NEXT steps so far), byte2=active_channel (`ServiceDiagChannel_t` 0..5: FL/FR/RL/RR/STEERING/NONE; NONE unless actually STEPPING), byte3=progress_pct (0..100, 0 unless STEPPING), byte4=abort/reject reason (`ServiceDiagReason_t` 0..15, single highest-priority cause), byte5=origin_state_raw (opaque `SystemState_t` snapshot at session entry, forwarded as-is), byte6=elapsed_sec (session age, saturating), byte7=active_pwm_pct (0..100, the PWM actually applied this cycle; 0 unless STEPPING). See §4.22. | `can_handler.c`, `service_diag_session.c`, `service_diag_frame.h` |
 | 0x31C | DIAG_TEST_RESULT | 8 | Once per step close | **SERVICE_DIAG per-step self-test result** (Bloque A, Hito 1), emitted the instant STEPPING exits to DEADTIME/ABORTED. byte0=channel (`ServiceDiagChannel_t` 0..5), byte1=pwm_step_pct (0..100, the clamped PWM commanded for the step), byte2-3=current_ma (u16 LE, saturating), byte4-5=pulses_per_sec (u16 LE, saturating; 0 for the steering channel), byte6=verdict (`ServiceDiagStepVerdict_t` 0..3: NONE/RUNNING/PASS/FAIL_OVERCURRENT), byte7=step_index (correlates with the 0x31B step_index active when this result was produced). See §4.22. | `can_handler.c`, `service_diag_session.c`, `service_diag_frame.h` |
+| 0x31D | DIAG_WHEEL_EQUALITY | 8 | On-demand: 16-frame burst (4 field_ids × 4 wheels) once per completed Fase, silent otherwise | **Wheel-equality / BTS7960 half-bridge health self-test results** (Hito 2). byte0=bit0-1 wheel index (0..3 FL/FR/RL/RR) \| bit2-3 field_id (0=SPEED,1=CURRENT,2=HEALTH,3=VERDICT) \| bit4 phase2_included (this burst covers Fase 2, 0 if Fase 1 only) \| bits5-7 reserved; bytes1-7 payload layout depends on field_id (the VERDICT field_id additionally carries its own `phase2_ran` bit at byte3) — see §4.23 for the full per-field byte table, all enum values and scaling factors. DLC is always 8 for this telemetry frame (strict, `WheelEqualityFrame_Unpack()` rejects any other length); DLC=2 is a *different* frame — the `SERVICE_CMD` (0x110) command carrying this action, not this telemetry ID. Commands REAL raw PWM through a dedicated bypass (§4.23); active only during an armed SERVICE_DIAG session with all four wheels grounded (or exempted — see §4.23). | `can_handler.c`, `wheel_equality_test.c`, `wheel_equality_frame.h` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -830,6 +832,169 @@ in `Core/Src/can_handler.c`, `ServiceDiagSessionFrame_Pack/Unpack` +
 
 ---
 
+### 4.23 SERVICE_CMD WHEEL_EQUALITY (0x110 action 0xFD) / DIAG_WHEEL_EQUALITY (0x31D) — Bidirectional (rev 1.22, additive)
+
+Wheel-equality / BTS7960 half-bridge health self-test (Hito 2, PR #445). Nested
+inside Hito 1's SERVICE_DIAG session (§4.22): BEGIN is only accepted once that
+session is already ARMED — its own entry gates (not BOOT, gear P/N, all 4
+wheels stationary ≥1 s, confirm token, battery above cutoff) are not
+duplicated here. Runs a two-phase measurement (Fase 1: 16 sequential steps,
+one wheel at a time, at 25% and 50% PWM, forward and reverse; Fase 2 optional:
+simultaneous 4-wheel run at 50% PWM) while steering is centred and all 4
+wheels report Ackermann diff == 1.000 (`WheelEqTest_Begin()` precondition),
+then computes per-wheel verdicts and drives the results out as a 16-frame
+0x31D burst.
+
+**Unlike Hito 1's Bloque A (§4.22, instrumentation-only), this self-test DOES
+drive real actuators**: `Traction_SetWheelEqActuation()`
+(`Core/Src/motor_control.c:1412`) feeds a raw wheel_mask/pwm_pct/forward
+triple (statics at `Core/Src/motor_control.c:479-482`) into a dedicated
+bypass at the top of `Traction_Update()`
+(`Core/Src/motor_control_patched.c:521-541`) that applies the SAME raw PWM
+identically to every masked wheel, coasts every other wheel, and returns
+BEFORE `TractionOutput_Resolve4x4()`/`TractionOutput_Resolve4x2Rear()`
+(`traction_output_policy.h`) ever run — the ONLY intentional bypass of those
+two wheel-equalisation functions in production code, because this test's
+entire purpose is to reveal wheel-to-wheel differences that those functions
+would otherwise equalise away. The bypass is gated on `wheeleq_active`
+(default false) and is a byte-for-byte no-op whenever the self-test is not
+running.
+
+**Command — SERVICE_CMD WHEEL_EQUALITY (0x110, byte0 = 0xFD), ESP32 → STM32:**
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xFD` = `SERVICE_ACTION_WHEEL_EQUALITY` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+
+**Sub-opcodes (byte 1) — DLC=2 is valid and sufficient for ALL FOUR:**
+
+| Op | Name | Min DLC | Effect |
+|----|------|---------|--------|
+| 0x01 | WHEQ_OP_BEGIN | 2 | Start Fase 1 (requires Hito 1 session ARMED, steering centred, Ackermann diff == 1.000 on all 4 wheels). ACK OK/REJECTED/BLOCKED_BY_SAFETY |
+| 0x02 | WHEQ_OP_BEGIN_PHASE2 | 2 | Start Fase 2 (requires PHASE1_DONE with zero FAIL verdict anywhere). ACK OK/REJECTED/BLOCKED_BY_SAFETY |
+| 0x03 | WHEQ_OP_ABORT | 2 | Operator abort (idempotent no-op if none running; also releases the raw-PWM bypass immediately). Always ACK_OK |
+| 0x04 | WHEQ_OP_QUERY | 2 | Read-only: resend the last completed 0x31D results burst (if any) without changing state. Always ACK_OK |
+
+All four sub-opcodes only ever read `payload[1]` (the op byte itself); none of
+them consult `payload[2]` or beyond, so **DLC=2 is both necessary AND
+sufficient** for every one of the 4 sub-commands — the dispatcher's only
+length gate is `len < 2` (`wheq_handle_service_cmd()`,
+`Core/Src/can_handler.c:4114`), so a longer payload is accepted but any bytes
+past offset 1 are simply ignored. Every op replies with exactly one `CMD_ACK`
+(0x103, cmd_id_low = 0x10).
+
+**Telemetry — DIAG_WHEEL_EQUALITY (0x31D), DLC 8 (strict — no forward-compatible
+short form, `WheelEqualityFrame_Unpack()` rejects any other length), STM32 →
+ESP32, on-demand 16-frame burst (4 field_ids × 4 wheels), emitted once when
+Fase 1 completes and again (overwriting) if Fase 2 also runs, or on
+WHEQ_OP_QUERY; SILENT otherwise:**
+
+Common byte0 (ALL field kinds):
+
+| Bits | Field | Description |
+|------|-------|-------------|
+| 0-1 | wheel | 0=FL, 1=FR, 2=RL, 3=RR |
+| 2-3 | field_id | 0=SPEED, 1=CURRENT, 2=HEALTH, 3=VERDICT |
+| 4 | phase2_included | 1 if this burst reflects a Fase 2 run, 0 if Fase 1 only |
+| 5-7 | reserved | 0 |
+
+field_id 0 — SPEED (bytes 1-7):
+
+| Byte | Field | Type | Scale/Unit |
+|------|-------|------|------------|
+| 1-2 | pulses_per_sec_25 | uint16 LE | raw pulses/s @ 25% PWM, forward direction; no scaling |
+| 3-4 | pulses_per_sec_50 | uint16 LE | raw pulses/s @ 50% PWM, forward direction; no scaling |
+| 5-6 | normalized_speed_x1000 | uint16 LE | pulses/s ÷ (pwm_pct × battery_V), averaged over all 4 Fase 1 samples, ×1000 (3 decimals); ÷1000.0 to recover the real value |
+| 7 | deviation_pct | uint8 | \|value−median\|/median × 100, magnitude only; 0..100 saturating, no further scaling |
+
+field_id 1 — CURRENT / SLOPE (bytes 1-7):
+
+| Byte | Field | Type | Scale/Unit |
+|------|-------|------|------------|
+| 1-2 | current_ma_25 | uint16 LE | mA @ 25% PWM, forward direction (derived as I50 − slope×25, then ×1000 for mA) |
+| 3-4 | current_ma_50 | uint16 LE | mA @ 50% PWM, forward direction (×1000); the HMI's single "corriente" column |
+| 5-6 | slope_ma_per_pct_x10 | uint16 LE | (I50−I25)/(50−25) in mA per PWM-percent, ×10 (1 decimal, combined with the ×1000 mA conversion = ×10000 on the underlying A/% value); ÷10.0 to recover mA per PWM-percent |
+| 7 | probable_cause | uint8 | `WheelEqCause_t` wire value 0..4 (see enums) |
+
+field_id 2 — HEALTH (bytes 1-7):
+
+| Byte | Field | Type | Scale/Unit |
+|------|-------|------|------------|
+| 1-2 | asymmetry_pct_x10 | uint16 LE | forward-vs-reverse normalized-speed/current asymmetry at the 50% step, ×10 (1 decimal); ÷10.0 for the real percent |
+| 3-4 | delta_temp_c_x10 | uint16 LE | DS18B20 temperature rise across the sequence, ×10 (1 decimal); ÷10.0 for °C; 0 when temp_present is false |
+| 5 | halfbridge_verdict | uint8 | `WheelEqHalfBridgeVerdict_t` wire value 0..2 (see enums) |
+| 6 | temp_present | uint8 (0/1) | 1 if a DS18B20 is mapped to this wheel |
+| 7 | reserved | uint8 | 0 |
+
+field_id 3 — VERDICT (bytes 1-7):
+
+| Byte | Field | Type | Scale/Unit |
+|------|-------|------|------------|
+| 1 | wheel_verdict | uint8 | `WheelEqWheelVerdict_t` wire value 0..4 (see enums) |
+| 2 | driver_verdict | uint8 | `WheelEqDriverVerdict_t` wire value 0..3 (see enums) |
+| 3 | phase2_ran | uint8 (0/1) | 1 if Fase 2 actually executed |
+| 4 | driver_reason_mask | uint8 | `WHEQ_DRIVER_REASON_*` bitmask (see enums) |
+| 5-7 | reserved | uint8 | 0 |
+
+**Enums (STM32 `Core/Inc/wheel_equality_test.h` / ESP32
+`esp32/include/can_ids.h` — MUST mirror exactly):**
+
+| Value | WheelEqWheelVerdict_t (VERDICT byte1) | WheelEqCause_t (CURRENT byte7) | WheelEqHalfBridgeVerdict_t (HEALTH byte5) | WheelEqDriverVerdict_t (VERDICT byte2) |
+|-------|-------------------------------------------|-------------------------------------|-------------------------------------------------|----------------------------------------------|
+| 0 | PENDING (not yet measured) | NONE (PASS — no significant deviation) | PASS | PENDING |
+| 1 | PASS | MECHANICAL (gira MENOS, consume MÁS) | WARN | SANO |
+| 2 | WARN | ELECTRICAL (gira MENOS, consume MENOS) | FAIL | SOSPECHOSO |
+| 3 | FAIL | SENSOR (gira ~igual, corriente normal, cuenta MENOS pulsos) | — | DEGRADADO |
+| 4 | FAIL_ACKERMANN_OFFSET (precondition failure, not a speed/current deviation) | OTHERS_BRAKED (gira MÁS que la mediana) | — | — |
+
+`WHEQ_DRIVER_REASON_*` bitmask (VERDICT byte4, concrete criterion(a) behind
+the driver verdict): bit0 `HALFBRIDGE` (0x01, F/R asymmetry WARN/FAIL), bit1
+`SLOPE` (0x02, I/PWM slope vs. median), bit2 `ELECTRICAL` (0x04,
+electrical-cause wheel), bit3 `THERMAL` (0x08, ΔT vs. median).
+
+**Validation & safety (STM32-side, enforced unconditionally every tick):**
+- Nested inside Hito 1's SERVICE_DIAG session — BEGIN/BEGIN_PHASE2 rejected
+  (`ACK_BLOCKED_BY_SAFETY`) unless that session is already ARMED, and the
+  test aborts (`WHEQ_REASON_ENVELOPE_ABORT`) if that envelope is lost mid-run.
+- Steering must be centred and all 4 wheels must report Ackermann diff ==
+  1.000 before Fase 1 starts (`WheelEqTest_Begin()`); a precondition failure
+  is recorded as `WHEQ_WHEEL_VERDICT_FAIL_ACKERMANN_OFFSET`, never a bare
+  rejection with no explanation.
+- Fase 2 is only accepted from PHASE1_DONE with zero FAIL verdict anywhere
+  (`WheelEqTest_Phase1AllPass()`).
+- PWM levels are fixed at 25%/50% (`WHEQ_PWM_LEVEL_25_PCT`/`_50_PCT`), both
+  compile-time asserted `<=` Hito 1's `SVCDIAG_PWM_DEFAULT_CEILING_PCT`
+  ceiling.
+- Grounded-wheel-pulse guard (`svcdiag_build_conds()`,
+  `Core/Src/can_handler.c:3675-3700`): any wheel OTHER than the wheel(s)
+  WheelEqTest is actually driving THIS cycle
+  (`WheelEqTest_ActiveWheelMask()`) showing movement aborts the session as
+  before — the exemption is per-cycle, tracks only the currently-commanded
+  wheel(s) (never a global permission), and is always 0 outside a
+  wheel-equality session (Hito 1 behaviour unchanged otherwise).
+- Stops are always coast; ABORT (or any Hito 1 envelope loss) releases the
+  raw-PWM bypass immediately (`wheeleq_active = false`).
+- The PIN gate is enforced by the ESP32's PIN-gated engineering menu before
+  `SERVICE_ACTION_WHEEL_EQUALITY` is ever sent — not part of this CAN
+  contract.
+- **This bypass drives no motion outside an active wheel-equality session**:
+  `wheeleq_active` defaults to false and the raw-PWM block in
+  `Traction_Update()` is skipped entirely whenever it is false, so normal
+  driving (gear/pedal/ABS/TCS/Ackermann/ramps/4x4-4x2 split) is byte-for-byte
+  unaffected the instant the self-test is not running.
+
+Source: `WheelEqTest_*()` in `Core/Src/wheel_equality_test.c` (pure decision
+core), `wheq_handle_service_cmd()` + `wheq_send_result_burst()` +
+`CAN_WheelEqualityTick()` in `Core/Src/can_handler.c`,
+`WheelEqualityFrame_Pack/Unpack` in `Core/Inc/wheel_equality_frame.h`,
+`Traction_SetWheelEqActuation()` + the raw-PWM bypass in
+`Core/Src/motor_control.c` / `Core/Src/motor_control_patched.c`,
+`esp32/src/wheel_equality_view.h` (ESP32 decode + text),
+`esp32/src/vehicle_data.h` (`WheelEqualityData` per-wheel field_id merge).
+
+---
+
 ## 5. Requested vs. Actual Signals
 
 | Signal | Requested (ESP32 → STM32) | Actual (STM32 → ESP32) |
@@ -1037,15 +1202,15 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.21 adds the SERVICE_DIAG self-test session command (0x110 action 0xFC) and its two telemetry frames (0x31B, 0x31C) while preserving every existing CAN ID and payload layout.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.22 adds the wheel-equality/BTS7960 health self-test command (0x110 action 0xFD) and its telemetry frame (0x31D) while preserving every existing CAN ID and payload layout.
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.21 |
-| Previous revision | 1.20 |
+| Contract revision | 1.22 |
+| Previous revision | 1.21 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.21 is additive and backward-compatible: legacy nodes silently ignore 0x31B/0x31C and never send action 0xFC; no existing frame ID, DLC, timing or payload changes. |
+| Backward compatibility | Revision 1.22 is additive and backward-compatible: legacy nodes silently ignore 0x31D and never send action 0xFD; no existing frame ID, DLC, timing or payload changes. |
 
 The source files that define this contract are:
 

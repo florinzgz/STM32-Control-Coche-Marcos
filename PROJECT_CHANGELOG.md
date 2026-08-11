@@ -1,5 +1,245 @@
 # PROJECT_CHANGELOG
 
+## [2026-08-11] — HITO 2 CERRADO (P1-P6): igualdad de ruedas / salud BTS7960 — núcleo, frame 0x31D, espejo ESP32 y verificación final
+
+Cierre del Hito 2 (P1-P6, PR #445 — auto-test de igualdad de ruedas / salud de
+los half-bridge BTS7960). P1-P4 (núcleo de decisión `wheel_equality_test.c`
+con su FSM propia `WheelEqState_t`; veredictos de semipuente F/R y de
+pendiente I/PWM; bypass deliberado de `TractionOutput_Resolve4x4()`/
+`TractionOutput_Resolve4x2Rear()` para no enmascarar diferencias rueda a
+rueda; exención del guardia de rueda-en-el-suelo vía
+`WheelEqTest_ActiveWheelMask()`; trama `DIAG_WHEEL_EQUALITY` 0x31D; wiring CAN
+`wheq_handle_service_cmd()`/`wheq_send_result_burst()`/
+`CAN_WheelEqualityTick()`; integración CI; espejo ESP32 completo —
+`can_ids.h`, `wheel_equality_view.h`, `vehicle_data.h`, `can_rx.cpp`, pantalla
+de resultados SERVICE AUTOTEST página 1, test host
+`test_wheel_equality_view.cpp`) ya estaban implementados y verificados en
+sesiones anteriores. Esta sesión ejecuta **P5** (documentación completa +
+tabla de paridad STM32/ESP32 obligatoria) y **P6** (verificación final
+combinada), con alcance estrictamente limitado a esto — sin lógica nueva, sin
+Hito 3/4, sin refactor.
+
+### P5a — `docs/CAN_CONTRACT_FINAL.md` (revisión 1.21 → **1.22**)
+
+Añadida la sección **§4.23** con el contrato completo de `SERVICE_CMD` acción
+`0xFD` (`SERVICE_ACTION_WHEEL_EQUALITY`, sub-opcodes
+`WHEQ_OP_BEGIN/BEGIN_PHASE2/ABORT/QUERY`) y la trama de telemetría
+`DIAG_WHEEL_EQUALITY` (0x31D, DLC 8, ráfaga de 16 tramas — 4 field_ids × 4
+ruedas — bajo demanda, silenciosa en caso contrario): layout de bytes completo
+para los 4 field_ids (SPEED/CURRENT/HEALTH/VERDICT), tabla de enums
+(`WheelEqWheelVerdict_t`, `WheelEqCause_t`, `WheelEqHalfBridgeVerdict_t`,
+`WheelEqDriverVerdict_t`, bitmask `WHEQ_DRIVER_REASON_*`) con todos sus
+valores numéricos, factores de escalado/unidades de cada campo, documentación
+explícita de que **DLC=2 es válido y suficiente para los 4 sub-comandos**
+(el único guardia de longitud del despachador es `len < 2`), y el bypass de
+PWM crudo (`Traction_SetWheelEqActuation()` → `Traction_Update()`) con su
+razón de ser. Añadida la fila correspondiente a §3.3 (mensajes bidireccionales
+de diagnóstico) para 0x31D. Entrada de historial de revisiones 1.22
+registrada (encabezado Revision/Status/Date actualizado).
+
+### P5b — Esta entrada de `PROJECT_CHANGELOG.md`.
+
+### P5c — Tabla de paridad STM32/ESP32 — verificación sistemática y exhaustiva
+
+El sandbox no puede compilar PlatformIO (confirmado de nuevo esta sesión, ver
+P6 más abajo), así que esta tabla es la única red de seguridad contra un
+desajuste real entre placas. Verificación byte a byte, enum a enum,
+contrastando directamente el código fuente de ambos lados (no solo la
+documentación):
+
+| Elemento | STM32 (fuente de verdad) | ESP32 (espejo) | ¿Coincide? | Discrepancia |
+|----------|--------------------------|-----------------|------------|--------------|
+| CAN ID 0x31D | `Core/Inc/can_handler.h:182 CAN_ID_DIAG_WHEEL_EQUALITY` | `esp32/include/can_ids.h:731 DIAG_WHEEL_EQUALITY` | ✅ Sí | Ninguna |
+| DLC telemetría 0x31D | `Core/Inc/wheel_equality_frame.h:96 WHEEL_EQUALITY_FRAME_DLC=8`; `Unpack()` (línea 244) rechaza `len != 8`, sin forma corta compatible | `esp32/src/wheel_equality_view.h:37 FRAME_DLC=8U`; `decode()` (línea 91) rechaza `dlc != FRAME_DLC` (igualdad estricta, no `>=`) | ✅ Sí | Ninguna |
+| Acción SERVICE_CMD 0xFD | `can_handler.h:210 SERVICE_ACTION_WHEEL_EQUALITY=0xFD` | `can_ids.h:733 SERVICE_ACTION_WHEEL_EQUALITY=0xFD` | ✅ Sí | Ninguna |
+| Sub-opcode BEGIN | `can_handler.h:419 WHEQ_OP_BEGIN=0x01` | `can_ids.h:736 WHEQ_OP_BEGIN=0x01` | ✅ Sí | Ninguna |
+| Sub-opcode BEGIN_PHASE2 | `can_handler.h:420 WHEQ_OP_BEGIN_PHASE2=0x02` | `can_ids.h:737 WHEQ_OP_BEGIN_PHASE2=0x02` | ✅ Sí | Ninguna |
+| Sub-opcode ABORT | `can_handler.h:421 WHEQ_OP_ABORT=0x03` | `can_ids.h:738 WHEQ_OP_ABORT=0x03` | ✅ Sí | Ninguna |
+| Sub-opcode QUERY | `can_handler.h:422 WHEQ_OP_QUERY=0x04` | `can_ids.h:739 WHEQ_OP_QUERY=0x04` | ✅ Sí | Ninguna |
+| DLC=2 suficiente para los 4 sub-comandos | `can_handler.c:4114 wheq_handle_service_cmd()` único guardia `len<2→ACK_INVALID`; `op=payload[1]` (línea 4119) es el único otro byte leído en las 4 ramas (BEGIN/BEGIN_PHASE2/ABORT/QUERY nunca leen `payload[2+]`); `msg_len` viene del DLC real recibido (`ExtractDLC()`, línea 4247) | `engineering_screen.cpp:7069 sendWheelEqualityOp()` fija `frame.data_length_code=2` para los 4 ops (líneas 3744/3758/3770/598) | ✅ Sí | Ninguna — el ESP32 siempre manda exactamente DLC=2, el STM32 lo acepta como necesario y suficiente |
+| byte0 bits0-1 wheel index | `wheel_equality_frame.h:36,106,170,250 wheel (0=FL,1=FR,2=RL,3=RR)` | `wheel_equality_view.h:56,96 wheel (0=FL,1=FR,2=RL,3=RR)` | ✅ Sí | Ninguna |
+| byte0 bits2-3 field_id | `wheel_equality_frame.h:37,99-102,107,171,247 field_id (0=SPEED,1=CURRENT,2=HEALTH,3=VERDICT)` | `wheel_equality_view.h:57,92,100 fieldId` + `can_ids.h:744-747 WHEQ_FIELD_SPEED/CURRENT/HEALTH/VERDICT=0/1/2/3` | ✅ Sí | Ninguna |
+| byte0 bit4 phase2_included | `wheel_equality_frame.h:38-39,108,172,252 phase2_included` | `wheel_equality_view.h:58,98 phase2Included` | ✅ Sí | Ninguna |
+| byte0 bits5-7 reservado | `wheel_equality_frame.h:40 reserved(0)`; `Pack()` no los fija explícitamente pero `out[0]` solo compone bits 0-4 (línea 170-172), quedando 0 por inicialización | `wheel_equality_view.h` `decode()` no los lee (solo bits 0-4, línea 92/96/98); coherente, nunca interpretados | ✅ Sí | Ninguna |
+| Wheel index enum `WheelEqWheel_t` | `wheel_equality_test.h:173-178 WHEQ_WHEEL_FL=0,FR=1,RL=2,RR=3` | `can_ids.h:750-753 WHEQ_WHEEL_FL=0,FR=1,RL=2,RR=3` | ✅ Sí | Ninguna |
+| FIELD_SPEED b1-2 pulses_per_sec_25 | `wheel_equality_frame.h:179-180` (Pack, LE) / `265` (Unpack: `data[1]\|data[2]<<8`) | `wheel_equality_view.h:102` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b3-4 pulses_per_sec_50 | `wheel_equality_frame.h:181-182` / `266` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:103` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b5-6 normalized_speed_x1000 | `wheel_equality_frame.h:183-184` / `267` (`data[5]\|data[6]<<8`) | `wheel_equality_view.h:104` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b7 deviation_pct | `wheel_equality_frame.h:185` / `268` (`data[7]`, 1 byte) | `wheel_equality_view.h:105` (`data[7]`) | ✅ Sí | Ninguna |
+| FIELD_CURRENT b1-2 current_ma_25 | `wheel_equality_frame.h:192-193` / `271` (`data[1]\|data[2]<<8`) | `wheel_equality_view.h:108` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b3-4 current_ma_50 | `wheel_equality_frame.h:194-195` / `272` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:109` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b5-6 slope_ma_per_pct_x10 | `wheel_equality_frame.h:196-197` / `273` (`data[5]\|data[6]<<8`) | `wheel_equality_view.h:110` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b7 probable_cause | `wheel_equality_frame.h:198` / `274` (`data[7]`, 1 byte) | `wheel_equality_view.h:111` (`data[7]`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b1-2 asymmetry_pct_x10 | `wheel_equality_frame.h:204-205` / `277` (`data[1]\|data[2]<<8`) | `wheel_equality_view.h:114` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_HEALTH b3-4 delta_temp_c_x10 | `wheel_equality_frame.h:206-207` / `278` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:115` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_HEALTH b5 halfbridge_verdict | `wheel_equality_frame.h:208` / `279` (`data[5]`, 1 byte) | `wheel_equality_view.h:116` (`data[5]`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b6 temp_present | `wheel_equality_frame.h:209` / `280` (`data[6]!=0`) | `wheel_equality_view.h:117` (`data[6]!=0`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b7 reservado | `wheel_equality_frame.h:210` Pack fija `out[7]=0`; Unpack no lo lee | `wheel_equality_view.h` decode no lo lee | ✅ Sí | Ninguna |
+| FIELD_VERDICT b1 wheel_verdict | `wheel_equality_frame.h:214` / `283` (`data[1]`, 1 byte) | `wheel_equality_view.h:120` (`data[1]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b2 driver_verdict | `wheel_equality_frame.h:215` / `284` (`data[2]`, 1 byte) | `wheel_equality_view.h:121` (`data[2]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b3 phase2_ran | `wheel_equality_frame.h:216` / `285` (`data[3]!=0`) | `wheel_equality_view.h:122` (`data[3]!=0`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b4 driver_reason_mask | `wheel_equality_frame.h:217` / `286` (`data[4]`, 1 byte) | `wheel_equality_view.h:123` (`data[4]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b5-7 reservado | `wheel_equality_frame.h:218` Pack fija `out[5..7]=0`; Unpack no los lee | `wheel_equality_view.h` decode no los lee | ✅ Sí | Ninguna |
+| Enum `WheelEqWheelVerdict_t` (0-4) | `wheel_equality_test.h:186-193` PENDING=0,PASS=1,WARN=2,FAIL=3,FAIL_ACKERMANN_OFFSET=4 | `can_ids.h:756-760` mismos 5 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqCause_t` (0-4) | `wheel_equality_test.h:196-203` NONE=0,MECHANICAL=1,ELECTRICAL=2,SENSOR=3,OTHERS_BRAKED=4 | `can_ids.h:764-768` mismos 5 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqHalfBridgeVerdict_t` (0-2) | `wheel_equality_test.h:206-210` PASS=0,WARN=1,FAIL=2 | `can_ids.h:772-774` mismos 3 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqDriverVerdict_t` (0-3) | `wheel_equality_test.h:213-218` PENDING=0,SANO=1,SOSPECHOSO=2,DEGRADADO=3 | `can_ids.h:778-781` mismos 4 valores en el mismo orden | ✅ Sí | Ninguna |
+| Bitmask `WHEQ_DRIVER_REASON_*` (bits 0-3) | `wheel_equality_test.h:141-144` HALFBRIDGE=1<<0,SLOPE=1<<1,ELECTRICAL=1<<2,THERMAL=1<<3 | `can_ids.h:785-788` mismos 4 bits en el mismo orden | ✅ Sí | Ninguna |
+| WHEQ_NUM_WHEELS estructural | `wheel_equality_test.h:90 WHEQ_NUM_WHEELS=4U` | `vehicle_data.h:37 NUM_WHEELS=4` (usado por `setWheelEquality()` línea 812 como guardia de rango) | ✅ Sí | Ninguna |
+| Escalado normalized_speed_x1000 | `can_handler.c:4040-4041` `round(normalized_speed*1000.0f)`, u16 saturado | ÷1000.0 en `engineering_screen.cpp:7319-7320` (visualización con 3 decimales) | ✅ Sí (mismo factor ×1000 / ÷1000) | Ninguna |
+| Escalado deviation_pct | `can_handler.c:4042` `round(r->deviation_pct)`, u8 saturado 0-100, SIN escalar | `engineering_screen.cpp:7322` usa el valor tal cual (`%3u`), sin dividir | ✅ Sí (ambos lados tratan el campo como entero 0-100 directo) | Ninguna |
+| Escalado current_ma_25/50 | `can_handler.c:4049-4051` `current_ma_25` derivado como `(I50 − slope×25)×1000`; `current_ma_50 = round(current_a*1000.0f)`, ambos u16 saturados, unidad mA directa | `engineering_screen.cpp:7325` usa `currentMa50` tal cual (`%5u`, mA directos, sin dividir) | ✅ Sí (mismo factor ×1000 A→mA, ambos lados tratan el resultado como mA enteros) | Ninguna |
+| Escalado slope_ma_per_pct_x10 | `can_handler.c:4052-4053` `round(slope_a_per_pct*10000.0f)` (×1000 A→mA combinado con ×10 de 1 decimal) | ÷10.0 en `engineering_screen.cpp:7327-7328` (recupera mA/% con 1 decimal) | ✅ Sí (mismo factor ×10000 / ÷10 sobre el valor ya en mA) | Ninguna |
+| Escalado asymmetry_pct_x10 | `can_handler.c:4058-4059` `round(halfbridge_asym_pct*10.0f)`, u16 saturado | ÷10.0 en `engineering_screen.cpp:7330-7331` (recupera % con 1 decimal) | ✅ Sí | Ninguna |
+| Escalado delta_temp_c_x10 | `can_handler.c:4060-4061` `round(delta_temp_c*10.0f)`, u16 saturado | ÷10.0 en `engineering_screen.cpp:7334-7335` (recupera °C con 1 decimal) | ✅ Sí | Ninguna |
+| probable_cause / halfbridge_verdict / wheel_verdict / driver_verdict / driver_reason_mask | `can_handler.c:4054,4062,4066-4067,4069` cast directo `(uint8_t)enum`, SIN escalar | `wheel_equality_view.h`/`vehicle_data.h` los tratan como `uint8_t` directos, SIN escalar | ✅ Sí | Ninguna |
+| Endianness de TODOS los campos multi-byte (b1-2,b3-4,b5-6 en los 3 primeros field_id) | `wheel_equality_frame.h` Pack: `out[n]=v&0xFF`, `out[n+1]=(v>>8)&0xFF` (líneas 179-184,192-197,204-207); Unpack: `data[n]\|(data[n+1]<<8)` (líneas 265-267,271-273,277-278) — Little-Endian explícito y consistente | `wheel_equality_view.h:102-104,108-110,114-115` mismo patrón `data[n]\|(data[n+1]<<8)` LE | ✅ Sí | Ninguna |
+| phase2_included vs phase2_ran (consistencia semántica) | `can_handler.c:4024,4034,4068` ambos campos derivados de la MISMA variable local `phase2_included` (`WheelEqTest_Phase2Ran()`), por diseño siempre iguales en una ráfaga dada | `vehicle_data.h:842` `w.phase2Included=view.phase2Included` (byte0 bit4, todo field_id); `w.phase2Ran` solo se actualiza cuando llega FIELD_VERDICT (línea 836) — el merge no rompe la igualdad, solo puede quedar "phase2Included" más reciente que "phase2Ran" si aún no llegó el FIELD_VERDICT de esta ráfaga (transitorio, no un desajuste de contrato) | ✅ Sí (comportamiento esperado, no discrepancia) | Ninguna — redundancia intencionada en el propio STM32, el ESP32 solo la refleja fielmente |
+| Comando ESP32→STM32: SERVICE_CMD byte0/byte1 | `can_handler.c:4112,4119` `payload[0]`=acción (ya despachada en el switch exterior por `cmd`), `payload[1]`=`op` | `engineering_screen.cpp:7070-7071` `frame.data[0]=SERVICE_ACTION_WHEEL_EQUALITY`, `frame.data[1]=op` | ✅ Sí | Ninguna |
+| ACK de respuesta | `can_handler.c:4115,4133,4142,4148,4159,4165,4177,4181 CAN_SendCommandAck(0x10, ACK_*)` — siempre exactamente 1 ACK por op | `engineering_screen.cpp` (feedback genérico de `CMD_ACK`, sin bytes propios de motivo — documentado como limitación conocida, no discrepancia) | ✅ Sí | Ninguna |
+
+**Discrepancias encontradas: 2, ambas de redacción interna en el borrador de
+esta misma sesión (§3.3 de `CAN_CONTRACT_FINAL.md`), NINGUNA en el código
+fuente STM32/ESP32 ya existente — corregidas antes de cerrar esta sesión:**
+1. La fila resumen de 0x31D en §3.3 (recién añadida) describía `field_id`
+   como `1=SPEED,2=CURRENT,3=HEALTH,4=VERDICT` (1-indexado) cuando el valor
+   real de cable es 0-indexado (`0=SPEED,1=CURRENT,2=HEALTH,3=VERDICT`,
+   confirmado en `wheel_equality_frame.h:37,99-102`). **Corregido** en el
+   mismo commit de P5a, antes de publicarse.
+2. La misma fila mencionaba un inexistente "bit5 phase2_ran" en byte0 común,
+   confundiéndolo con el campo real `phase2_ran` (que SÍ existe, pero
+   únicamente dentro del field_id VERDICT, byte3 — `wheel_equality_frame.h:75,
+   131`, no en byte0 común). **Corregido**: el texto ahora aclara que
+   byte0 solo lleva `phase2_included` (bit4) y que `phase2_ran` es un campo
+   separado del field_id VERDICT.
+
+Ambas eran errores de redacción cometidos y detectados dentro de esta misma
+sesión de documentación (nunca llegaron a un commit publicado ni afectan
+código fuente ARM/ESP32 alguno). **Fuera de estas dos, no se ha encontrado
+ninguna discrepancia real de paridad STM32/ESP32** en ningún elemento cubierto
+por la tabla anterior: ID+DLC, acción+4 sub-opcodes, offset y anchura de
+absolutamente todos los campos de los 4 field_id, los 5+5+3+4 valores de los
+4 enums más el bitmask de 4 bits, el factor de escalado/unidad de cada campo
+numérico (confirmando el MISMO factor en ambos lados) y el endianness de
+todos los campos multi-byte.
+
+### P6 — Verificación final combinada
+
+- **Build ARM** (`make clean && make -j$(nproc)`): **OK**, sin warnings
+  (`-Wall -Wextra -Werror`) y **0 símbolos sin resolver**
+  (`arm-none-eabi-nm build/STM32G474RE.elf | grep " U "` vacío).
+  `text=112512, data=320, bss=18960` (`dec=131792` = `0x202d0`).
+- **Tests host STM32**: réplica exacta de
+  `.github/workflows/firmware-validation.yml` (pasos `run:` extraídos con
+  Python/PyYAML para fidelidad byte a byte con CI, no una lista reconstruida
+  a mano). 56 invocaciones de test (incluidas las 20 EPS/steering/relay/
+  centering con macros especiales `HOST_TEST_GPIO_MODEL`,
+  `HOST_TEST_GPIO_WRITE_OBSERVER`, `STEERING_Z_REQUIRED=1`,
+  `STEERING_ISOLATION_THRESHOLD_CALIBRATED=1`, y las 2 variantes
+  `RC_OVERRIDE_ENABLED=0/1`), **18668 aserciones sumadas vía "N run, M
+  failed", 0 fallos**, más 3 suites en formato no estándar todas en verde
+  (`test_relay_health_frame.c` "Checks: 27, Failures: 0",
+  `test_service_diag_frame.c` "all assertions PASS",
+  `test_wheel_equality_frame.c` "all tests passed"). Exit code 0.
+- **Tests host ESP32**: misma técnica de extracción. 42 invocaciones `g++`,
+  **1454 aserciones sumadas vía "N run, M failed", 0 fallos**, más evidencia
+  adicional de paso en formatos no estándar (246 líneas `ok: ...`, 24 líneas
+  `count=N: ... OK` de cadencia, 4 banners `ALL TESTS PASSED`, 5 líneas `...:
+  PASS` de nivel superior incl. `Wheel equality view decode tests: PASS`) —
+  **ningún "not ok"/FAIL real encontrado en ningún formato**. Incluye
+  `test_wheel_equality_view.cpp` (decode 0x31D). Exit code 0, re-ejecutado dos
+  veces con salida idéntica byte a byte (confirmado por `diff`).
+- **`scripts/check_effective_eps_wrapper.py`**: PASS ("power gate, reversal
+  coast, damped assist and observer-preserving coast OK").
+- **`scripts/check_cubeide_source_exclusions.py`**: PASS (implementaciones
+  base y puntos de entrada requeridos intactos).
+- **Static analysis** (`scripts/run_static_analysis.sh`):
+  - `cppcheck`: 0 errores.
+  - `flawfinder` (`--minlevel=3`): "No hits found".
+  - `clang-tidy`: 19 warnings preexistentes en 10 ficheros, **ninguno en
+    `wheel_equality_*`/`motor_control*`/`can_handler.c` recién tocado por
+    Hito 2** — confirmado no introducido por P1-P6.
+  - `lizard`: única nota preexistente `compute_verdicts` CCN=31
+    (`Core/Src/wheel_equality_test.c:179`) — puramente informativa (el script
+    la envuelve en `|| true`, no afecta al código de salida), parte del
+    código ya fusionado de P1-P4, no tocado esta sesión; no se ha refactorizado
+    (fuera de alcance).
+  - `scan-build`: "No bugs found." (nota de sandbox: `scan-build` no está en
+    el PATH por defecto aunque `scan-build-18` sí está instalado; requirió un
+    symlink manual local no versionado para esta verificación — no es una
+    diferencia de CI, solo una particularidad de este sandbox).
+- **PlatformIO build ESP32** (`pio run -e esp32s3`): **BLOQUEADO por el
+  sandbox** — el CLI `platformio` se instala correctamente vía `pip`, pero
+  `pio run` falla al descargar la plataforma `espressif32`
+  (`HTTPClientError`); confirmado con `curl -v` que `api.registry.platformio.org`
+  no resuelve por DNS en este sandbox, mientras que `github.com` sí resuelve
+  (200) y `api.github.com` resuelve pero requiere autenticación (403). Idéntico
+  hallazgo al de la sesión de cierre del Hito 1. **No se da por verificado.**
+  Como consecuencia, tampoco se ha podido ejecutar análisis estático de
+  PlatformIO ni CodeQL específico sobre un build real de ESP32-S3.
+- **CodeQL** (`codeql_checker`): ejecutado sobre los cambios de esta sesión
+  (documentación pura + 2 correcciones de redacción en un borrador no
+  publicado, declaradas triviales). No sustituye un análisis CodeQL C/C++
+  completo del árbol ni cubre el firmware ESP32 (bloqueado arriba). **El
+  análisis CodeQL completo del árbol y el análisis específico de ESP32 siguen
+  sin poder verificarse en este sandbox.**
+
+### Regresión — sin cambio de comportamiento (confirmado por la batería de tests host, 0 fallos; ningún fichero de test modificado esta sesión)
+
+EPS (assist-only, coast de inversión, damping por magnitud —
+`test_eps_boot_traction.c`, `check_effective_eps_wrapper.py`), homing
+(`test_centering_boot_traction.c`, `test_centering_pc12_gate.c`) y las
+guardas de la auditoría V2 (`test_steering_supervisor.c`,
+`test_steering_supervisor_io.c`), ABS/TCS (`test_drive_dynamics_policy.c`),
+obstáculos (`test_obstacle_sensor.cpp` ESP32), reparto 4x4/4x2
+(`test_motor_control.c`, incl. `test_4x2_coast_rear_stays_braked` y fases
+COAST 4x4/4x2), Ackermann (solo reduce — `test_geometry_store.c`), pedal
+(`test_pedal_plausibility.c`), los cinco stores del Bloque C
+(`tcs_tuning_store`, `geometry_store`, `shunt_store`,
+`steering_service_store`, `wheel_sensor_store`), el arbitraje HMI/mando
+(`test_rc_arbiter_policy.c` ×2 variantes RC_OVERRIDE_ENABLED, `test_mode_sync.cpp`
+ESP32) y la FSM del Hito 1 (`test_service_diag_session.c`,
+`test_service_diag_frame.c`, `test_frame_parity_cross.cpp`,
+`test_service_diag_view.cpp`) — todos ejecutados en esta pasada, **0
+fallos**.
+
+Atención específica al bypass de PWM del Hito 2: `wheeleq_active` (estático,
+`Core/Src/motor_control.c:482`) se inicializa a `false` y el bloque de
+actuación cruda al inicio de `Traction_Update()`
+(`Core/Src/motor_control_patched.c:521-541`) se salta por completo cuando es
+`false`, cayendo exactamente en la misma ruta previa
+(`auto_release_tank()`/`init_shadow()`/... línea 543 en adelante) que antes
+de que existiera Hito 2 — no hay ninguna comprobación adicional, rama nueva
+ni coste añadido en el camino normal de tracción fuera de una sesión de
+servicio activa. Confirmado también por `test_motor_control.c` (0 fallos, sin
+modificar) y por el hecho de que `wheeleq_active` solo se pone a `true` desde
+`Traction_SetWheelEqActuation()`, llamada únicamente por
+`CAN_WheelEqualityTick()`/`wheq_process_transition()` mientras
+`WheelEqTest_Active()` es verdadero.
+
+### Declaración
+
+**HITO 2 CERRADO** (P1-P6), con dos salvedades de sandbox explícitamente no
+verificadas y declaradas como tales: el build PlatformIO real de ESP32-S3
+(bloqueado por falta de acceso de red al registro `api.registry.platformio.org`)
+y, en consecuencia, el análisis estático/CodeQL específico sobre ese build
+real de ESP32 (el `codeql_checker` de esta sesión sólo confirma que los
+cambios de esta sesión —documentación— son triviales y no introducen
+alertas, no sustituye un escaneo completo del árbol ni cubre el firmware
+ESP32). Todo lo demás — build ARM (0 símbolos sin resolver), paridad
+STM32/ESP32 (verificada de forma sistemática y exhaustiva: ID+DLC, acción y
+los 4 sub-opcodes, offset/anchura de todos los campos de los 4 field_id,
+todos los valores de los 4 enums + 1 bitmask, escalado/unidades de cada campo
+numérico con el mismo factor confirmado en ambos lados, endianness de todos
+los campos multi-byte — 0 discrepancias de código encontradas, solo 2 erratas
+de redacción en el propio borrador de esta sesión, corregidas antes de
+publicarse), totalidad de tests host STM32 (18668 aserciones) + ESP32 (1454
+aserciones + evidencia adicional en formatos no estándar), ambos scripts de
+verificación, el análisis estático disponible en el sandbox
+(cppcheck/clang-tidy/flawfinder/lizard/scan-build) y la confirmación expresa
+de que el bypass de PWM del Hito 2 no altera el comportamiento de tracción
+fuera de la sesión de servicio — está verificado en verde.
+
 ## [2026-08-10] — HITO 1 CERRADO (T6): documentación CAN, paridad STM32/ESP32 y verificación final combinada
 
 Cierre del Hito 1 (T1-T6, Bloque A, PR #445 — sesión guiada SERVICE_DIAG
