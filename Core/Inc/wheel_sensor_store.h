@@ -22,12 +22,14 @@
   *
   * pulses_per_rev / circumference_mm / debounce_us are wired live into
   * sensor_manager.c (Wheel_ComputeSpeed() and the ISR DWT pre-filter via
-  * Sensor_SetDebounceUs()).  mismatch_debounce_ms is persisted/validated here
-  * and is consumed by the service-diagnostic session's own "pulses on a
-  * wheel that is not being actuated" abort check (Block A) -- it is
-  * DELIBERATELY NOT wired into safety_system.c's production WHEEL_FAULT_
-  * DEBOUNCE_MS fault-latch path, which stays on its audited compile-time
-  * constant to avoid widening that safety-critical file's dependency graph.
+  * Sensor_SetDebounceUs()).  mismatch_debounce_ms is persisted/validated/
+  * staged here but has NO wired consumer yet -- it is DELIBERATELY NOT
+  * wired into safety_system.c's production WHEEL_FAULT_DEBOUNCE_MS
+  * fault-latch path, which stays on its audited compile-time constant to
+  * avoid widening that safety-critical file's dependency graph, and
+  * Block A's service-diagnostic session currently aborts on grounded-wheel
+  * movement using its own fixed threshold (SVCDIAG_WHEEL_STATIONARY_KMH in
+  * can_handler.c) rather than this store's value.
   *
   * Safety invariants:
   *   - Editable while a service-diag test is ACTIVE (staged in RAM only),
@@ -92,8 +94,14 @@ bool WheelSensorStore_IsValid(void);
 void WheelSensorStore_GetDefaults(WheelSensorParams_t *out);
 bool WheelSensorStore_Validate(const WheelSensorParams_t *w);
 
-/** Effective (RAM-staged) values -- consumed by sensor_manager.c's wheel
- *  speed calculation / DWT debounce and safety_system.c's mismatch debounce. */
+/** Effective (RAM-staged) values -- pulses_per_rev/circumference_mm/
+ *  debounce_us are consumed by sensor_manager.c's wheel speed calculation
+ *  and DWT debounce.  mismatch_debounce_ms is persisted/validated/staged
+ *  here but has NO wired consumer yet: it is deliberately NOT read by
+ *  safety_system.c's production mismatch-fault debounce (see the module
+ *  docblock above), and Block A's service-diagnostic session currently
+ *  aborts on grounded-wheel movement using its own fixed threshold
+ *  (SVCDIAG_WHEEL_STATIONARY_KMH in can_handler.c), not this value. */
 void WheelSensorStore_GetEffective(WheelSensorParams_t *out);
 uint16_t WheelSensorStore_GetEffectivePulsesPerRev(void);
 float    WheelSensorStore_GetEffectiveCircumferenceM(void);

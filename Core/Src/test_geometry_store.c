@@ -38,6 +38,7 @@
 #include <math.h>
 
 #include "geometry_store.h"
+#include "safety_system.h"   /* real SystemState_t / Safety_Error_t (V1) */
 
 /* geometry_store.c calls Ackermann_SetGeometry() (declared in
  * motor_control.h, defined in motor_control.c) every time the staged
@@ -57,16 +58,15 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg)
     s_apply_calls++;
 }
 
-/* Safety_GetState() is called by GeometryStore_Save(); provide a stub
- * whose return value the test can flip, to exercise the STANDBY-only
- * flash-write gate (rejects outside STANDBY, accepts inside STANDBY). */
-#ifndef SAFETY_SYSTEM_H
-typedef enum { SYS_STATE_BOOT = 0, SYS_STATE_STANDBY = 1, SYS_STATE_ACTIVE = 2 } SystemState_t;
-typedef enum { SAFETY_ERROR_NONE = 0 } Safety_Error_t;
+/* Safety_GetState() is called by GeometryStore_Save(); safety_system.h
+ * (included above) already declares its prototype and the SystemState_t
+ * enum, so only the definition (a stub whose return value the test can
+ * flip) is provided here, to exercise the STANDBY-only flash-write gate
+ * (rejects outside STANDBY, accepts inside STANDBY) without linking the
+ * real safety_system.c. */
 static SystemState_t s_stub_state = SYS_STATE_STANDBY;
 SystemState_t Safety_GetState(void) { return s_stub_state; }
 Safety_Error_t Safety_GetError(void) { return SAFETY_ERROR_NONE; }
-#endif
 
 /* ---- Test harness ---- */
 static int tests_run    = 0;

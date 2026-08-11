@@ -97,9 +97,11 @@ void ShuntStore_Revert(void);
 void ShuntStore_ResetToDefaults(void);
 
 /**
- * @brief Persist the staged shunt calibration to flash and immediately
- *        "recalculate the INA226 calibration" (push the new divisor into
- *        sensor_manager.c's runtime array).
+ * @brief Persist the staged shunt calibration to flash so it survives a
+ *        reboot.  Stage() already made the candidate the effective value
+ *        (read on every cycle via ShuntStore_GetEffectiveMohm()); there is
+ *        no INA226 hardware CAL register or sensor_manager.c runtime array
+ *        for Save() to push into -- see the module docblock above.
  */
 bool ShuntStore_Save(void);
 
