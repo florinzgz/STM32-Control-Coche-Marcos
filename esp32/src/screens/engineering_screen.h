@@ -646,6 +646,53 @@ private:
     bool          svcDiagPrevValid_     = false;
     uint32_t      svcDiagPrevTableSig_[vehicle::ServiceDiagResultData::CHANNEL_COUNT] = {
         0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+
+    // ---- WHEEL EQUALITY results (Hito 2, PR #445) — a SECOND page of the
+    // SAME SubMenu::SERVICE_AUTOTEST (not a new menu entry), toggled by a
+    // small header button.  svcDiagPage_==0 is the pre-existing Hito 1
+    // step-by-step view above; ==1 is this page.  Fed exclusively by 0x31D
+    // (see esp32/src/wheel_equality_view.h) — there is no live session-
+    // status frame for WHEQ (unlike 0x31B for SVCDIAG), so the only
+    // feedback this page can show is (a) the last received per-wheel
+    // results and (b) the generic CMD_ACK of the last WHEQ_OP_* sent.
+    // Entering SERVICE_AUTOTEST fresh from the main menu always resets to
+    // page 0 (see case 24 in handleTouch()); switching pages here does not
+    // re-touch svcDiagPage_ elsewhere.
+    uint8_t       svcDiagPage_          = 0;   // 0 = paso a paso, 1 = igualdad ruedas
+    // INICIAR (WHEQ_OP_BEGIN) double-tap-confirm — same idiom/timeout as
+    // svcDiagStartPending_ above (backed by the same permanent "VEHICULO
+    // SUSPENDIDO" banner).  FASE2/ABORTAR are single-tap: BEGIN_PHASE2 is
+    // already hard-gated STM32-side on a clean Fase 1 (WheelEqTest_Phase1
+    // AllPass — see Core/Src/wheel_equality_test.c) and ABORT is idempotent.
+    bool          wheqStartPending_     = false;
+    bool          wheqStartArm_         = false;  // stamp wheqStartPendingMs_ next update()
+    unsigned long wheqStartPendingMs_   = 0;
+    unsigned long wheqLastQueryMs_      = 0;      // throttles the periodic QUERY on entry
+    static constexpr unsigned long WHEQ_QUERY_INTERVAL_MS = 500;  // mirrors SVCDIAG_QUERY_INTERVAL_MS
+    // Generic ACK feedback for the last WHEQ_OP_* sent (own dedicated
+    // fields, per-screen convention — see epsAck_/drvAck_/batAck_).  Reuses
+    // the single shared lastAckTracked_ de-dup cursor (declared above with
+    // lastAckResult_) so each screen still independently decides whether it
+    // cares about a given ACK via its own *Wait_ gate — same pattern as
+    // BATTERY_LIMITS/DRIVE_TUNING.
+    enum class WheqAck : uint8_t { NONE = 0, OK, REJECTED, BLOCKED, INVALID, TIMEOUT };
+    WheqAck       wheqAck_              = WheqAck::NONE;
+    unsigned long wheqAckMs_            = 0;
+    bool          wheqAckWait_          = false;
+    unsigned long wheqAckWaitSentMs_    = 0;
+    static constexpr unsigned long WHEQ_ACK_WAIT_TIMEOUT_MS = 2000;  // mirrors BAT_SAVE_TIMEOUT_MS
+    static constexpr unsigned long WHEQ_ACK_CLEAR_MS = 4000;
+    bool          wheqForcePaint_       = false;
+    // Previous displayed per-ROW (display position, not wheel index) hash —
+    // a wheel's row can move (results are sorted by deviation% DESCENDING
+    // per the mandatory spec) so the wheel index occupying a row is itself
+    // part of the hash: a re-sort alone forces that row to repaint even if
+    // no underlying value changed.
+    uint32_t      wheqPrevRowSig_[vehicle::NUM_WHEELS] = {
+        0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    void sendWheelEqualityOp(uint8_t op);
+    void drawWheelEquality();
+    void refreshWheelEquality(bool force);
 };
 
 #endif // ENGINEERING_SCREEN_H

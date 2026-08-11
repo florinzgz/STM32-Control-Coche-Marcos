@@ -509,6 +509,20 @@ static void decodeServiceDiagResult(const CanFrame& f, vehicle::VehicleData& dat
     data.setServiceDiagResult(v.channel, v, millis());
 }
 
+// 0x31D DIAG_WHEEL_EQUALITY — one 0x31D sub-frame (one wheel, one field_id)
+// of the wheel-equality / BTS7960 half-bridge health self-test results
+// burst (Hito 2, PR #445). A full burst is 16 frames (4 field_ids x 4
+// wheels); each is merged into the matching wheel's composite record by
+// VehicleData::setWheelEquality() — see esp32/src/wheel_equality_view.h and
+// Core/Inc/wheel_equality_frame.h for the wire contract.
+static void decodeWheelEquality(const CanFrame& f, vehicle::VehicleData& data) {
+    wheel_equality_view::FrameView v;
+    if (!wheel_equality_view::decode(f.data, f.data_length_code, v)) {
+        return;
+    }
+    data.setWheelEquality(v, millis());
+}
+
 // 0x316 DIAG_STEERING_CENTERING — steering homing telemetry (DLC 8).
 // Frame layout mirrors Core/Inc/steering_centering_frame.h; decoded by the
 // shared pure helper so the HMI and host test share one deserialiser.
@@ -843,6 +857,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_BATTERY_LIMITS:  decodeBatteryLimits(frame, data);     break;
             case can::DIAG_SERVICE_SESSION: decodeServiceDiagSession(frame, data); break;
             case can::DIAG_TEST_RESULT:     decodeServiceDiagResult(frame, data);  break;
+            case can::DIAG_WHEEL_EQUALITY:  decodeWheelEquality(frame, data);      break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;
