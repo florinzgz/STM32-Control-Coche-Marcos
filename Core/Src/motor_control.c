@@ -7,6 +7,7 @@
 
 #include "motor_control.h"
 #include "ackermann.h"
+#include "ackermann_diff.h"
 #include "eps_params.h"
 #include "eps_output_policy.h"
 #include "steering_eps.h"
@@ -21,6 +22,21 @@
 #include "motion_inhibit.h"
 #include <math.h>
 #include <stdbool.h>
+
+/* ackermann_diff.h defines its own FL/FR/RL/RR enum (ACKERMANN_DIFF_*) to
+ * stay HAL-free and independently host-testable — cross-check at compile
+ * time that it never silently drifts from motor_control.h's MOTOR_FL/FR/
+ * RL/RR, which compute_ackermann_differential()'s wrapper below relies on
+ * being index-compatible (same pattern as motor_control_patched.c's
+ * MOTOR_MODE_* / TRACTION_OUTPUT_MODE_* asserts). */
+_Static_assert((int)ACKERMANN_DIFF_FL == MOTOR_FL,
+               "ackermann_diff FL index must match motor_control.h");
+_Static_assert((int)ACKERMANN_DIFF_FR == MOTOR_FR,
+               "ackermann_diff FR index must match motor_control.h");
+_Static_assert((int)ACKERMANN_DIFF_RL == MOTOR_RL,
+               "ackermann_diff RL index must match motor_control.h");
+_Static_assert((int)ACKERMANN_DIFF_RR == MOTOR_RR,
+               "ackermann_diff RR index must match motor_control.h");
 
 /* ---- NaN / Inf float validation ----
  *
@@ -321,29 +337,17 @@ static inline float sanitize_float(float val, float safe_default)
 
 /* ---- Ackermann differential torque correction ----
  *
- * Simplified Ackermann geometry: when the vehicle is turning, the
- * inside wheels trace a smaller radius arc than the outside wheels.
- * To prevent inside wheel scrubbing (understeer) and improve
- * cornering stability, the torque is biased toward the outside
- * wheels and reduced on the inside wheels.
- *
- * Geometry:
- *   R = wheelbase / tan(|steering_angle|)   (turn center radius)
- *   left_ratio  = (R - track/2) / R
- *   right_ratio = (R + track/2) / R
- *   (swapped for right turns)
- *
- * The correction is bounded to ±15% maximum differential to avoid
- * aggressive torque imbalance.  Below a 2° deadband, no correction
- * is applied (straight-line driving).
+ * The calculation itself (deadband/tan_angle guards, correction formula,
+ * reduction-only clamp) lives in ackermann_diff.h/.c — extracted so it can
+ * be host-tested directly (PR #445 Bloque C, llamapreview P2 finding; see
+ * test_ackermann_diff.c).  ACKERMANN_DEADBAND_DEG / ACKERMANN_MAX_DIFF are
+ * defined there and pulled in via the #include above.
  *
  * Pipeline position:
  *   base_pwm → axle_split → degraded_limit → obstacle_scale
  *   → ackermann_diff[i] → wheel_scale[i] (ABS/TCS) → final PWM
  *
  * Coexists with ABS, TCS, obstacle_scale, and degraded mode.          */
-#define ACKERMANN_DEADBAND_DEG   2.0f    /* No correction below this    */
-#define ACKERMANN_MAX_DIFF       0.15f   /* Max ±15% differential       */
 
 /* ---- EPS high-speed assist fade ----
  * Steering assist is gradually reduced at higher speeds for safety.
@@ -390,6 +394,10 @@ static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_WIDTH_M;
 static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
+/* Last computed per-wheel Ackermann differential, snapshotted every
+ * Traction_Update() cycle.  Read-only telemetry for Traction_GetAckermannDiff()
+ * (service-diag C6 wheel-equality test). */
+static float acker_diff_snapshot[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 /* ---- EPS torque-assist state ---- */
 static float   eps_omega_filt     = 0.0f;   /* EMA-filtered angular velocity  */
@@ -461,6 +469,21 @@ static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*
  * already force the traction demand to 0 (see main.c:483-484), so this
  * is the strictest fail-safe boot state.                                */
 static GearPosition_t current_gear = GEAR_NEUTRAL;
+
+/* ---- Hito 2 (PR #445) wheel-equality self-test RAW actuation feed ----
+ * Written once per cycle by can_handler.c's CAN_WheelEqualityTick() via
+ * Traction_SetWheelEqActuation() (mirrors the existing Traction_SetDemand()
+ * cross-module wiring pattern), consumed at the very top of
+ * Traction_Update().  wheeleq_active gates a raw-PWM bypass path that
+ * skips gear/pedal/ABS/TCS/Ackermann/ramp AND, critically,
+ * TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear() — see the
+ * bypass block inside Traction_Update() for the full rationale. Defaults
+ * to inactive/all-zero so normal driving is byte-for-byte unaffected
+ * whenever the self-test is not running.                                 */
+static uint8_t wheeleq_wheel_mask = 0U;
+static uint8_t wheeleq_pwm_pct    = 0U;
+static bool    wheeleq_forward    = true;
+static bool    wheeleq_active     = false;
 
 /* ---- Runtime-configurable gear power limits (R-2) ----
  * Stored as percent (0..100) for an exact match with the Engineering-menu
@@ -1197,89 +1220,27 @@ void Traction_GetDriveTuning(DriveTuning_t *out)
 /* ==================================================================
  *  Ackermann Differential Torque Correction
  *
- *  Computes per-wheel torque multipliers based on the current
- *  steering angle using simplified Ackermann geometry.
- *
- *  For a turn of radius R (measured to the vehicle centre):
- *    left_wheel_radius  = R - track/2
- *    right_wheel_radius = R + track/2
- *
- *  The linear velocity of each wheel is proportional to its radius:
- *    left_ratio  = (R - track/2) / R = 1 - track/(2R)
- *    right_ratio = (R + track/2) / R = 1 + track/(2R)
- *
- *  For a left turn (positive angle), left wheels are inside;
- *  for a right turn (negative angle), right wheels are inside.
- *
- *  The correction is bounded to ±ACKERMANN_MAX_DIFF (15%) and
- *  each multiplier is clamped to [0, 1].
+ *  Thin wrapper around the pure AckermannDiff_Compute() (ackermann_diff.h):
+ *  sanitises the input angle, delegates the actual geometry/clamp/guard
+ *  math (see ackermann_diff.h for the full algorithm description), then
+ *  sanitises the outputs.  This is the ONLY place ackermann_wheelbase /
+ *  ackermann_track (the runtime statics Ackermann_SetGeometry() writes)
+ *  are read for the differential — passing them explicitly here, instead
+ *  of letting the calculation read a macro or a static internally, is what
+ *  keeps Ackermann_SetGeometry() from being silently nullified again (PR
+ *  #445 Bloque C).
  *
  *  diff_out[4]: FL, FR, RL, RR multipliers (1.0 = no change)
  * ================================================================== */
 
 static void compute_ackermann_differential(float steer_deg, float diff_out[4])
 {
-    /* Default: no correction (straight line or below deadband) */
-    diff_out[MOTOR_FL] = 1.0f;
-    diff_out[MOTOR_FR] = 1.0f;
-    diff_out[MOTOR_RL] = 1.0f;
-    diff_out[MOTOR_RR] = 1.0f;
-
-    /* Sanitize input: NaN/Inf would bypass all comparisons below */
+    /* Sanitize input: NaN/Inf would bypass all comparisons in the pure
+     * calculation below. */
     steer_deg = sanitize_float(steer_deg, 0.0f);
 
-    float abs_angle = fabsf(steer_deg);
-    if (abs_angle < ACKERMANN_DEADBAND_DEG) return;
-
-    /* Compute turn radius from Ackermann geometry:
-     * R = wheelbase / tan(|angle|) — distance from turn center
-     * to the midpoint of the rear axle.                            */
-    float angle_rad = abs_angle * (float)M_PI / 180.0f;
-    float tan_angle = tanf(angle_rad);
-
-    /* Guard against very small tan (near-zero angle already
-     * filtered by deadband, but protect against float edge cases) */
-    if (tan_angle < 0.001f) return;
-
-    float R = WHEELBASE_M / tan_angle;
-
-    /* Compute correction term: half_track / R.
-     * This is the fractional velocity difference between inside
-     * and outside wheels relative to the vehicle center speed.     */
-    float half_track = TRACK_WIDTH_M / 2.0f;
-    float correction = half_track / R;
-
-    /* Bound correction to maximum differential */
-    if (correction > ACKERMANN_MAX_DIFF)
-        correction = ACKERMANN_MAX_DIFF;
-
-    /* Apply correction:
-     *   Positive steer_deg = left turn → left wheels inside (slower)
-     *   Negative steer_deg = right turn → right wheels inside (slower)
-     *
-     * inside_mult  = 1.0 - correction  (reduce inside wheels)
-     * outside_mult = 1.0 + correction  (increase outside wheels)
-     * Then clamp outside to 1.0 to never exceed base torque.       */
-    float inside_mult  = 1.0f - correction;
-    float outside_mult = 1.0f + correction;
-
-    /* Clamp: never exceed 1.0 per wheel */
-    if (outside_mult > 1.0f) outside_mult = 1.0f;
-    if (inside_mult  < 0.0f) inside_mult  = 0.0f;
-
-    if (steer_deg > 0.0f) {
-        /* Left turn: left wheels are inside */
-        diff_out[MOTOR_FL] = inside_mult;
-        diff_out[MOTOR_FR] = outside_mult;
-        diff_out[MOTOR_RL] = inside_mult;
-        diff_out[MOTOR_RR] = outside_mult;
-    } else {
-        /* Right turn: right wheels are inside */
-        diff_out[MOTOR_FL] = outside_mult;
-        diff_out[MOTOR_FR] = inside_mult;
-        diff_out[MOTOR_RL] = outside_mult;
-        diff_out[MOTOR_RR] = inside_mult;
-    }
+    AckermannDiff_Compute(steer_deg, ackermann_wheelbase, ackermann_track,
+                           diff_out);
 
     /* Sanitize all outputs */
     for (uint8_t i = 0; i < 4; i++) {
@@ -1377,6 +1338,29 @@ float Traction_GetBrakeReleasePct(void)
     return sanitize_float(brake_release_pct, 0.0f);
 }
 
+/* Hito 2 (PR #445) — wheel-equality self-test RAW actuation feed.  See the
+ * static wheeleq_* declarations above and the bypass block at the top of
+ * Traction_Update() for the full rationale.  Called once per cycle by
+ * can_handler.c's CAN_WheelEqualityTick(); mirrors the existing
+ * Traction_SetDemand() cross-module wiring pattern (can_handler.c calls a
+ * setter, motor_control.c's static state is consumed inside
+ * Traction_Update()).  wheel_mask bit i: 0=FL,1=FR,2=RL,3=RR.  pwm_pct is
+ * clamped to 0..100 defensively (the real ceiling is enforced by the pure
+ * wheel_equality_test.c decision core against SVCDIAG_PWM_ABS_MAX_PCT;
+ * this clamp is only a last-resort guard against a corrupt caller value).
+ * active=false forces an immediate release to the normal pipeline: the
+ * very next Traction_Update() call runs its ordinary gear/pedal/ABS/TCS
+ * logic, no residual raw PWM survives. */
+void Traction_SetWheelEqActuation(uint8_t wheel_mask, uint8_t pwm_pct,
+                                  bool forward, bool active)
+{
+    if (pwm_pct > 100U) pwm_pct = 100U;
+    wheeleq_wheel_mask = wheel_mask & 0x0FU;
+    wheeleq_pwm_pct    = pwm_pct;
+    wheeleq_forward    = forward;
+    wheeleq_active     = active;
+}
+
 void Traction_Update(void)
 {
     /* --- Power-ready gate ---
@@ -1402,6 +1386,18 @@ void Traction_Update(void)
             return;  /* Relays not yet settled — suppress all motor output */
         }
     }
+
+    /* NOTE — Hito 2 (PR #445) wheel-equality RAW actuation bypass:
+     * this base function (Traction_Update_Base() once macro-renamed by
+     * motor_control_patched.c) is NOT the right place for the bypass,
+     * because the wrapper's REAL Traction_Update() unconditionally calls
+     * TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear() AFTER
+     * this function returns (using its own shadow-register readback),
+     * which would re-equalize anything decided here.  The actual bypass
+     * lives in motor_control_patched.c's Traction_Update(), BEFORE it
+     * calls this function — see wheeleq_active there for the full
+     * rationale.  wheeleq_wheel_mask/pwm_pct/forward/active above are
+     * shared (via #include) with that wrapper.                         */
 
     /* --- Gear P: Park Hold ---
      * Apply a PASSIVE electromagnetic brake via the H-bridge to simulate a
@@ -1857,6 +1853,11 @@ void Traction_Update(void)
             for (int i = 0; i < 4; i++) acker_diff[i] = 1.0f;
         }
     }
+    /* Snapshot for Traction_GetAckermannDiff(): the service-diag wheel
+     * equality test (Block C6) reads this every cycle to confirm the
+     * computed differential is exactly 1.000 on all four wheels with the
+     * steering wheel centred, without duplicating this computation. */
+    for (int i = 0; i < 4; i++) acker_diff_snapshot[i] = acker_diff[i];
 
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
@@ -2640,6 +2641,17 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg)
     ackermann_wheelbase  = wheelbase_m;
     ackermann_track      = track_m;
     ackermann_max_inner  = maxInnerDeg;
+}
+
+float Traction_GetAckermannDiff(uint8_t wheel)
+{
+    if (wheel >= 4U) return 1.0f;
+    return acker_diff_snapshot[wheel];
+}
+
+float Traction_GetAckermannDeadbandDeg(void)
+{
+    return ACKERMANN_DEADBAND_DEG;
 }
 
 /* ==================================================================

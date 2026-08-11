@@ -45,10 +45,19 @@ extern "C" {
 /* ---- Error log entry ---- */
 typedef struct {
     uint32_t timestamp_ms;     /* HAL_GetTick() at time of error              */
-    uint8_t  error_code;       /* Safety_Error_t enum value                   */
-    uint8_t  subsystem;        /* 0=GLOBAL, 1=MOTOR, 2=SENSOR, 3=CAN         */
+    uint8_t  error_code;       /* Safety_Error_t enum value (0-16), OR a
+                                * pseudo-event code >= 0x40 for a non-fault
+                                * diagnostic event (e.g. SVCDIAG_DTC_CODE_ENTER/
+                                * _EXIT in can_handler.c, SERVICE_DIAG self-test
+                                * session, Bloque A) — deliberately outside the
+                                * Safety_Error_t range so it can never be
+                                * confused with a real fault.                */
+    uint8_t  subsystem;        /* 0=GLOBAL, 1=MOTOR, 2=SENSOR, 3=CAN,
+                                * 4=SERVICE_DIAG (self-test session)          */
     uint8_t  system_state;     /* SystemState_t at time of error              */
-    uint8_t  fault_flags;      /* Heartbeat fault flags at time of error      */
+    uint8_t  fault_flags;      /* Heartbeat fault flags at time of error, OR
+                                * (for a SVCDIAG_DTC_CODE_EXIT pseudo-event)
+                                * the ServiceDiagReason_t exit/abort cause    */
     uint8_t  reset_cause;      /* MCU reset cause flags (boot only)           */
     uint8_t  i2c_fail_count;   /* I2C consecutive failure count               */
     uint8_t  reserved[2];      /* Padding for 4-byte alignment                */
@@ -73,8 +82,9 @@ void ErrorLog_Init(void);
  *         Appends to the ring buffer and auto-saves to flash.
  *         If the buffer is full, the oldest entry is overwritten.
  *
- * @param  error_code   Safety error code (Safety_Error_t)
- * @param  subsystem    Diagnostic subsystem (0-3)
+ * @param  error_code   Safety error code (Safety_Error_t), or a SVCDIAG_DTC_*
+ *                      pseudo-event code (>= 0x40) for a non-fault event.
+ * @param  subsystem    Diagnostic subsystem (0-4; 4=SERVICE_DIAG)
  * @param  system_state Current system state (SystemState_t)
  * @param  fault_flags  Current heartbeat fault flags
  */

@@ -135,7 +135,7 @@ test_battery_limits: 42 run, 0 failed
 -- test_steering_centering_diag.c
 steering_centering_diag: 44 run, 0 failed
 -- test_steering_centering_frame.c
-steering_centering_frame: 136 run, 0 failed
+steering_centering_frame: 179 run, 0 failed
 -- test_pedal_cal_limits.c
 === pedal_cal_limits: 6 run, 0 failed ===
 -- test_pedal_cal_session.c
@@ -199,8 +199,34 @@ test_classifier_scenarios
 test_frame_roundtrip
 ina226_ch5_frame: 28 run, 0 failed
 RESULT: PASS
+-- test_can_rx_policy.c
+test_can_rx_policy: 12 run, 0 failed
+-- test_holdover_service_policy.c
+test_holdover_service_policy: 10 run, 0 failed
 -- test_loop_diag.c
 --- loop_diag tests: 18 run, 0 failed ---
+-- test_tcs_tuning_store.c
+test_tcs_tuning_store: 36 run, 0 failed
+-- test_geometry_store.c
+test_geometry_store: 31 run, 0 failed
+-- test_shunt_store.c
+test_shunt_store: 41 run, 0 failed
+-- test_steering_service_store.c
+test_steering_service_store: 38 run, 0 failed
+-- test_wheel_sensor_store.c
+test_wheel_sensor_store: 39 run, 0 failed
+-- test_service_diag_frame.c
+service_diag_frame: all assertions PASS
+-- test_service_diag_session.c
+service_diag_session: 226 run, 0 failed
+-- test_wheel_equality_frame.c
+wheel_equality_frame: all tests passed
+-- test_wheel_equality_test.c
+wheel_equality_test: 193 run, 0 failed
+-- test_rc_arbiter_policy.c (local-only bench build)
+test_rc_arbiter_policy: 5 run, 0 failed (enabled=0)
+-- test_rc_arbiter_policy.c (future RC-enabled contract)
+test_rc_arbiter_policy: 8 run, 0 failed (enabled=1)
 -- test_relay_seq_eps.c
 ==== test_relay_seq_eps: 1317 run, 0 failed ====
 -- test_eps_boot_traction.c

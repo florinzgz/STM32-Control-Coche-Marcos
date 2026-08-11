@@ -28,6 +28,8 @@
 #include "relay_health_view.h"
 #include "ina226_ch5_view.h"
 #include "traction_limit_diag_view.h"
+#include "service_diag_view.h"
+#include "wheel_equality_view.h"
 
 namespace vehicle {
 
@@ -456,6 +458,78 @@ struct Ina226Ch5DiagData {
 };
 
 // -------------------------------------------------------------------------
+// 0x31B DIAG_SERVICE_SESSION — SERVICE_DIAG self-test session status
+// (Bloque A, PR #445 Hito 1).  See esp32/src/service_diag_view.h and
+// Core/Inc/service_diag_frame.h.
+// -------------------------------------------------------------------------
+struct ServiceDiagSessionData {
+    service_diag_view::SessionView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x31C DIAG_TEST_RESULT — latest per-channel SERVICE_DIAG step result.
+// Indexed by ServiceDiagChannel_t wire value (can::SVCDIAG_CH_FL..STEERING).
+// Each slot holds only the MOST RECENT result for that channel — this is a
+// per-channel status TABLE, not a chronological log — and is overwritten in
+// place whenever a fresh 0x31C names that channel.
+// -------------------------------------------------------------------------
+struct ServiceDiagResultData {
+    static constexpr uint8_t CHANNEL_COUNT = 5;  // FL,FR,RL,RR,STEERING
+    service_diag_view::TestResultView view[CHANNEL_COUNT]{};
+    bool          valid[CHANNEL_COUNT]       = {false, false, false, false, false};
+    unsigned long timestampMs[CHANNEL_COUNT] = {0, 0, 0, 0, 0};
+};
+
+// -------------------------------------------------------------------------
+// 0x31D DIAG_WHEEL_EQUALITY — wheel-equality / BTS7960 half-bridge health
+// self-test results (Hito 2, PR #445).  One results burst is 16 CAN frames
+// (4 field_ids x 4 wheels: SPEED, CURRENT, HEALTH, VERDICT) — each
+// wheel_equality_view::decode() call only ever yields ONE field_id at a
+// time, so this slot MERGES all field_ids seen so far for a wheel into one
+// composite record.  fieldsSeen tracks which of the 4 field_ids have
+// actually arrived (bit i = 1<<field_id) so the HMI can tell a still-
+// incomplete row (e.g. only SPEED received so far) from a fully populated
+// one, without inventing zeros as real data.
+// See esp32/src/wheel_equality_view.h and Core/Inc/wheel_equality_frame.h.
+// -------------------------------------------------------------------------
+struct WheelEqualityWheelData {
+    // FIELD_SPEED
+    uint16_t pulsesPerSec25       = 0;
+    uint16_t pulsesPerSec50       = 0;
+    uint16_t normalizedSpeedX1000 = 0;   // /1000.0 for the real value
+    uint8_t  deviationPct         = 0;   // 0..100, magnitude only
+
+    // FIELD_CURRENT
+    uint16_t currentMa25        = 0;
+    uint16_t currentMa50        = 0;     // the HMI's single "corriente" column
+    uint16_t slopeMaPerPctX10   = 0;     // /10.0 for mA per PWM-percent
+    uint8_t  probableCause      = 0;     // WHEQ_CAUSE_*
+
+    // FIELD_HEALTH
+    uint16_t asymmetryPctX10    = 0;     // /10.0 for the real percent
+    uint16_t deltaTempCX10      = 0;     // /10.0 for degrees C; 0 if !tempPresent
+    uint8_t  halfBridgeVerdict  = 0;     // WHEQ_HALFBRIDGE_*
+    bool     tempPresent        = false;
+
+    // FIELD_VERDICT
+    uint8_t  wheelVerdict       = 0;     // WHEQ_WHEEL_VERDICT_*
+    uint8_t  driverVerdict      = 0;     // WHEQ_DRIVER_*
+    bool     phase2Ran          = false;
+    uint8_t  driverReasonMask   = 0;     // WHEQ_DRIVER_REASON_* bitmask
+
+    bool          phase2Included = false;  // byte0 bit4 of the last sub-frame received
+    uint8_t       fieldsSeen     = 0;      // bitmask: bit(field_id) set once received
+    bool          valid          = false;  // true once ANY field_id has been received
+    unsigned long timestampMs    = 0;      // stamp of the MOST RECENT sub-frame
+};
+
+struct WheelEqualityData {
+    WheelEqualityWheelData wheel[NUM_WHEELS]{};
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -722,6 +796,59 @@ public:
     void setEpsParams(const EpsParamsData& d)       { epsParams_ = d; }
     void setDriveTuning(const DriveTuningData& d)   { driveTuning_ = d; }
     void setBatteryLimits(const BatteryLimitsData& d) { batteryLimits_ = d; }
+    void setServiceDiagSession(const ServiceDiagSessionData& d) { serviceDiagSession_ = d; }
+    void setServiceDiagResult(uint8_t channel, const service_diag_view::TestResultView& v,
+                              unsigned long ts) {
+        if (channel >= ServiceDiagResultData::CHANNEL_COUNT) return;
+        serviceDiagResult_.view[channel]       = v;
+        serviceDiagResult_.valid[channel]      = true;
+        serviceDiagResult_.timestampMs[channel] = ts;
+    }
+
+    // Merges ONE decoded 0x31D sub-frame (one field_id) into the matching
+    // wheel's composite record. Only the fields for `view.fieldId` are
+    // copied — the other field groups keep whatever was last merged.
+    void setWheelEquality(const wheel_equality_view::FrameView& view, unsigned long ts) {
+        if (view.wheel >= NUM_WHEELS) return;
+        WheelEqualityWheelData& w = wheelEquality_.wheel[view.wheel];
+        switch (view.fieldId) {
+        case can::WHEQ_FIELD_SPEED:
+            w.pulsesPerSec25       = view.pulsesPerSec25;
+            w.pulsesPerSec50       = view.pulsesPerSec50;
+            w.normalizedSpeedX1000 = view.normalizedSpeedX1000;
+            w.deviationPct         = view.deviationPct;
+            break;
+        case can::WHEQ_FIELD_CURRENT:
+            w.currentMa25      = view.currentMa25;
+            w.currentMa50      = view.currentMa50;
+            w.slopeMaPerPctX10 = view.slopeMaPerPctX10;
+            w.probableCause    = view.probableCause;
+            break;
+        case can::WHEQ_FIELD_HEALTH:
+            w.asymmetryPctX10   = view.asymmetryPctX10;
+            w.deltaTempCX10     = view.deltaTempCX10;
+            w.halfBridgeVerdict = view.halfBridgeVerdict;
+            w.tempPresent       = view.tempPresent;
+            break;
+        case can::WHEQ_FIELD_VERDICT:
+            w.wheelVerdict     = view.wheelVerdict;
+            w.driverVerdict    = view.driverVerdict;
+            w.phase2Ran        = view.phase2Ran;
+            w.driverReasonMask = view.driverReasonMask;
+            break;
+        default:
+            return;   // unreachable (decode() already rejects fieldId>3)
+        }
+        w.phase2Included = view.phase2Included;
+        w.fieldsSeen    |= static_cast<uint8_t>(1U << view.fieldId);
+        w.valid          = true;
+        w.timestampMs    = ts;
+    }
+
+    // Clears every wheel's WHEQ result (e.g. when a fresh BEGIN starts a new
+    // results burst) so stale PASS/FAIL text never lingers from a previous
+    // run under a wheel that hasn't reported yet this time.
+    void resetWheelEquality() { wheelEquality_ = WheelEqualityData{}; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -767,6 +894,9 @@ public:
     const EpsParamsData&    epsParams()    const { return epsParams_; }
     const DriveTuningData&  driveTuning()  const { return driveTuning_; }
     const BatteryLimitsData& batteryLimits() const { return batteryLimits_; }
+    const ServiceDiagSessionData& serviceDiagSession() const { return serviceDiagSession_; }
+    const ServiceDiagResultData&  serviceDiagResult()  const { return serviceDiagResult_; }
+    const WheelEqualityData&      wheelEquality()      const { return wheelEquality_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -813,6 +943,9 @@ private:
     EpsParamsData    epsParams_;
     DriveTuningData  driveTuning_;
     BatteryLimitsData batteryLimits_;
+    ServiceDiagSessionData serviceDiagSession_;
+    ServiceDiagResultData  serviceDiagResult_;
+    WheelEqualityData      wheelEquality_;
 };
 
 } // namespace vehicle

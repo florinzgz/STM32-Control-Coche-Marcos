@@ -13,6 +13,12 @@ extern "C" {
 /* ---- Initialization ---- */
 void Sensor_Init(void);
 
+/** Recompute the ISR-facing µs-level DWT debounce window (sensor_debounce_
+ *  cycles) from a new microsecond value.  Cheap (one multiply); called by
+ *  wheel_sensor_store.c whenever the runtime-tunable debounce window (C5)
+ *  changes.  Never call this from an ISR context. */
+void Sensor_SetDebounceUs(uint16_t debounce_us);
+
 /* ---- Wheel speed (EXTI interrupt-driven) ---- */
 void Wheel_FL_IRQHandler(void);
 void Wheel_FR_IRQHandler(void);

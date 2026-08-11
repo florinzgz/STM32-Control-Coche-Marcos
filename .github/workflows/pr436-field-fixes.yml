@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U([[:space:]]|$)' Core/Inc/steering_centering.h
           grep -Eq '^#define REVERSE_DEADTIME_MS[[:space:]]+100U$' Core/Src/steering_centering_patched.c
           grep -Eq '^#define ENDSTOP_CONFIRM_SAMPLES[[:space:]]+2U$' Core/Src/steering_centering_patched.c
           grep -Eq '^#define ENDSTOP_HARD_CURRENT_MA[[:space:]]+20000U$' Core/Src/steering_centering_patched.c

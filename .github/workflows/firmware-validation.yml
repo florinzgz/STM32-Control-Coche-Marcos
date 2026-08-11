@@ -101,7 +101,17 @@ jobs:
               Core/Src/test_ina226_ch5_frame.c \
               Core/Src/test_can_rx_policy.c \
               Core/Src/test_holdover_service_policy.c \
-              Core/Src/test_loop_diag.c; do
+              Core/Src/test_loop_diag.c \
+              Core/Src/test_tcs_tuning_store.c \
+              Core/Src/test_geometry_store.c \
+              Core/Src/test_shunt_store.c \
+              Core/Src/test_steering_service_store.c \
+              Core/Src/test_wheel_sensor_store.c \
+              Core/Src/test_service_diag_frame.c \
+              Core/Src/test_service_diag_session.c \
+              Core/Src/test_wheel_equality_frame.c \
+              Core/Src/test_wheel_equality_test.c \
+              Core/Src/test_ackermann_diff.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
               case "$src" in
@@ -127,6 +137,14 @@ jobs:
                 Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
                 Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
                 Core/Src/test_gear_limits.c) extra="Core/Src/gear_limits_store.c" ;;
+                Core/Src/test_tcs_tuning_store.c) extra="Core/Src/tcs_tuning_store.c" ;;
+                Core/Src/test_geometry_store.c) extra="Core/Src/geometry_store.c" ;;
+                Core/Src/test_shunt_store.c) extra="Core/Src/shunt_store.c" ;;
+                Core/Src/test_steering_service_store.c) extra="Core/Src/steering_service_store.c" ;;
+                Core/Src/test_wheel_sensor_store.c) extra="Core/Src/wheel_sensor_store.c" ;;
+                Core/Src/test_service_diag_session.c) extra="Core/Src/service_diag_session.c" ;;
+                Core/Src/test_wheel_equality_test.c) extra="Core/Src/wheel_equality_test.c" ;;
+                Core/Src/test_ackermann_diff.c) extra="Core/Src/ackermann_diff.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -502,6 +520,18 @@ jobs:
               esp32/src/test_frame_parity_cross.cpp \
               -o /tmp/test_frame_parity_cross
             /tmp/test_frame_parity_cross
+
+            echo "-- test_service_diag_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -ICore/Inc -Iesp32/src -Iesp32/include \
+              esp32/src/test_service_diag_view.cpp -lm \
+              -o /tmp/test_service_diag_view
+            /tmp/test_service_diag_view
+
+            echo "-- test_wheel_equality_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -ICore/Inc -Iesp32/src -Iesp32/include \
+              esp32/src/test_wheel_equality_view.cpp -lm \
+              -o /tmp/test_wheel_equality_view
+            /tmp/test_wheel_equality_view
 
             echo "-- test_display_recovery.cpp"
             g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \

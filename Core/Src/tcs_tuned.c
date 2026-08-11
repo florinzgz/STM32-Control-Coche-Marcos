@@ -15,6 +15,7 @@
 #include "motor_control.h"
 #include "service_mode.h"
 #include "drive_dynamics_policy.h"
+#include "tcs_tuning_store.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -100,11 +101,17 @@ void TCS_Update_Tuned(void)
         }
 
         const float reference = TcsTuned_RobustReference(speed, i);
-        const bool slipping = DriveDynamics_TcsIsSlipping(reference, speed[i]);
+        const bool slipping = DriveDynamics_TcsIsSlipping(reference, speed[i],
+            TcsTuningStore_GetMinReferenceKmh(),
+            TcsTuningStore_GetSlipThresholdPct());
         if (slipping) slip_mask |= (uint8_t)(1U << i);
 
         s_tcs_reduction[i] =
-            DriveDynamics_TcsReductionNext(s_tcs_reduction[i], slipping, dt);
+            DriveDynamics_TcsReductionNext(s_tcs_reduction[i], slipping, dt,
+                TcsTuningStore_GetInitialReduction(),
+                TcsTuningStore_GetReductionRatePerS(),
+                TcsTuningStore_GetRecoveryRatePerS(),
+                TcsTuningStore_GetMaxReduction());
         const float scale = 1.0f - s_tcs_reduction[i];
         if (scale < safety_status.wheel_scale[i]) {
             safety_status.wheel_scale[i] = scale;

@@ -1,5 +1,696 @@
 # PROJECT_CHANGELOG
 
+## [2026-08-11] — PR #445 (BLOQUE C): cobertura de test que faltaba para el fix de Ackermann (llamapreview P2)
+
+Continuación de la PR #445: añade la cobertura de test que faltaba para el
+fix de Ackermann del Bloque C (hallazgo `llamapreview`, P2 — ver auditoría
+del 2026-08-09 más abajo). Alcance estrictamente limitado a esto: un test
+nuevo y la extracción mínima imprescindible para hacerlo posible. Sin cambio
+de comportamiento de producción.
+
+### Causa raíz del hallazgo
+
+`compute_ackermann_differential()` (`Core/Src/motor_control.c`, función
+`static`) es exactamente la función que estuvo rota en silencio durante el
+Bloque C: leía los macros de compilación `WHEELBASE_M`/`TRACK_WIDTH_M`
+(`vehicle_physics.h`) en vez de los estáticos de runtime
+`ackermann_wheelbase`/`ackermann_track` que `Ackermann_SetGeometry()`
+escribe, anulando el setter sin que ningún test fallara. Los tests de
+`geometry_store` (`Core/Src/test_geometry_store.c`) solo verifican, mediante
+un stub que graba la llamada, que el store invoca
+`Ackermann_SetGeometry()` — nadie comprobaba que el CÁLCULO consumiera esos
+valores. El comentario de `test_geometry_store.c:44-51` afirmaba
+incorrectamente que esa cobertura existía "covered by test_motor_control.c";
+`test_motor_control.c` (1673 líneas) no contiene ninguna referencia a
+"Ackermann" — el comentario era en sí mismo parte del hueco de cobertura.
+
+### a) Extracción para hacer testeable el cálculo (opción 1, preferida por la tarea)
+
+`compute_ackermann_differential()` no se podía enlazar directamente en un
+test host sin arrastrar todo el grafo de dependencias HAL/CAN/ADC de
+`motor_control.c` (confirmado: cero tests existentes enlazan
+`motor_control.c` real). Se optó por **extraer la matemática pura a un
+módulo nuevo**, en vez de una build especial de test (opción 2 del enunciado):
+
+- **`Core/Inc/ackermann_diff.h` (nuevo)** — declara `AckermannDiff_Compute(
+  steer_deg, wheelbase_m, track_m, diff_out[4])`, el enum independiente
+  `ACKERMANN_DIFF_FL/FR/RL/RR` (HAL-free, para no depender de
+  `motor_control.h`) y las macros `ACKERMANN_DEADBAND_DEG`=2.0f /
+  `ACKERMANN_MAX_DIFF`=0.15f (movidas desde `motor_control.c`).
+- **`Core/Src/ackermann_diff.c` (nuevo)** — implementación de
+  `AckermannDiff_Compute()`, matemática idéntica byte a byte a la función
+  original (guarda de deadband, guarda `tan_angle<0.001f`, fórmula de
+  corrección, clamp de solo-reducción, asignación FL/FR/RL/RR), pero
+  recibiendo `wheelbase_m`/`track_m` como parámetros explícitos en vez de
+  leer estáticos o macros — estructuralmente imposible que caiga de nuevo en
+  un valor de compilación en silencio. Sin sanitización NaN/Inf ni efectos
+  laterales (función pura; a diferencia de `sanitize_float()` de
+  `motor_control.c`, que sí tiene efecto lateral vía `Safety_SetError()`).
+- **`Core/Src/motor_control.c:10`** — añadido `#include "ackermann_diff.h"`.
+- **`Core/Src/motor_control.c:32-39`** — 4 `_Static_assert` que verifican en
+  tiempo de compilación `ACKERMANN_DIFF_FL/FR/RL/RR == MOTOR_FL/FR/RL/RR`
+  (mismo patrón defensivo que `motor_control_patched.c:61-66` para
+  `MOTOR_MODE_*`/`TRACTION_OUTPUT_MODE_*`), para que los dos enums nunca
+  diverjan en silencio.
+- **`Core/Src/motor_control.c:1236-1247`** — `compute_ackermann_differential()`
+  simplificada a un wrapper: sanitiza el ángulo de entrada → llama a
+  `AckermannDiff_Compute(steer_deg, ackermann_wheelbase, ackermann_track,
+  diff_out)` (este es el único punto donde se leen los estáticos de
+  runtime) → sanitiza las 4 salidas. Comportamiento idéntico al de antes de
+  la extracción; verificado bit a bit (ver apartado de verificación).
+- **`Core/Inc/motor_control.h`** — comentario de
+  `Traction_GetAckermannDeadbandDeg()` actualizado: ya no referencia
+  "motor_control.c — private #define" (movido a `ackermann_diff.h`).
+- **`Core/Src/test_geometry_store.c:44-51`** — corregido el comentario
+  incorrecto que afirmaba que `test_motor_control.c` cubría el cálculo;
+  ahora referencia correctamente `test_ackermann_diff.c`.
+- **`Makefile`** — añadido `$(CORE_SRC)/ackermann_diff.c` a `C_SOURCES`
+  (tras `ackermann.c`). Sin cambios en `.cproject`: CubeIDE auto-descubre
+  `Core/Src/*.c` nuevos; solo los wrappers `_patched.c` y `test_*.c` están
+  explícitamente excluidos, y `ackermann_diff.c` no es ninguno de los dos.
+
+### b) Test host nuevo — `Core/Src/test_ackermann_diff.c` (292 líneas, 17432 aserciones)
+
+Enlaza directamente `Core/Src/ackermann_diff.c` (la función real, no un
+stub). Con geometría NO por defecto (wheelbase 1.20 / track 0.50) verifica:
+
+- **Sensibilidad a la geometría staged**: a 10°, el resultado con
+  wheelbase=1.20/track=0.50 (FL=RL=0.96326524) difiere en más de 0.01 del
+  resultado con la geometría por defecto 0.95/0.70 (FL=RL=0.93503743, misma
+  función, mismo ángulo) — prueba directa de que el cálculo consume
+  `wheelbase_m`/`track_m` explícitos y no un macro. Variación aislada de
+  solo wheelbase (0.94857132) y de solo track (0.95359814) confirman que
+  ningún parámetro puede ignorarse en silencio por separado.
+- **Volante centrado (0°) ⇒ EXACTAMENTE 1.000** en las cuatro ruedas, con
+  ambas geometrías — fija además la precondición `FAIL_ACKERMANN_OFFSET`
+  del test de igualdad del Hito 2 (`wheel_equality_test.c`), que depende de
+  esta igualdad exacta.
+- **Clamp de solo reducción**: barrido de 6 combinaciones de geometría
+  (incluidas las 4 esquinas `GEOMETRY_WHEELBASE_M_MIN/MAX` ×
+  `GEOMETRY_TRACK_WIDTH_M_MIN/MAX` de `geometry_store.h`, más la
+  por-defecto y la no-por-defecto) × ángulos de -90° a 90° en pasos de
+  0.5° (722 ángulos × 6 geometrías × 4 ruedas = 17328 aserciones):
+  `diff_out[i]` nunca sale de `[0.0, 1.0]` con ninguna geometría válida ni
+  ángulo, y un flag `saw_real_reduction` confirma que el clamp reduce
+  realmente la rueda interior en algún punto del barrido (no es un no-op).
+- **Guarda de deadband**: 1.999999° y -1.9° bloquean la corrección
+  (resultado 1.0 exacto); exactamente 2.0° sí la activa
+  (FL=RL=0.99272484 &lt; 1.0) — confirma el límite estricto `<`, sin
+  desplazamiento a `<=`.
+- **Guarda `tan_angle<0.001f`**: 91° y 95° (con ambas geometrías) devuelven
+  el default 1.0 en las cuatro ruedas — solo alcanzable más allá de 90°,
+  nunca en el rango de dirección real (`MAX_STEER_DEG`=54°).
+- **Paridad con el comportamiento anterior al fix**, geometría por defecto
+  (0.95/0.70), en 5 ángulos representativos: 0° (1.0 exacto), 1.5° dentro
+  del deadband (1.0 exacto), 10° sin clamp (0.93503743), 30° con clamp
+  (0.85000002) y ±`MAX_STEER_DEG`=54° con clamp (0.85000002, mismo valor
+  que 30° porque ambos superan el umbral de clamp ~22.14° para esta
+  geometría — no es un error, es la saturación esperada).
+
+Valores esperados generados ejecutando directamente el código real
+extraído (no calculados a mano), eliminando riesgo de transcripción.
+
+### c) Registro en CI
+
+- **`Makefile`**: `ackermann_diff.c` añadido a `C_SOURCES` (build ARM, ver
+  apartado a).
+- **`.github/workflows/firmware-validation.yml`**: `test_ackermann_diff.c`
+  añadido a la lista de tests host STM32 y entrada
+  `Core/Src/test_ackermann_diff.c) extra="Core/Src/ackermann_diff.c" ;;`
+  en el case-statement de fuentes adicionales, siguiendo el mismo patrón
+  que `test_geometry_store.c`.
+
+### Verificación
+
+- **Suite host STM32 completa**: `test_ackermann_diff.c` 17432/17432 OK;
+  resto de la suite (`test_motor_control.c` incluido, 11619 aserciones) sin
+  regresiones — 0 fallos en ningún test.
+- **Suite host ESP32 completa**: sin cambios, sin regresiones (no se ha
+  tocado ningún archivo ESP32).
+- **Build ARM** (`make clean && make`): 0 warnings/errores
+  (`text=112536, data=320, bss=18960`), `ackermann_diff.o` enlazado.
+- **`scripts/check_effective_eps_wrapper.py`** y
+  **`scripts/check_cubeide_source_exclusions.py`**: ambos OK.
+- **Prueba de reversión manual** (confirma que el test realmente fija el
+  bug): se reintrodujo temporalmente el bug histórico dentro de
+  `ackermann_diff.c` (leer `WHEELBASE_M`/`TRACK_WIDTH_M` de
+  `vehicle_physics.h` en vez de los parámetros `wheelbase_m`/`track_m`) y
+  se recompiló/ejecutó `test_ackermann_diff.c`: **11 aserciones fallan**
+  (las de geometría no-por-defecto y la de 2.0° exactos), confirmando que
+  el test detecta la regresión. Revertido el archivo a su estado corregido
+  y re-confirmado 17432/17432 OK.
+
+## [2026-08-11] — HITO 2 CERRADO (P1-P6): igualdad de ruedas / salud BTS7960 — núcleo, frame 0x31D, espejo ESP32 y verificación final
+
+Cierre del Hito 2 (P1-P6, PR #445 — auto-test de igualdad de ruedas / salud de
+los half-bridge BTS7960). P1-P4 (núcleo de decisión `wheel_equality_test.c`
+con su FSM propia `WheelEqState_t`; veredictos de semipuente F/R y de
+pendiente I/PWM; bypass deliberado de `TractionOutput_Resolve4x4()`/
+`TractionOutput_Resolve4x2Rear()` para no enmascarar diferencias rueda a
+rueda; exención del guardia de rueda-en-el-suelo vía
+`WheelEqTest_ActiveWheelMask()`; trama `DIAG_WHEEL_EQUALITY` 0x31D; wiring CAN
+`wheq_handle_service_cmd()`/`wheq_send_result_burst()`/
+`CAN_WheelEqualityTick()`; integración CI; espejo ESP32 completo —
+`can_ids.h`, `wheel_equality_view.h`, `vehicle_data.h`, `can_rx.cpp`, pantalla
+de resultados SERVICE AUTOTEST página 1, test host
+`test_wheel_equality_view.cpp`) ya estaban implementados y verificados en
+sesiones anteriores. Esta sesión ejecuta **P5** (documentación completa +
+tabla de paridad STM32/ESP32 obligatoria) y **P6** (verificación final
+combinada), con alcance estrictamente limitado a esto — sin lógica nueva, sin
+Hito 3/4, sin refactor.
+
+### P5a — `docs/CAN_CONTRACT_FINAL.md` (revisión 1.21 → **1.22**)
+
+Añadida la sección **§4.23** con el contrato completo de `SERVICE_CMD` acción
+`0xFD` (`SERVICE_ACTION_WHEEL_EQUALITY`, sub-opcodes
+`WHEQ_OP_BEGIN/BEGIN_PHASE2/ABORT/QUERY`) y la trama de telemetría
+`DIAG_WHEEL_EQUALITY` (0x31D, DLC 8, ráfaga de 16 tramas — 4 field_ids × 4
+ruedas — bajo demanda, silenciosa en caso contrario): layout de bytes completo
+para los 4 field_ids (SPEED/CURRENT/HEALTH/VERDICT), tabla de enums
+(`WheelEqWheelVerdict_t`, `WheelEqCause_t`, `WheelEqHalfBridgeVerdict_t`,
+`WheelEqDriverVerdict_t`, bitmask `WHEQ_DRIVER_REASON_*`) con todos sus
+valores numéricos, factores de escalado/unidades de cada campo, documentación
+explícita de que **DLC=2 es válido y suficiente para los 4 sub-comandos**
+(el único guardia de longitud del despachador es `len < 2`), y el bypass de
+PWM crudo (`Traction_SetWheelEqActuation()` → `Traction_Update()`) con su
+razón de ser. Añadida la fila correspondiente a §3.3 (mensajes bidireccionales
+de diagnóstico) para 0x31D. Entrada de historial de revisiones 1.22
+registrada (encabezado Revision/Status/Date actualizado).
+
+### P5b — Esta entrada de `PROJECT_CHANGELOG.md`.
+
+### P5c — Tabla de paridad STM32/ESP32 — verificación sistemática y exhaustiva
+
+El sandbox no puede compilar PlatformIO (confirmado de nuevo esta sesión, ver
+P6 más abajo), así que esta tabla es la única red de seguridad contra un
+desajuste real entre placas. Verificación byte a byte, enum a enum,
+contrastando directamente el código fuente de ambos lados (no solo la
+documentación):
+
+| Elemento | STM32 (fuente de verdad) | ESP32 (espejo) | ¿Coincide? | Discrepancia |
+|----------|--------------------------|-----------------|------------|--------------|
+| CAN ID 0x31D | `Core/Inc/can_handler.h:182 CAN_ID_DIAG_WHEEL_EQUALITY` | `esp32/include/can_ids.h:731 DIAG_WHEEL_EQUALITY` | ✅ Sí | Ninguna |
+| DLC telemetría 0x31D | `Core/Inc/wheel_equality_frame.h:96 WHEEL_EQUALITY_FRAME_DLC=8`; `Unpack()` (línea 244) rechaza `len != 8`, sin forma corta compatible | `esp32/src/wheel_equality_view.h:37 FRAME_DLC=8U`; `decode()` (línea 91) rechaza `dlc != FRAME_DLC` (igualdad estricta, no `>=`) | ✅ Sí | Ninguna |
+| Acción SERVICE_CMD 0xFD | `can_handler.h:210 SERVICE_ACTION_WHEEL_EQUALITY=0xFD` | `can_ids.h:733 SERVICE_ACTION_WHEEL_EQUALITY=0xFD` | ✅ Sí | Ninguna |
+| Sub-opcode BEGIN | `can_handler.h:419 WHEQ_OP_BEGIN=0x01` | `can_ids.h:736 WHEQ_OP_BEGIN=0x01` | ✅ Sí | Ninguna |
+| Sub-opcode BEGIN_PHASE2 | `can_handler.h:420 WHEQ_OP_BEGIN_PHASE2=0x02` | `can_ids.h:737 WHEQ_OP_BEGIN_PHASE2=0x02` | ✅ Sí | Ninguna |
+| Sub-opcode ABORT | `can_handler.h:421 WHEQ_OP_ABORT=0x03` | `can_ids.h:738 WHEQ_OP_ABORT=0x03` | ✅ Sí | Ninguna |
+| Sub-opcode QUERY | `can_handler.h:422 WHEQ_OP_QUERY=0x04` | `can_ids.h:739 WHEQ_OP_QUERY=0x04` | ✅ Sí | Ninguna |
+| DLC=2 suficiente para los 4 sub-comandos | `can_handler.c:4114 wheq_handle_service_cmd()` único guardia `len<2→ACK_INVALID`; `op=payload[1]` (línea 4119) es el único otro byte leído en las 4 ramas (BEGIN/BEGIN_PHASE2/ABORT/QUERY nunca leen `payload[2+]`); `msg_len` viene del DLC real recibido (`ExtractDLC()`, línea 4247) | `engineering_screen.cpp:7069 sendWheelEqualityOp()` fija `frame.data_length_code=2` para los 4 ops (líneas 3744/3758/3770/598) | ✅ Sí | Ninguna — el ESP32 siempre manda exactamente DLC=2, el STM32 lo acepta como necesario y suficiente |
+| byte0 bits0-1 wheel index | `wheel_equality_frame.h:36,106,170,250 wheel (0=FL,1=FR,2=RL,3=RR)` | `wheel_equality_view.h:56,96 wheel (0=FL,1=FR,2=RL,3=RR)` | ✅ Sí | Ninguna |
+| byte0 bits2-3 field_id | `wheel_equality_frame.h:37,99-102,107,171,247 field_id (0=SPEED,1=CURRENT,2=HEALTH,3=VERDICT)` | `wheel_equality_view.h:57,92,100 fieldId` + `can_ids.h:744-747 WHEQ_FIELD_SPEED/CURRENT/HEALTH/VERDICT=0/1/2/3` | ✅ Sí | Ninguna |
+| byte0 bit4 phase2_included | `wheel_equality_frame.h:38-39,108,172,252 phase2_included` | `wheel_equality_view.h:58,98 phase2Included` | ✅ Sí | Ninguna |
+| byte0 bits5-7 reservado | `wheel_equality_frame.h:40 reserved(0)`; `Pack()` no los fija explícitamente pero `out[0]` solo compone bits 0-4 (línea 170-172), quedando 0 por inicialización | `wheel_equality_view.h` `decode()` no los lee (solo bits 0-4, línea 92/96/98); coherente, nunca interpretados | ✅ Sí | Ninguna |
+| Wheel index enum `WheelEqWheel_t` | `wheel_equality_test.h:173-178 WHEQ_WHEEL_FL=0,FR=1,RL=2,RR=3` | `can_ids.h:750-753 WHEQ_WHEEL_FL=0,FR=1,RL=2,RR=3` | ✅ Sí | Ninguna |
+| FIELD_SPEED b1-2 pulses_per_sec_25 | `wheel_equality_frame.h:179-180` (Pack, LE) / `265` (Unpack: `data[1]\|data[2]<<8`) | `wheel_equality_view.h:102` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b3-4 pulses_per_sec_50 | `wheel_equality_frame.h:181-182` / `266` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:103` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b5-6 normalized_speed_x1000 | `wheel_equality_frame.h:183-184` / `267` (`data[5]\|data[6]<<8`) | `wheel_equality_view.h:104` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_SPEED b7 deviation_pct | `wheel_equality_frame.h:185` / `268` (`data[7]`, 1 byte) | `wheel_equality_view.h:105` (`data[7]`) | ✅ Sí | Ninguna |
+| FIELD_CURRENT b1-2 current_ma_25 | `wheel_equality_frame.h:192-193` / `271` (`data[1]\|data[2]<<8`) | `wheel_equality_view.h:108` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b3-4 current_ma_50 | `wheel_equality_frame.h:194-195` / `272` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:109` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b5-6 slope_ma_per_pct_x10 | `wheel_equality_frame.h:196-197` / `273` (`data[5]\|data[6]<<8`) | `wheel_equality_view.h:110` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_CURRENT b7 probable_cause | `wheel_equality_frame.h:198` / `274` (`data[7]`, 1 byte) | `wheel_equality_view.h:111` (`data[7]`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b1-2 asymmetry_pct_x10 | `wheel_equality_frame.h:204-205` / `277` (`data[1]\|data[2]<<8`) | `wheel_equality_view.h:114` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_HEALTH b3-4 delta_temp_c_x10 | `wheel_equality_frame.h:206-207` / `278` (`data[3]\|data[4]<<8`) | `wheel_equality_view.h:115` mismo patrón LE | ✅ Sí | Ninguna |
+| FIELD_HEALTH b5 halfbridge_verdict | `wheel_equality_frame.h:208` / `279` (`data[5]`, 1 byte) | `wheel_equality_view.h:116` (`data[5]`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b6 temp_present | `wheel_equality_frame.h:209` / `280` (`data[6]!=0`) | `wheel_equality_view.h:117` (`data[6]!=0`) | ✅ Sí | Ninguna |
+| FIELD_HEALTH b7 reservado | `wheel_equality_frame.h:210` Pack fija `out[7]=0`; Unpack no lo lee | `wheel_equality_view.h` decode no lo lee | ✅ Sí | Ninguna |
+| FIELD_VERDICT b1 wheel_verdict | `wheel_equality_frame.h:214` / `283` (`data[1]`, 1 byte) | `wheel_equality_view.h:120` (`data[1]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b2 driver_verdict | `wheel_equality_frame.h:215` / `284` (`data[2]`, 1 byte) | `wheel_equality_view.h:121` (`data[2]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b3 phase2_ran | `wheel_equality_frame.h:216` / `285` (`data[3]!=0`) | `wheel_equality_view.h:122` (`data[3]!=0`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b4 driver_reason_mask | `wheel_equality_frame.h:217` / `286` (`data[4]`, 1 byte) | `wheel_equality_view.h:123` (`data[4]`) | ✅ Sí | Ninguna |
+| FIELD_VERDICT b5-7 reservado | `wheel_equality_frame.h:218` Pack fija `out[5..7]=0`; Unpack no los lee | `wheel_equality_view.h` decode no los lee | ✅ Sí | Ninguna |
+| Enum `WheelEqWheelVerdict_t` (0-4) | `wheel_equality_test.h:186-193` PENDING=0,PASS=1,WARN=2,FAIL=3,FAIL_ACKERMANN_OFFSET=4 | `can_ids.h:756-760` mismos 5 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqCause_t` (0-4) | `wheel_equality_test.h:196-203` NONE=0,MECHANICAL=1,ELECTRICAL=2,SENSOR=3,OTHERS_BRAKED=4 | `can_ids.h:764-768` mismos 5 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqHalfBridgeVerdict_t` (0-2) | `wheel_equality_test.h:206-210` PASS=0,WARN=1,FAIL=2 | `can_ids.h:772-774` mismos 3 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `WheelEqDriverVerdict_t` (0-3) | `wheel_equality_test.h:213-218` PENDING=0,SANO=1,SOSPECHOSO=2,DEGRADADO=3 | `can_ids.h:778-781` mismos 4 valores en el mismo orden | ✅ Sí | Ninguna |
+| Bitmask `WHEQ_DRIVER_REASON_*` (bits 0-3) | `wheel_equality_test.h:141-144` HALFBRIDGE=1<<0,SLOPE=1<<1,ELECTRICAL=1<<2,THERMAL=1<<3 | `can_ids.h:785-788` mismos 4 bits en el mismo orden | ✅ Sí | Ninguna |
+| WHEQ_NUM_WHEELS estructural | `wheel_equality_test.h:90 WHEQ_NUM_WHEELS=4U` | `vehicle_data.h:37 NUM_WHEELS=4` (usado por `setWheelEquality()` línea 812 como guardia de rango) | ✅ Sí | Ninguna |
+| Escalado normalized_speed_x1000 | `can_handler.c:4040-4041` `round(normalized_speed*1000.0f)`, u16 saturado | ÷1000.0 en `engineering_screen.cpp:7319-7320` (visualización con 3 decimales) | ✅ Sí (mismo factor ×1000 / ÷1000) | Ninguna |
+| Escalado deviation_pct | `can_handler.c:4042` `round(r->deviation_pct)`, u8 saturado 0-100, SIN escalar | `engineering_screen.cpp:7322` usa el valor tal cual (`%3u`), sin dividir | ✅ Sí (ambos lados tratan el campo como entero 0-100 directo) | Ninguna |
+| Escalado current_ma_25/50 | `can_handler.c:4049-4051` `current_ma_25` derivado como `(I50 − slope×25)×1000`; `current_ma_50 = round(current_a*1000.0f)`, ambos u16 saturados, unidad mA directa | `engineering_screen.cpp:7325` usa `currentMa50` tal cual (`%5u`, mA directos, sin dividir) | ✅ Sí (mismo factor ×1000 A→mA, ambos lados tratan el resultado como mA enteros) | Ninguna |
+| Escalado slope_ma_per_pct_x10 | `can_handler.c:4052-4053` `round(slope_a_per_pct*10000.0f)` (×1000 A→mA combinado con ×10 de 1 decimal) | ÷10.0 en `engineering_screen.cpp:7327-7328` (recupera mA/% con 1 decimal) | ✅ Sí (mismo factor ×10000 / ÷10 sobre el valor ya en mA) | Ninguna |
+| Escalado asymmetry_pct_x10 | `can_handler.c:4058-4059` `round(halfbridge_asym_pct*10.0f)`, u16 saturado | ÷10.0 en `engineering_screen.cpp:7330-7331` (recupera % con 1 decimal) | ✅ Sí | Ninguna |
+| Escalado delta_temp_c_x10 | `can_handler.c:4060-4061` `round(delta_temp_c*10.0f)`, u16 saturado | ÷10.0 en `engineering_screen.cpp:7334-7335` (recupera °C con 1 decimal) | ✅ Sí | Ninguna |
+| probable_cause / halfbridge_verdict / wheel_verdict / driver_verdict / driver_reason_mask | `can_handler.c:4054,4062,4066-4067,4069` cast directo `(uint8_t)enum`, SIN escalar | `wheel_equality_view.h`/`vehicle_data.h` los tratan como `uint8_t` directos, SIN escalar | ✅ Sí | Ninguna |
+| Endianness de TODOS los campos multi-byte (b1-2,b3-4,b5-6 en los 3 primeros field_id) | `wheel_equality_frame.h` Pack: `out[n]=v&0xFF`, `out[n+1]=(v>>8)&0xFF` (líneas 179-184,192-197,204-207); Unpack: `data[n]\|(data[n+1]<<8)` (líneas 265-267,271-273,277-278) — Little-Endian explícito y consistente | `wheel_equality_view.h:102-104,108-110,114-115` mismo patrón `data[n]\|(data[n+1]<<8)` LE | ✅ Sí | Ninguna |
+| phase2_included vs phase2_ran (consistencia semántica) | `can_handler.c:4024,4034,4068` ambos campos derivados de la MISMA variable local `phase2_included` (`WheelEqTest_Phase2Ran()`), por diseño siempre iguales en una ráfaga dada | `vehicle_data.h:842` `w.phase2Included=view.phase2Included` (byte0 bit4, todo field_id); `w.phase2Ran` solo se actualiza cuando llega FIELD_VERDICT (línea 836) — el merge no rompe la igualdad, solo puede quedar "phase2Included" más reciente que "phase2Ran" si aún no llegó el FIELD_VERDICT de esta ráfaga (transitorio, no un desajuste de contrato) | ✅ Sí (comportamiento esperado, no discrepancia) | Ninguna — redundancia intencionada en el propio STM32, el ESP32 solo la refleja fielmente |
+| Comando ESP32→STM32: SERVICE_CMD byte0/byte1 | `can_handler.c:4112,4119` `payload[0]`=acción (ya despachada en el switch exterior por `cmd`), `payload[1]`=`op` | `engineering_screen.cpp:7070-7071` `frame.data[0]=SERVICE_ACTION_WHEEL_EQUALITY`, `frame.data[1]=op` | ✅ Sí | Ninguna |
+| ACK de respuesta | `can_handler.c:4115,4133,4142,4148,4159,4165,4177,4181 CAN_SendCommandAck(0x10, ACK_*)` — siempre exactamente 1 ACK por op | `engineering_screen.cpp` (feedback genérico de `CMD_ACK`, sin bytes propios de motivo — documentado como limitación conocida, no discrepancia) | ✅ Sí | Ninguna |
+
+**Discrepancias encontradas: 2, ambas de redacción interna en el borrador de
+esta misma sesión (§3.3 de `CAN_CONTRACT_FINAL.md`), NINGUNA en el código
+fuente STM32/ESP32 ya existente — corregidas antes de cerrar esta sesión:**
+1. La fila resumen de 0x31D en §3.3 (recién añadida) describía `field_id`
+   como `1=SPEED,2=CURRENT,3=HEALTH,4=VERDICT` (1-indexado) cuando el valor
+   real de cable es 0-indexado (`0=SPEED,1=CURRENT,2=HEALTH,3=VERDICT`,
+   confirmado en `wheel_equality_frame.h:37,99-102`). **Corregido** en el
+   mismo commit de P5a, antes de publicarse.
+2. La misma fila mencionaba un inexistente "bit5 phase2_ran" en byte0 común,
+   confundiéndolo con el campo real `phase2_ran` (que SÍ existe, pero
+   únicamente dentro del field_id VERDICT, byte3 — `wheel_equality_frame.h:75,
+   131`, no en byte0 común). **Corregido**: el texto ahora aclara que
+   byte0 solo lleva `phase2_included` (bit4) y que `phase2_ran` es un campo
+   separado del field_id VERDICT.
+
+Ambas eran errores de redacción cometidos y detectados dentro de esta misma
+sesión de documentación (nunca llegaron a un commit publicado ni afectan
+código fuente ARM/ESP32 alguno). **Fuera de estas dos, no se ha encontrado
+ninguna discrepancia real de paridad STM32/ESP32** en ningún elemento cubierto
+por la tabla anterior: ID+DLC, acción+4 sub-opcodes, offset y anchura de
+absolutamente todos los campos de los 4 field_id, los 5+5+3+4 valores de los
+4 enums más el bitmask de 4 bits, el factor de escalado/unidad de cada campo
+numérico (confirmando el MISMO factor en ambos lados) y el endianness de
+todos los campos multi-byte.
+
+### P6 — Verificación final combinada
+
+- **Build ARM** (`make clean && make -j$(nproc)`): **OK**, sin warnings
+  (`-Wall -Wextra -Werror`) y **0 símbolos sin resolver**
+  (`arm-none-eabi-nm build/STM32G474RE.elf | grep " U "` vacío).
+  `text=112512, data=320, bss=18960` (`dec=131792` = `0x202d0`).
+- **Tests host STM32**: réplica exacta de
+  `.github/workflows/firmware-validation.yml` (pasos `run:` extraídos con
+  Python/PyYAML para fidelidad byte a byte con CI, no una lista reconstruida
+  a mano). 56 invocaciones de test (incluidas las 20 EPS/steering/relay/
+  centering con macros especiales `HOST_TEST_GPIO_MODEL`,
+  `HOST_TEST_GPIO_WRITE_OBSERVER`, `STEERING_Z_REQUIRED=1`,
+  `STEERING_ISOLATION_THRESHOLD_CALIBRATED=1`, y las 2 variantes
+  `RC_OVERRIDE_ENABLED=0/1`), **18668 aserciones sumadas vía "N run, M
+  failed", 0 fallos**, más 3 suites en formato no estándar todas en verde
+  (`test_relay_health_frame.c` "Checks: 27, Failures: 0",
+  `test_service_diag_frame.c` "all assertions PASS",
+  `test_wheel_equality_frame.c` "all tests passed"). Exit code 0.
+- **Tests host ESP32**: misma técnica de extracción. 42 invocaciones `g++`,
+  **1454 aserciones sumadas vía "N run, M failed", 0 fallos**, más evidencia
+  adicional de paso en formatos no estándar (246 líneas `ok: ...`, 24 líneas
+  `count=N: ... OK` de cadencia, 4 banners `ALL TESTS PASSED`, 5 líneas `...:
+  PASS` de nivel superior incl. `Wheel equality view decode tests: PASS`) —
+  **ningún "not ok"/FAIL real encontrado en ningún formato**. Incluye
+  `test_wheel_equality_view.cpp` (decode 0x31D). Exit code 0, re-ejecutado dos
+  veces con salida idéntica byte a byte (confirmado por `diff`).
+- **`scripts/check_effective_eps_wrapper.py`**: PASS ("power gate, reversal
+  coast, damped assist and observer-preserving coast OK").
+- **`scripts/check_cubeide_source_exclusions.py`**: PASS (implementaciones
+  base y puntos de entrada requeridos intactos).
+- **Static analysis** (`scripts/run_static_analysis.sh`):
+  - `cppcheck`: 0 errores.
+  - `flawfinder` (`--minlevel=3`): "No hits found".
+  - `clang-tidy`: 19 warnings preexistentes en 10 ficheros, **ninguno en
+    `wheel_equality_*`/`motor_control*`/`can_handler.c` recién tocado por
+    Hito 2** — confirmado no introducido por P1-P6.
+  - `lizard`: única nota preexistente `compute_verdicts` CCN=31
+    (`Core/Src/wheel_equality_test.c:179`) — puramente informativa (el script
+    la envuelve en `|| true`, no afecta al código de salida), parte del
+    código ya fusionado de P1-P4, no tocado esta sesión; no se ha refactorizado
+    (fuera de alcance).
+  - `scan-build`: "No bugs found." (nota de sandbox: `scan-build` no está en
+    el PATH por defecto aunque `scan-build-18` sí está instalado; requirió un
+    symlink manual local no versionado para esta verificación — no es una
+    diferencia de CI, solo una particularidad de este sandbox).
+- **PlatformIO build ESP32** (`pio run -e esp32s3`): **BLOQUEADO por el
+  sandbox** — el CLI `platformio` se instala correctamente vía `pip`, pero
+  `pio run` falla al descargar la plataforma `espressif32`
+  (`HTTPClientError`); confirmado con `curl -v` que `api.registry.platformio.org`
+  no resuelve por DNS en este sandbox, mientras que `github.com` sí resuelve
+  (200) y `api.github.com` resuelve pero requiere autenticación (403). Idéntico
+  hallazgo al de la sesión de cierre del Hito 1. **No se da por verificado.**
+  Como consecuencia, tampoco se ha podido ejecutar análisis estático de
+  PlatformIO ni CodeQL específico sobre un build real de ESP32-S3.
+- **CodeQL** (`codeql_checker`): ejecutado sobre los cambios de esta sesión
+  (documentación pura + 2 correcciones de redacción en un borrador no
+  publicado, declaradas triviales). No sustituye un análisis CodeQL C/C++
+  completo del árbol ni cubre el firmware ESP32 (bloqueado arriba). **El
+  análisis CodeQL completo del árbol y el análisis específico de ESP32 siguen
+  sin poder verificarse en este sandbox.**
+
+### Regresión — sin cambio de comportamiento (confirmado por la batería de tests host, 0 fallos; ningún fichero de test modificado esta sesión)
+
+EPS (assist-only, coast de inversión, damping por magnitud —
+`test_eps_boot_traction.c`, `check_effective_eps_wrapper.py`), homing
+(`test_centering_boot_traction.c`, `test_centering_pc12_gate.c`) y las
+guardas de la auditoría V2 (`test_steering_supervisor.c`,
+`test_steering_supervisor_io.c`), ABS/TCS (`test_drive_dynamics_policy.c`),
+obstáculos (`test_obstacle_sensor.cpp` ESP32), reparto 4x4/4x2
+(`test_motor_control.c`, incl. `test_4x2_coast_rear_stays_braked` y fases
+COAST 4x4/4x2), Ackermann (solo reduce — `test_geometry_store.c`), pedal
+(`test_pedal_plausibility.c`), los cinco stores del Bloque C
+(`tcs_tuning_store`, `geometry_store`, `shunt_store`,
+`steering_service_store`, `wheel_sensor_store`), el arbitraje HMI/mando
+(`test_rc_arbiter_policy.c` ×2 variantes RC_OVERRIDE_ENABLED, `test_mode_sync.cpp`
+ESP32) y la FSM del Hito 1 (`test_service_diag_session.c`,
+`test_service_diag_frame.c`, `test_frame_parity_cross.cpp`,
+`test_service_diag_view.cpp`) — todos ejecutados en esta pasada, **0
+fallos**.
+
+Atención específica al bypass de PWM del Hito 2: `wheeleq_active` (estático,
+`Core/Src/motor_control.c:482`) se inicializa a `false` y el bloque de
+actuación cruda al inicio de `Traction_Update()`
+(`Core/Src/motor_control_patched.c:521-541`) se salta por completo cuando es
+`false`, cayendo exactamente en la misma ruta previa
+(`auto_release_tank()`/`init_shadow()`/... línea 543 en adelante) que antes
+de que existiera Hito 2 — no hay ninguna comprobación adicional, rama nueva
+ni coste añadido en el camino normal de tracción fuera de una sesión de
+servicio activa. Confirmado también por `test_motor_control.c` (0 fallos, sin
+modificar) y por el hecho de que `wheeleq_active` solo se pone a `true` desde
+`Traction_SetWheelEqActuation()`, llamada únicamente por
+`CAN_WheelEqualityTick()`/`wheq_process_transition()` mientras
+`WheelEqTest_Active()` es verdadero.
+
+### Declaración
+
+**HITO 2 CERRADO** (P1-P6), con dos salvedades de sandbox explícitamente no
+verificadas y declaradas como tales: el build PlatformIO real de ESP32-S3
+(bloqueado por falta de acceso de red al registro `api.registry.platformio.org`)
+y, en consecuencia, el análisis estático/CodeQL específico sobre ese build
+real de ESP32 (el `codeql_checker` de esta sesión sólo confirma que los
+cambios de esta sesión —documentación— son triviales y no introducen
+alertas, no sustituye un escaneo completo del árbol ni cubre el firmware
+ESP32). Todo lo demás — build ARM (0 símbolos sin resolver), paridad
+STM32/ESP32 (verificada de forma sistemática y exhaustiva: ID+DLC, acción y
+los 4 sub-opcodes, offset/anchura de todos los campos de los 4 field_id,
+todos los valores de los 4 enums + 1 bitmask, escalado/unidades de cada campo
+numérico con el mismo factor confirmado en ambos lados, endianness de todos
+los campos multi-byte — 0 discrepancias de código encontradas, solo 2 erratas
+de redacción en el propio borrador de esta sesión, corregidas antes de
+publicarse), totalidad de tests host STM32 (18668 aserciones) + ESP32 (1454
+aserciones + evidencia adicional en formatos no estándar), ambos scripts de
+verificación, el análisis estático disponible en el sandbox
+(cppcheck/clang-tidy/flawfinder/lizard/scan-build) y la confirmación expresa
+de que el bypass de PWM del Hito 2 no altera el comportamiento de tracción
+fuera de la sesión de servicio — está verificado en verde.
+
+## [2026-08-10] — HITO 1 CERRADO (T6): documentación CAN, paridad STM32/ESP32 y verificación final combinada
+
+Cierre del Hito 1 (T1-T6, Bloque A, PR #445 — sesión guiada SERVICE_DIAG
+self-test de un solo actuador). T1-T5 (FSM pura `service_diag_session.c`
+con su envolvente de seguridad — techo de PWM, un solo actuador a la vez,
+timeouts de plateau/paso/sesión, watchdog, coast+dead-time, abortos por
+batería/marcha/CAN/cambio de estado —, wiring CAN
+`svcdiag_handle_service_cmd()`/`svcdiag_send_session_status()` en
+`can_handler.c` con la acción de servicio `SERVICE_ACTION_SELF_TEST` (0xFC,
+sub-opcodes START/NEXT/ABORT/QUERY), registro DTC de entrada/salida de sesión
+(`ErrorLog_Record(SVCDIAG_DTC_CODE_ENTER/_EXIT, ...)`, subsistema
+`SERVICE_DIAG`=4, ver `can_handler.c:3569-3571,3770,3810` y `error_log.h`),
+integración Makefile/CI, submenú ESP32 SERVICE AUTOTEST) estaban
+implementados y con tests host en verde de sesiones anteriores; esta sesión
+ejecuta el T6 (documentación) y la verificación final combinada exigida antes
+de declarar el hito cerrado.
+
+### T6 — Documentación
+
+- **`docs/CAN_CONTRACT_FINAL.md`** (revisión 1.20 → **1.21**): añadida la
+  sección **§4.22** con el contrato completo de `SERVICE_CMD` acción `0xFC`
+  (`SERVICE_ACTION_SELF_TEST`, sub-opcodes START/NEXT/ABORT/QUERY) y las dos
+  tramas de telemetría `DIAG_SERVICE_SESSION` (0x31B, DLC 8, 10 Hz mientras hay
+  sesión activa, silenciosa en caso contrario) y `DIAG_TEST_RESULT` (0x31C,
+  DLC 8, una vez por cierre de paso): layout de bytes completo, tablas de
+  `ServiceDiagState_t`/`ServiceDiagChannel_t`/`ServiceDiagReason_t`/
+  `ServiceDiagStepVerdict_t`, envolvente de seguridad y ficheros fuente. Añadidas
+  las dos filas correspondientes a §3.3 (mensajes bidireccionales de
+  diagnóstico). Entrada de historial de revisiones 1.21 registrada; §10
+  (Versioning and Stability) actualizada (revisión actual/previa, política de
+  compatibilidad).
+- **`PROJECT_CHANGELOG.md`**: esta entrada.
+
+### Corrección de alcance: reversión de trabajo de Hito 2
+
+Al reanudar la PR #445 en esta sesión, la punta de la rama (`4301c73`,
+posterior al cierre de T6 en `7de3791`) ya contenía un commit **"Hito 2 (in
+progress): 0x31D DIAG_WHEEL_EQUALITY..."** que añadía
+`Core/Inc/wheel_equality_frame.h` y `Core/Src/test_wheel_equality_frame.c`
+(paridad de ruedas / BTS7960) — trabajo del Hito 2, explícitamente fuera del
+alcance de esta sesión ("NO empieces el Hito 2"). Se revirtió con
+`git revert --no-edit 4301c73`, confirmando que el árbol vuelve exactamente al
+estado de `7de3791` (T6 completo) en los tres ficheros afectados
+(`Core/Inc/wheel_equality_frame.h`, `Core/Src/test_wheel_equality_frame.c`,
+`.github/workflows/firmware-validation.yml`). Ningún fichero del Hito 2
+permanece en el árbol.
+
+### Paridad STM32/ESP32 — verificación sistemática (punto débil conocido)
+
+Los símbolos nuevos del ESP32 (T5) se habían verificado a mano en una sesión
+anterior porque el sandbox no permite compilar PlatformIO (confirmado de
+nuevo esta sesión, ver más abajo). Esta sesión **repite la comprobación de
+forma independiente**, byte a byte, enum a enum, contrastando directamente el
+código fuente de ambos lados (no solo la documentación ni el informe de la
+sesión anterior):
+
+| Elemento | STM32 (fuente de verdad) | ESP32 (espejo) | ¿Coincide? | Discrepancia |
+|----------|--------------------------|-----------------|------------|--------------|
+| CAN ID 0x31B | `can_handler.h:173 CAN_ID_DIAG_SERVICE_SESSION` | `can_ids.h:655 DIAG_SERVICE_SESSION` | ✅ Sí | Ninguna |
+| CAN ID 0x31C | `can_handler.h:178 CAN_ID_DIAG_TEST_RESULT` | `can_ids.h:656 DIAG_TEST_RESULT` | ✅ Sí | Ninguna |
+| Acción SERVICE_CMD 0xFC | `can_handler.h:203 SERVICE_ACTION_SELF_TEST=0xFC` | `can_ids.h:658 SERVICE_ACTION_SELF_TEST=0xFC` | ✅ Sí | Ninguna |
+| DLC 0x31B | `service_diag_frame.h:69 SERVICE_DIAG_SESSION_FRAME_DLC=8`, `Unpack()` rechaza `len != 8` | `service_diag_view.h:34 SESSION_FRAME_DLC=8` | ✅ Sí | Ninguna |
+| DLC 0x31C | `service_diag_frame.h:70 SERVICE_DIAG_TEST_RESULT_FRAME_DLC=8`, `Unpack()` rechaza `len != 8` | `service_diag_view.h:35 TEST_RESULT_FRAME_DLC=8` | ✅ Sí | Ninguna |
+| DLC comando START | `can_handler.c:3786-3789` guarda común `len<2→ACK_INVALID` (aplica a todos los sub-opcodes); `can_handler.c:3805` token leído solo si `len>=3` (si no, `confirm_token_ok=false` → `ACK_REJECTED` vía el camino `safety_block`, nunca `ACK_INVALID`) | `engineering_screen.cpp:6861-6863 sendServiceDiagOp()` DLC=3 fijo | ✅ Sí (ESP32 siempre manda el DLC máximo; STM32 tolera DLC=2 sin romper) | Ninguna funcional. Nota: doc §4.22 dice DLC "≥3" para START — STM32 no lo fuerza como `ACK_INVALID`, ver nota debajo |
+| DLC comando NEXT | `can_handler.c:3832-3835` exige `len>=7`, si no `ACK_INVALID` | `engineering_screen.cpp:6864-6865` DLC=7 fijo | ✅ Sí | Ninguna |
+| DLC comando ABORT/QUERY | `can_handler.c:3786-3789` (guarda común `len<2`, antes del switch en `3793`) | `engineering_screen.cpp:6871-6872` DLC=2 fijo | ✅ Sí | Ninguna |
+| Sub-opcodes | `can_handler.h:389-392 SVCDIAG_OP_START/NEXT/ABORT/QUERY = 0x01/02/03/04` | `can_ids.h:661-664` mismos valores | ✅ Sí | Ninguna |
+| Token de confirmación | `service_diag_session.h:101 SVCDIAG_CONFIRM_TOKEN=0xA5` | `can_ids.h:673 SVCDIAG_CONFIRM_TOKEN=0xA5` | ✅ Sí | Ninguna |
+| 0x31B offsets (b0-b7) | `service_diag_frame.h:122-129` b0 state,b1 step_index,b2 active_channel,b3 progress_pct,b4 reason,b5 origin_state_raw,b6 elapsed_sec,b7 active_pwm_pct — anchura 1 byte cada campo | `service_diag_view.h:71-78 decodeSession()` mismo orden y anchura exacta | ✅ Sí | Ninguna |
+| 0x31C offsets (b0-b7) | `service_diag_frame.h:174-181` b0 channel(1B),b1 pwm_step_pct(1B),b2-3 current_ma(2B),b4-5 pulses_per_sec(2B),b6 verdict(1B),b7 step_index(1B) | `service_diag_view.h:84-90 decodeTestResult()` mismo orden y anchura | ✅ Sí | Ninguna |
+| Comando NEXT offsets | `can_handler.c:3836-3839` b2 channel(1B),b3 direction(1B),b4 pwm_pct(1B),b5-6 plateau_ms(2B) | `engineering_screen.cpp:6866-6870` mismos offsets/anchuras | ✅ Sí | Ninguna |
+| Endianness current_ma/pulses_per_sec (0x31C) | `service_diag_frame.h:201-202 Unpack()` LE explícito: `data[2]\|data[3]<<8`, `data[4]\|data[5]<<8` (mismo patrón en `Pack()` líneas 176-179) | `service_diag_view.h:86-87` mismo patrón LE | ✅ Sí | Ninguna |
+| Endianness plateau_ms (comando NEXT) | `can_handler.c:3839` LE: `payload[5] \| payload[6]<<8` | `engineering_screen.cpp:6869-6870` LE: `plateauMs & 0xFF`, `(plateauMs>>8) & 0xFF` | ✅ Sí | Ninguna |
+| Enum `ServiceDiagState_t` (0-5) | `service_diag_session.h:111-118` IDLE,ENTERING,ARMED,STEPPING,DEADTIME,ABORTED | `can_ids.h:676-681` mismos 6 valores en el mismo orden | ✅ Sí | Ninguna |
+| Enum `ServiceDiagChannel_t` (0-5) | `service_diag_session.h:121-128` FL,FR,RL,RR,STEERING,NONE | `can_ids.h:684-689` mismos 6 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagDirection_t` (0-1) | `service_diag_session.h:130-133` FORWARD,REVERSE | `can_ids.h:692-693` mismos 2 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagStepVerdict_t` (0-3) | `service_diag_session.h:135-140` NONE,RUNNING,PASS,FAIL_OVERCURRENT | `can_ids.h:696-699` mismos 4 valores | ✅ Sí | Ninguna |
+| Enum `ServiceDiagReason_t` (0-15, motivo de aborto) | `service_diag_session.h:144-161` NONE..WATCHDOG (16 valores, WATCHDOG=15) | `can_ids.h:703-718` mismos 16 valores en el mismo orden, `WATCHDOG=15` | ✅ Sí (tras la corrección) | **Encontrada y corregida**: `service_diag_frame.h:32` (comentario de layout de b4) decía `0..14` (15 valores), omitiendo `WATCHDOG=15` que sí viaja realmente por el cable (fijado en `enter_aborted()`, `service_diag_session.c:122`, y alcanzable desde el FSM). CAN_CONTRACT_FINAL.md §4.22 y §3.3 ya documentaban correctamente 0-15; solo el comentario interno de `service_diag_frame.h` estaba desactualizado. Causa raíz: comentario no actualizado cuando se añadió `SVCDIAG_REASON_WATCHDOG` como último valor del enum. Corregido a `0..15`. Sin impacto funcional (el pack/unpack es un passthrough `uint8_t` sin máscara de rango). |
+| Enum DTC subsistema `SERVICE_DIAG`=4 (registro DTC entrada/salida) | `error_log.h:55-56` `subsystem` 0=GLOBAL,1=MOTOR,2=SENSOR,3=CAN,**4=SERVICE_DIAG**; usado por `ErrorLog_Record(SVCDIAG_DTC_CODE_ENTER/_EXIT, SVCDIAG_DTC_SUBSYSTEM=4, ...)` en `can_handler.c:3770,3810` | `error_screen.cpp:71-80 diagSubsystemName()` YA tenía `case 4: return "SVC_DIAG"` correcto (funcional, sin bug); pero el enum de referencia `can_ids.h:190-195 DiagSubsystem` (no usado en lógica, solo documental) se quedaba en 0-3, y el comentario de `config_store.h:41` también | ✅ Sí (tras la corrección) | **Encontrada y corregida**: `esp32/include/can_ids.h:190-195` (enum `DiagSubsystem`) no tenía el valor `SERVICE_DIAG=4` que sí existe y se usa en el lado STM32 (`error_log.h`) y que el propio ESP32 ya sabe mostrar (`error_screen.cpp` `case 4`). Causa raíz: el enum de documentación no se actualizó cuando T3 introdujo el subsistema SERVICE_DIAG para el registro DTC de entrada/salida de este hito; no es una regresión de T6. Sin impacto funcional (el campo se transporta como `uint8_t` puro, nunca se castea a `DiagSubsystem`), pero es una discrepancia real de paridad documental. Corregido: añadido `SERVICE_DIAG = 4` al enum y actualizado el comentario de `config_store.h:41` a `4=ServiceDiag`. |
+| DTC pseudo-códigos 0x40/0x41 (ENTER/EXIT) | `can_handler.c:3569-3570 SVCDIAG_DTC_CODE_ENTER=0x40`, `_EXIT=0x41`; documentados en `error_log.h:48-54` como fuera del rango 0-16 de `Safety_Error_t` | `error_screen.cpp:64-65` `case 0x40: "SVC-DIAG ENTER"`, `case 0x41: "SVC-DIAG EXIT"` | ✅ Sí | Ninguna (ya eran correctos en la sesión anterior; solo el enum documental `DiagSubsystem` estaba incompleto, ver fila anterior) |
+| Textos de estado/motivo (HMI) | `service_diag_session.c:256-289 StateText()/ReasonText()` (español) | `service_diag_view.h:118-150 stateText()/reasonText()` | ✅ Sí | Ninguna, carácter a carácter |
+| Escalado/unidades current_ma | u16 LE, mA directos, sin escalar, saturado a 0xFFFF por `ServiceDiagFrame_SatU16()` **en el productor** (`can_handler.c:3691`, no dentro de `Pack()`) | mismo campo, mismo tipo, mismo factor (1:1), sin escalado | ✅ Sí | Ninguna |
+| Escalado/unidades pulses_per_sec | u16 LE, pulsos/s directos, sin escalar, saturado a 0xFFFF por `ServiceDiagFrame_SatU16()` **en el productor** (`can_handler.c:3698`, no dentro de `Pack()`) | mismo campo, mismo tipo, mismo factor (1:1), sin escalado | ✅ Sí | Ninguna |
+| Escalado/unidades progress_pct / pwm_step_pct / active_pwm_pct | u8 0-100 %, sin escalar, saturado por `ServiceDiagFrame_SatPct()` (`service_diag_frame.h:95`, llamado dentro de `Pack()` en líneas 125/129/175) | mismo campo, mismo tipo, mismo rango | ✅ Sí | Ninguna |
+
+**Discrepancias encontradas: 2, ambas de documentación/enum de referencia (sin
+impacto funcional en el binario ARM ni en el firmware ESP32 ya compilado
+históricamente), ambas corregidas en esta sesión:**
+1. `Core/Inc/service_diag_frame.h:32` — comentario de rango del campo `reason`
+   decía `0..14`, debía decir `0..15` (falta `WATCHDOG`=15). **Corregido.**
+2. `esp32/include/can_ids.h:190-195` (enum `DiagSubsystem`) y
+   `esp32/src/config_store.h:41` (comentario) no incluían el valor
+   `SERVICE_DIAG=4` ya usado por el registro DTC de entrada/salida de este
+   hito y ya soportado por la lógica de presentación
+   (`error_screen.cpp:77` ya mostraba `SVC_DIAG` correctamente). **Corregido**
+   (enum + comentario actualizados a 0-4).
+
+Fuera de estas dos, no se ha encontrado ninguna otra discrepancia: las 918
+líneas añadidas en el commit T5 (`git show --stat 8d67c29`: 9 ficheros, 918
+inserciones) — principalmente
+`esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`,
+`esp32/src/service_diag_view.h`, `esp32/src/screens/engineering_screen.{h,cpp}`
+— reproducen exactamente el contrato definido en
+`Core/Inc/service_diag_frame.h`/`service_diag_session.h`.
+
+### Bug encontrado y corregido durante la verificación
+
+- **`Core/Inc/steering_centering.h:99`** — causa raíz: contenía un
+  `_Static_assert(HOMING_PWM_COUNTS == 4249U, ...)` sin proteger. `_Static_assert`
+  (con guion bajo, keyword C11) **no es válido en C++** (solo `static_assert`,
+  sin guion bajo, es palabra clave C++). Esta cabecera se incluye
+  transitivamente desde `steering_centering_frame.h` →
+  `steering_centering_diag.h` → `steering_centering.h`, y
+  `esp32/src/test_frame_parity_cross.cpp` es el ÚNICO `.cpp` de todo el
+  repositorio que incluye `steering_centering_frame.h` directamente (el resto
+  de ficheros ESP32 solo la referencian en comentarios y mantienen su propio
+  espejo independiente en `can_ids.h`/`steering_diag_view.h`). Efecto: la
+  compilación de `test_frame_parity_cross.cpp` con `g++` fallaba
+  (`error: expected unqualified-id`), lo que habría bloqueado el pase
+  combinado de tests host ESP32 exigido para cerrar el Hito 1. Este fallo
+  nunca había sido detectado por CI porque todas las ejecuciones recientes de
+  `firmware-validation.yml` en esta rama muestran `conclusion: action_required`
+  (workflow pendiente de aprobación manual, nunca ejecutado realmente) —
+  confirmado vía GitHub Actions API.
+  Corrección aplicada: `#ifndef __cplusplus` / `#endif` alrededor del único
+  `_Static_assert`, con comentario explicando la razón (convención ya
+  documentada en la cabecera de `service_diag_frame.h:13-16`: las cabeceras
+  `*_frame.h` deben ser seguras en C++ porque los tests host ESP32 las
+  consumen como unidades de traducción C++ puras). Se preserva la
+  comprobación en tiempo de compilación para el build ARM/C11 y para los
+  tests host en C; solo se oculta para C++. Verificado sin impacto en el
+  tamaño del build ARM (idéntico antes/después: ver más abajo).
+
+### Verificación final combinada (una sola pasada, repetida de forma independiente esta sesión)
+
+- **Build ARM** (`make clean && make -j$(nproc)`, con todos los ficheros
+  `service_diag_session.c`/`.h`, `service_diag_frame.h` enlazados): **OK**, sin
+  warnings (`-Wall -Wextra -Werror`) y sin símbolos sin resolver
+  (`arm-none-eabi-nm build/STM32G474RE.elf | grep " U "` vacío).
+  `text=107440, data=316, bss=18488` (`dec=126244` = `0x1ed24`). Repetido
+  después de las 3 correcciones de paridad de esta sesión (comentario
+  `service_diag_frame.h` + enum/comentario ESP32): **tamaño idéntico**, como
+  se esperaba (solo comentarios y un enum C++ de solo documentación, ninguno
+  compilado en el firmware ARM).
+- **Tests host STM32**: réplica exacta de `.github/workflows/firmware-validation.yml`
+  (extraído los pasos `run:` del job `tests` con un script Python/PyYAML para
+  garantizar fidelidad byte a byte con CI). 54 invocaciones de test, **0
+  fallos**, incluidas 20 invocaciones EPS/steering/relay/centering
+  (`test_eps_params`, `test_steering_cal_store`, `test_steering_z`,
+  `test_steering_eps`, `test_steering_centering`,
+  `test_steering_centering_diag`, `test_steering_centering_frame`,
+  `test_relay_degraded`, `test_relay_health_diag`, `test_relay_health_frame`,
+  `test_steering_service_store`, `test_relay_seq_eps` 1317 aserciones,
+  `test_eps_boot_traction` 315, `test_steering_outputs` 14,
+  `test_centering_boot_traction` 94, `test_centering_pc12_gate` 91,
+  `test_steering_supervisor` 178 ×2 variantes STEERING_Z_REQUIRED=0/1,
+  `test_steering_supervisor_io` 52/57 variantes calibrado/no calibrado — nota:
+  la sesión anterior había citado "11", recuento corregido a 20 tras
+  enumeración exhaustiva esta sesión). Incluye `test_service_diag_session.c`
+  (226 aserciones) y `test_service_diag_frame.c` (todas las aserciones PASS).
+  Re-ejecutado dos veces tras las correcciones de esta sesión (fixes de
+  paridad + fixes de citas del propio changelog): **recuento de tests
+  idéntico, 0 fallos** en las tres pasadas (confirmado por diff).
+- **Tests host ESP32**: 41 invocaciones `g++`, **0 fallos**, incluyendo
+  `test_frame_parity_cross.cpp` (91 aserciones) y `test_service_diag_view.cpp`
+  (decode 0x31B/0x31C). Re-ejecutado tras añadir `SERVICE_DIAG=4` al enum
+  `DiagSubsystem` de `can_ids.h`: **recuento de tests idéntico, 0 fallos**
+  (confirmado por diff contra la primera pasada).
+- **`scripts/check_effective_eps_wrapper.py`**: PASS ("power gate, reversal
+  coast, damped assist and observer-preserving coast OK").
+- **`scripts/check_cubeide_source_exclusions.py`**: PASS (implementaciones
+  base y puntos de entrada requeridos intactos).
+- **Static analysis** (`scripts/run_static_analysis.sh`), ejecutado en esta
+  sesión con **todas** las herramientas instaladas (a diferencia de la
+  sesión anterior, que no tenía `flawfinder`/`lizard`/`scan-build`
+  disponibles y los omitió):
+  - `cppcheck`: 0 errores; 51 style + 13 performance + 7 information (todas
+    preexistentes, ninguna en `service_diag_*`/`steering_centering*`).
+  - `clang-tidy`: 19 warnings, todos `bugprone-branch-clone` /
+    `bugprone-suspicious-memory-comparison` /
+    `clang-analyzer-optin.performance.Padding` /
+    `readability-redundant-control-flow` preexistentes en
+    `can_rx_policy.h`, `can_handler.c`, `eps_params.c`, `main.c`,
+    `motor_control.c`, `pedal_cal_session.c`, `rc_arbiter.c`,
+    `safety_system.c`, `shunt_store.c`, `steering_supervisor.c`,
+    `wheel_sensor_store.c`. Nota de honestidad: uno de ellos
+    (`can_handler.c:3893`, dentro de `CAN_ServiceDiagTick()`) está
+    físicamente dentro del código SERVICE_DIAG, pero es un patrón
+    intencionado preexistente de **T3** (dos ramas de un `if/else if` con el
+    mismo cuerpo pero condiciones de disparo distintas: cambio de estado vs.
+    reenvío periódico) — confirmado con `git diff 8d67c29 7de3791` que T6 no
+    tocó `can_handler.c`; no es una regresión de esta sesión y T3 ya está
+    cerrado/verificado, así que no se ha tocado (fuera del alcance de esta
+    sesión, que es solo T6 + verificación).
+  - `flawfinder`: **"No hits found"** a nivel de riesgo mínimo 3 (0 hits en
+    los niveles 3-5; 954 hits de nivel 0-2, todos de bajo riesgo, ninguno en
+    `service_diag_*`/`steering_centering*` — confirmado con grep dirigido).
+  - `lizard`: informe de complejidad ciclomática generado; las únicas
+    funciones SERVICE_DIAG que aparecen
+    (`ServiceDiagSession_Update` CCN 18, `ServiceDiagSession_ReasonText`/
+    `service_diag_view::reasonText` CCN 17) son *switch* de 16 ramas
+    (una por `ServiceDiagReason_t`), la complejidad esperada para un
+    despachador de texto — no señalan ningún defecto.
+  - `scan-build` (Clang Static Analyzer, STM32): **"No bugs found."** ESP32
+    scan-build sigue diferido a un contexto de compilación PlatformIO (ver
+    más abajo).
+  - `semgrep`: SKIP intencionado, decisión previa del propio repositorio (no
+    relacionada con esta sesión).
+- **PlatformIO build** (`pio run -e esp32s3`): **BLOQUEADO por el sandbox** —
+  `Platform Manager: Installing espressif32` falla con `HTTPClientError`;
+  confirmado que es una restricción de red (DNS no resuelve
+  `api.registry.platformio.org` / `dl.registry.platformio.org` vía
+  `curl -v`/`getent hosts`), no un problema del código. **No se da por
+  verificado.**
+- **CodeQL** (`codeql_checker`): ejecutado sobre los cambios de esta sesión
+  (reversión del Hito 2 + 2 correcciones de paridad, declaradas triviales) →
+  **skip automático del propio tool por ser cambios triviales**, sin alertas
+  que investigar. No sustituye a un análisis CodeQL completo del árbol
+  (la sesión anterior ya había reportado que el análisis `cpp` completo se
+  omite por tamaño de base de datos) — **el análisis CodeQL C/C++ completo
+  del árbol sigue sin poder verificarse en este sandbox.**
+
+### Regresión — sin cambio de comportamiento (confirmado por la batería de tests host, 0 fallos)
+
+EPS (assist-only, coast de inversión, damping por magnitud —
+`test_eps_boot_traction.c`, `check_effective_eps_wrapper.py`), homing
+(`test_centering_boot_traction.c`, `test_centering_pc12_gate.c`,
+`steering_centering.h` sin cambios funcionales, solo visibilidad C++) y las
+guardas de la auditoría V2 (`test_steering_supervisor.c`,
+`test_steering_supervisor_io.c`), ABS/TCS (`safety_system.c` — `ABS_Update`/
+`TCS_Update` — sin tocar; política de slip/reducción verificada por
+`test_drive_dynamics_policy.c`, 21 aserciones), obstáculos
+(`test_obstacle_sensor.cpp` ESP32), reparto 4x4/4x2 (`test_motor_control.c`,
+incl. `test_4x2_coast_rear_stays_braked` y fases COAST 4x4/4x2), Ackermann
+(solo reduce — `ackermann.c`/`motor_control.c` sin tocar; setter de geometría
+cubierto por `test_geometry_store.c`), pedal (`test_pedal_plausibility.c`),
+los cinco stores del Bloque C (`tcs_tuning_store`, `geometry_store`,
+`shunt_store`, `steering_service_store`, `wheel_sensor_store` — mismo
+conjunto auditado el 2026-08-09 — suites host sin cambios ni fallos), el
+arbitraje HMI/mando (`test_rc_arbiter_policy.c`/`test_mode_sync.cpp` ESP32) y
+la FSM del Hito 1 (`test_service_diag_session.c`, `test_service_diag_frame.c`,
+`test_frame_parity_cross.cpp`, `test_service_diag_view.cpp`) — todos
+ejecutados en esta pasada, **0 fallos**, ninguno de estos ficheros de test
+fue modificado esta sesión.
+
+### Declaración
+
+**HITO 1 CERRADO** (T1-T6), con dos salvedades de sandbox explícitamente no
+verificadas y declaradas como tales: el build PlatformIO real (bloqueado por
+falta de acceso de red al registro) y el análisis CodeQL C/C++ completo del
+árbol (omitido por tamaño de base de datos; el `codeql_checker` de esta
+sesión solo confirma que los cambios propios son triviales, no sustituye un
+escaneo completo). Todo lo demás — build ARM, paridad STM32/ESP32 (verificada
+de forma sistemática e independiente, 2 discrepancias documentales
+encontradas y corregidas, 0 discrepancias funcionales), totalidad de tests
+host STM32+ESP32 (incluidas las 20 invocaciones especiales EPS/steering/
+relay/centering, ver detalle arriba), los
+dos scripts de verificación, el análisis estático disponible en el sandbox
+(cppcheck/clang-tidy/flawfinder/lizard/scan-build STM32) y la reversión del
+trabajo de Hito 2 fuera de alcance — está verificado en verde.
+
+## [2026-08-09] — AUDITORÍA PR #445 (BLOQUE C): correcciones mínimas + tests host (STM32)
+
+Auditoría de verificación (V1–V7) sobre los cinco stores del Bloque C
+(`tcs_tuning_store`, `geometry_store`, `shunt_store`,
+`steering_service_store`, `wheel_sensor_store`). No se ha añadido
+funcionalidad nueva ni implementado los bloques A/B/C6/D/E. Correcciones
+mínimas derivadas de los hallazgos:
+
+- **V3d (flash, P1)**: ninguno de los 5 `Save()` comprobaba el estado del
+  sistema antes de escribir en flash (a diferencia de `gear_limits_store` y
+  el resto de stores existentes). Añadida la guarda
+  `Safety_GetState() != SYS_STATE_STANDBY → rechazar` en
+  `tcs_tuning_store.c`, `geometry_store.c`, `shunt_store.c`,
+  `steering_service_store.c` y `wheel_sensor_store.c`, igual que el resto de
+  stores del proyecto.
+- **V6d (validación de float, P2)**: el patrón `v < MIN || v > MAX` no
+  detecta `NaN` (comparación IEEE-754 siempre falsa), permitiendo que un
+  `NaN` se aceptara como válido. Añadida comprobación explícita
+  `isnan()`/`isinf()` (mismo patrón que `eps_params.c`) en
+  `tcs_tuning_store.h`, `geometry_store.h`, `shunt_store.h` y
+  `wheel_sensor_store.h` (los seis campos float de `tcs_tuning_store` y los
+  campos float de los otros tres). `steering_service_store` no tiene campos
+  float, no requiere cambio.
+- **Documentación (`shunt_store.h`)**: corregidos dos comentarios que
+  describían incorrectamente `GetEffectiveMohm()` como reflejo del valor
+  *persistido* (`stored`); el comportamiento real e intencionado — coherente
+  con el resto de stores del Bloque C y con `steering_service_store` (C4),
+  que comparte la misma precondición "actuadores parados" — es que el valor
+  efectivo seguido inmediatamente el valor *staged* en RAM tras `Stage()`,
+  sin necesitar `Save()`. Solo se ha corregido la documentación; el código
+  (`shunt_store.c`) ya se comportaba así y no ha cambiado.
+- **Tests host nuevos** (uno por store, exigido por V1/V2/V6):
+  `Core/Src/test_tcs_tuning_store.c` (36 aserciones),
+  `Core/Src/test_geometry_store.c` (31), `Core/Src/test_shunt_store.c` (41),
+  `Core/Src/test_steering_service_store.c` (33) y
+  `Core/Src/test_wheel_sensor_store.c` (39). Cada uno verifica: paridad
+  bit a bit del default contra el macro de compilación (V1), rechazo de
+  valores fuera de rango/NaN/Inf/negativos (V6c/d), guarda STANDBY en
+  `Save()` (V3d), `Revert()` (V6b) y ausencia de cualquier campo de trim por
+  rueda (V6e). Registrados en
+  `.github/workflows/firmware-validation.yml`.
+- **Hallazgo reportado, no corregido (P2)**: `steering_service_store` expone
+  `search_pwm_counts` con techo `STEER_SVC_SEARCH_PWM_MAX=1200`, muy por
+  debajo del suelo reducido de seguridad (~2336) del homing en
+  `motor_control.c`; el store en sí no representa riesgo porque no está
+  cableado a ningún consumidor de producción todavía (ver informe de
+  auditoría completo en el PR). No se ha modificado: es una decisión de
+  alcance de la propia PR #445, no un bug.
+- Sin cambios de tamaño de binario ARM (`text=104600` antes y después).
+
 ## [2026-08-08] — BLOQUE 1: LA PANTALLA (HMI) ES AUTORIDAD ABSOLUTA SOBRE MODO/LUCES; BLOQUE 2: GUARDA DE TIEMPO EN HOMING (STM32 + ESP32)
 
 ### Bloque 1 — HMI autoridad absoluta de modo (360/tank) y luces; emisora solo mueve (ESP32)

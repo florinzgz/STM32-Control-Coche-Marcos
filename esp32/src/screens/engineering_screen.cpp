@@ -44,7 +44,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 24;  // +1 for MOTION INHIBIT DIAG (item 23)
+static constexpr int     NUM_MAIN_ITEMS = 25;  // +1 for SERVICE AUTOTEST (item 24)
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -61,7 +61,7 @@ static constexpr int     TILE_COLS   = 3;
 
 static constexpr int     PAGE1_ITEM_COUNT = 9;   // tiles per page (3×3 grid)
 // Total number of main-menu pages, derived from the item count so adding
-// functions never overflows a page.  23 items → 3 pages (9 + 9 + 5).
+// functions never overflows a page.  25 items → 3 pages (9 + 9 + 7).
 static constexpr uint8_t MAIN_PAGE_COUNT =
     (uint8_t)((NUM_MAIN_ITEMS + PAGE1_ITEM_COUNT - 1) / PAGE1_ITEM_COUNT);
 
@@ -72,14 +72,14 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
     "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT",
-    "LED", "MOTION"
+    "LED", "MOTION", "SERVICE"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
     "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG",
-    "MODE", "INHIBIT"
+    "MODE", "INHIBIT", "AUTOTEST"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -111,7 +111,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_BLUE,    // 20 Battery Limits      — configuration
     ui::COL_CYAN,    // 21 Drive/Battery Diag  — diagnostic
     ui::COL_CYAN,    // 22 LED Mode selector   — configuration
-    ui::COL_CYAN     // 23 Motion Inhibit Diag — diagnostic
+    ui::COL_CYAN,    // 23 Motion Inhibit Diag — diagnostic
+    ui::COL_RED      // 24 Service Autotest    — destructive / actuates wheels
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -503,6 +504,99 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             (frameTimeMs - factoryPendingMs_) >= FACTORY_CONFIRM_TIMEOUT_MS) {
             factoryPendingIdx_ = -1;
             needsRedraw_ = true;
+        }
+    }
+
+    // SERVICE AUTOTEST (0x31B/0x31C, SERVICE_CMD 0xFC) — EJECUTAR START
+    // confirmation window, same deterministic-timeout technique as above.
+    // Page 0 = Hito 1 step-by-step (this block); page 1 = Hito 2 wheel-
+    // equality results (WHEQ_* block right below) — see svcDiagPage_.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST && svcDiagPage_ == 0) {
+        if (svcDiagStartArm_) {
+            svcDiagStartArm_ = false;
+            svcDiagStartPendingMs_ = frameTimeMs;
+        }
+        if (svcDiagStartPending_ &&
+            (frameTimeMs - svcDiagStartPendingMs_) >= SVCDIAG_CONFIRM_TIMEOUT_MS) {
+            svcDiagStartPending_ = false;
+            needsRedraw_ = true;
+        }
+        // Advance the round-robin test cursor only once the STM32 confirms
+        // the PREVIOUS step actually closed (a new 0x31C step_index for the
+        // channel the cursor was pointing at) — never optimistically on
+        // send, avoiding drift if a NEXT command is lost/rejected.
+        const auto& res = data.serviceDiagResult();
+        if (res.valid[svcDiagCursorChannel_]) {
+            const int16_t seen = res.view[svcDiagCursorChannel_].stepIndex;
+            if (seen != svcDiagLastResultStepIndex_) {
+                svcDiagLastResultStepIndex_ = seen;
+                svcDiagCursorChannel_ =
+                    (svcDiagCursorChannel_ + 1U) % vehicle::ServiceDiagResultData::CHANNEL_COUNT;
+            }
+        }
+        // 0x31B is SILENT while IDLE (no session active), so ESTADO/MOTIVO
+        // would otherwise freeze at whatever the entry QUERY showed even if
+        // the blocking condition changes (gear, wheels, battery...).  Poll
+        // like EPS_TUNING/DRIVE_TUNING/BATTERY_LIMITS so a legible, CURRENT
+        // rejection reason is always on screen, not just a stale snapshot.
+        if ((frameTimeMs - svcDiagLastQueryMs_) >= SVCDIAG_QUERY_INTERVAL_MS) {
+            sendServiceDiagOp(can::SVCDIAG_OP_QUERY);
+            svcDiagLastQueryMs_ = frameTimeMs;
+        }
+    }
+
+    // WHEEL EQUALITY results (0x31D, SERVICE_CMD 0xFD) — Hito 2, page 1 of
+    // the SAME SERVICE_AUTOTEST submenu.  INICIAR FASE1 double-tap-confirm
+    // window (same technique as above) plus a periodic QUERY poll: unlike
+    // 0x31B there is no live WHEQ session-status frame at all, so QUERY is
+    // the ONLY way this page can recover the last completed results burst
+    // after (re)entering the page — see WHEQ_OP_QUERY in can_handler.c.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST && svcDiagPage_ == 1) {
+        if (wheqStartArm_) {
+            wheqStartArm_ = false;
+            wheqStartPendingMs_ = frameTimeMs;
+        }
+        if (wheqStartPending_ &&
+            (frameTimeMs - wheqStartPendingMs_) >= SVCDIAG_CONFIRM_TIMEOUT_MS) {
+            wheqStartPending_ = false;
+            wheqForcePaint_ = true;
+        }
+        // Generic CMD_ACK (0x103) feedback for the last WHEQ_OP_BEGIN /
+        // BEGIN_PHASE2 / ABORT sent — same cmdIdLow==0x10 + lastAckTracked_
+        // de-dup convention as BATTERY_LIMITS/DRIVE_TUNING (the periodic
+        // QUERY poll below never sets wheqAckWait_, so its own ACKs are
+        // deliberately NOT shown here — mirrors SVCDIAG_OP_QUERY above).
+        if (wheqAckWait_) {
+            const auto& ad = data.ack();
+            if (ad.cmdIdLow == 0x10 && ad.timestampMs != lastAckTracked_) {
+                lastAckTracked_ = ad.timestampMs;
+                switch (ad.result) {
+                    case can::AckResult::OK:               wheqAck_ = WheqAck::OK;       break;
+                    case can::AckResult::REJECTED:          wheqAck_ = WheqAck::REJECTED; break;
+                    case can::AckResult::INVALID:           wheqAck_ = WheqAck::INVALID;  break;
+                    case can::AckResult::BLOCKED_BY_SAFETY: wheqAck_ = WheqAck::BLOCKED;  break;
+                    default:                                 wheqAck_ = WheqAck::REJECTED; break;
+                }
+                wheqAckWait_ = false;
+                wheqAckMs_   = frameTimeMs;
+                wheqForcePaint_ = true;
+            } else if ((frameTimeMs - wheqAckWaitSentMs_) > WHEQ_ACK_WAIT_TIMEOUT_MS) {
+                wheqAckWait_ = false;
+                wheqAck_     = WheqAck::TIMEOUT;
+                wheqAckMs_   = frameTimeMs;
+                wheqForcePaint_ = true;
+            }
+        }
+        if (wheqAck_ != WheqAck::NONE && (frameTimeMs - wheqAckMs_) > WHEQ_ACK_CLEAR_MS) {
+            wheqAck_ = WheqAck::NONE;
+            wheqForcePaint_ = true;
+        }
+        // 0x31D is only ever sent on-demand (once at Fase1/Fase2 completion
+        // or on QUERY) — there is no periodic push, so poll like SVCDIAG's
+        // 0x31B QUERY above to recover the last burst after (re)entering.
+        if ((frameTimeMs - wheqLastQueryMs_) >= WHEQ_QUERY_INTERVAL_MS) {
+            sendWheelEqualityOp(can::WHEQ_OP_QUERY);
+            wheqLastQueryMs_ = frameTimeMs;
         }
     }
 
@@ -1251,6 +1345,9 @@ void EngineeringScreen::draw() {
             case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
             case SubMenu::LED_MODE:         drawLedMode();             break;
             case SubMenu::MOTION_INHIBIT_DIAG: drawMotionInhibitDiag(); break;
+            case SubMenu::SERVICE_AUTOTEST:
+                if (svcDiagPage_ == 1) drawWheelEquality(); else drawServiceAutotest();
+                break;
             default:
                 // Unknown/unexpected submenu: fall back to the Engineering
                 // main menu instead of leaving the screen blank.
@@ -2394,6 +2491,19 @@ void EngineeringScreen::draw() {
         miForcePaint_ = false;
     }
 
+    // Partial redraw for SERVICE AUTOTEST (0x31B/0x31C, page 0) or WHEEL
+    // EQUALITY results (0x31D, page 1) — same technique, dispatched by
+    // svcDiagPage_ (both pages of the SAME SubMenu::SERVICE_AUTOTEST).
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST) {
+        if (svcDiagPage_ == 1) {
+            refreshWheelEquality(wheqForcePaint_);
+            wheqForcePaint_ = false;
+        } else {
+            refreshServiceAutotest(svcDiagForcePaint_);
+            svcDiagForcePaint_ = false;
+        }
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 // -------------------------------------------------------------------------
@@ -2436,6 +2546,9 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         batSaveWait_    = false;
         batRestoreArm_  = false;
         batLocalInvalid_ = false;
+        svcDiagStartPending_ = false;  // cancel any pending EJECUTAR start confirm
+        wheqStartPending_ = false;     // cancel any pending INICIAR FASE1 confirm
+        svcDiagPage_ = 0;              // always re-enter SERVICE_AUTOTEST on page 0
         if (currentMenu_ == SubMenu::BRIGHTNESS && brightnessDirty_) {
             config_store::flush();
             brightnessDirty_ = false;
@@ -2740,6 +2853,49 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             miPrevLimitSignature_ = 0xFFFFFFFFu;
                             miPrevValid_    = false;
                             currentMenu_ = SubMenu::MOTION_INHIBIT_DIAG;
+                            break;
+                        case 24:
+                            // Open SERVICE AUTOTEST (0x31B/0x31C, 0xFC).
+                            // Reset all session-scoped UI state: the test
+                            // cursor always restarts at FL, no confirmation
+                            // is pending, and every cached field is primed to
+                            // force a full first paint.  svcDiagLastQueryMs_=0
+                            // makes update()'s poll loop fire on the very
+                            // next frame (same convention as EPS_TUNING/
+                            // DRIVE_TUNING/BATTERY_LIMITS above) so a
+                            // re-entered session shows its real state
+                            // immediately instead of stale "INACTIVO".
+                            // Always opens on page 0 (Hito 1 step-by-step);
+                            // page 1 (Hito 2 wheel equality, WHEQ_*) state is
+                            // reset the same way here so a stale ACK/pending
+                            // confirm from a previous visit never lingers.
+                            svcDiagPage_           = 0;
+                            svcDiagStartPending_   = false;
+                            svcDiagStartArm_       = false;
+                            svcDiagCursorChannel_  = can::SVCDIAG_CH_FL;
+                            svcDiagLastResultStepIndex_ = -1;
+                            svcDiagLastQueryMs_    = 0;
+                            svcDiagForcePaint_     = true;
+                            svcDiagPrevState_      = 0xFFu;
+                            svcDiagPrevReason_     = 0xFFu;
+                            svcDiagPrevProgress_   = 0xFFu;
+                            svcDiagPrevChannel_    = 0xFFu;
+                            svcDiagPrevPwm_        = 0xFFu;
+                            svcDiagPrevElapsed_    = 0xFFu;
+                            svcDiagPrevValid_      = false;
+                            for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+                                svcDiagPrevTableSig_[i] = 0xFFFFFFFFu;
+                            }
+                            wheqStartPending_      = false;
+                            wheqStartArm_          = false;
+                            wheqLastQueryMs_       = 0;
+                            wheqForcePaint_        = true;
+                            wheqAck_               = WheqAck::NONE;
+                            wheqAckWait_           = false;
+                            for (uint8_t i = 0; i < vehicle::NUM_WHEELS; ++i) {
+                                wheqPrevRowSig_[i] = 0xFFFFFFFFu;
+                            }
+                            currentMenu_ = SubMenu::SERVICE_AUTOTEST;
                             break;
                         default:
                             break;
@@ -3532,6 +3688,144 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 needsRedraw_ = true;
                 return true;
             }
+        }
+        return false;
+    }
+
+    // SERVICE AUTOTEST: EJECUTAR / ABORTAR (SVCDIAG_OP_*, 0x31B/0x31C, 0xFC)
+    // on page 0, or INICIAR/FASE2/ABORTAR (WHEQ_OP_*, 0x31D, 0xFD) on page 1
+    // — both pages of the SAME submenu, switched by a small header toggle
+    // button.  Geometry is duplicated locally (mirrors the LM_TEST_X-style
+    // per-function constants elsewhere in this file) because
+    // drawServiceAutotest()/drawWheelEquality()'s anonymous-namespace
+    // constants are declared later in the translation unit.
+    if (currentMenu_ == SubMenu::SERVICE_AUTOTEST) {
+        static constexpr int16_t WEQ_TOGGLE_X = 372;
+        static constexpr int16_t WEQ_TOGGLE_Y = 2;
+        static constexpr int16_t WEQ_TOGGLE_W = 104;
+        static constexpr int16_t WEQ_TOGGLE_H = 26;
+
+        // Page toggle — reachable from either page; always cancels any
+        // pending confirmation so nothing stale carries across the switch.
+        if (x >= WEQ_TOGGLE_X && x <= WEQ_TOGGLE_X + WEQ_TOGGLE_W &&
+            y >= WEQ_TOGGLE_Y && y <= WEQ_TOGGLE_Y + WEQ_TOGGLE_H) {
+            svcDiagStartPending_ = false;
+            wheqStartPending_    = false;
+            if (svcDiagPage_ == 0) {
+                svcDiagPage_     = 1;
+                wheqLastQueryMs_ = 0;   // fire an immediate QUERY on next update()
+                for (uint8_t i = 0; i < vehicle::NUM_WHEELS; ++i) {
+                    wheqPrevRowSig_[i] = 0xFFFFFFFFu;
+                }
+            } else {
+                svcDiagPage_        = 0;
+                svcDiagLastQueryMs_ = 0;
+            }
+            needsRedraw_ = true;   // switching page repaints the whole static layout
+            return true;
+        }
+
+        if (svcDiagPage_ == 1) {
+            static constexpr int16_t WEQ_BTN_Y    = 280;
+            static constexpr int16_t WEQ_BTN_H    = 30;
+            static constexpr int16_t WEQ_START_X  = 98;
+            static constexpr int16_t WEQ_START_W  = 108;
+            static constexpr int16_t WEQ_PHASE2_X = 210;
+            static constexpr int16_t WEQ_PHASE2_W = 108;
+            static constexpr int16_t WEQ_ABORT_X  = 322;
+            static constexpr int16_t WEQ_ABORT_W  = 124;
+
+            if (x >= WEQ_ABORT_X && x <= WEQ_ABORT_X + WEQ_ABORT_W &&
+                y >= WEQ_BTN_Y && y <= WEQ_BTN_Y + WEQ_BTN_H) {
+                // ABORTAR: always tappable/idempotent — mandatory "always
+                // visible and accessible"; also cancels any pending INICIAR
+                // confirm.
+                wheqStartPending_   = false;
+                sendWheelEqualityOp(can::WHEQ_OP_ABORT);
+                wheqAckWait_        = true;
+                wheqAckWaitSentMs_  = lastFrameTimeMs_;
+                needsRedraw_        = true;
+                return true;
+            }
+
+            if (x >= WEQ_PHASE2_X && x <= WEQ_PHASE2_X + WEQ_PHASE2_W &&
+                y >= WEQ_BTN_Y && y <= WEQ_BTN_Y + WEQ_BTN_H) {
+                // FASE2: deliberately single-tap (no local double-confirm) —
+                // the STM32 already hard-gates BEGIN_PHASE2 on a clean Fase 1
+                // (WheelEqTest_Phase1AllPass, Core/Src/wheel_equality_test.c)
+                // and reports ACK_REJECTED otherwise; no client-side gating
+                // can be more authoritative than that check.
+                sendWheelEqualityOp(can::WHEQ_OP_BEGIN_PHASE2);
+                wheqAckWait_        = true;
+                wheqAckWaitSentMs_  = lastFrameTimeMs_;
+                needsRedraw_        = true;
+                return true;
+            }
+
+            if (x >= WEQ_START_X && x <= WEQ_START_X + WEQ_START_W &&
+                y >= WEQ_BTN_Y && y <= WEQ_BTN_Y + WEQ_BTN_H) {
+                if (wheqStartPending_) {
+                    // Second deliberate tap within the timeout: confirmed.
+                    wheqStartPending_   = false;
+                    sendWheelEqualityOp(can::WHEQ_OP_BEGIN);
+                    wheqAckWait_        = true;
+                    wheqAckWaitSentMs_  = lastFrameTimeMs_;
+                } else {
+                    wheqStartPending_ = true;
+                    wheqStartArm_     = true;  // stamp the timeout in update()
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+            return false;
+        }
+
+        static constexpr int16_t SD_BTN_Y   = 280;
+        static constexpr int16_t SD_BTN_H   = 30;
+        static constexpr int16_t SD_EXEC_X  = 170;
+        static constexpr int16_t SD_ABORT_X = 330;
+        static constexpr int16_t SD_BTN_W   = 140;
+
+        const uint8_t state = (data_ != nullptr && data_->serviceDiagSession().valid)
+                                   ? data_->serviceDiagSession().view.state
+                                   : can::SVCDIAG_STATE_IDLE;
+
+        if (x >= SD_ABORT_X && x <= SD_ABORT_X + SD_BTN_W &&
+            y >= SD_BTN_Y && y <= SD_BTN_Y + SD_BTN_H) {
+            // ABORTAR: always tappable, idempotent per the FSM's own
+            // contract; also cancels any pending EJECUTAR start confirm.
+            svcDiagStartPending_ = false;
+            sendServiceDiagOp(can::SVCDIAG_OP_ABORT);
+            needsRedraw_ = true;
+            return true;
+        }
+
+        if (x >= SD_EXEC_X && x <= SD_EXEC_X + SD_BTN_W &&
+            y >= SD_BTN_Y && y <= SD_BTN_Y + SD_BTN_H) {
+            if (state == can::SVCDIAG_STATE_IDLE || state == can::SVCDIAG_STATE_ABORTED) {
+                if (svcDiagStartPending_) {
+                    // Second deliberate tap within the timeout: confirmed.
+                    svcDiagStartPending_ = false;
+                    sendServiceDiagOp(can::SVCDIAG_OP_START);
+                } else {
+                    svcDiagStartPending_ = true;
+                    svcDiagStartArm_     = true;  // stamp the timeout in update()
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+            if (state == can::SVCDIAG_STATE_ARMED) {
+                // Step the round-robin-cursored channel with fixed
+                // conservative parameters (dry run only — Hito 1 does not
+                // drive any actuator; see can_handler.c).
+                sendServiceDiagOp(can::SVCDIAG_OP_NEXT, svcDiagCursorChannel_,
+                                  can::SVCDIAG_DIR_FORWARD, SVCDIAG_STEP_PWM_PCT,
+                                  SVCDIAG_STEP_PLATEAU_MS);
+                needsRedraw_ = true;
+                return true;
+            }
+            // STEPPING / ENTERING / DEADTIME: grayed out, consumed as a no-op.
+            return true;
         }
         return false;
     }
@@ -6455,6 +6749,648 @@ void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
     }
 
     miPrevValid_ = mi.valid;
+}
+
+// =========================================================================
+// SERVICE AUTOTEST (0x31B/0x31C, SERVICE_CMD 0xFC) — lifted-vehicle
+// actuator self-test submenu (Bloque A, PR #445 Hito 1).
+//
+// EJECUTAR and ABORTAR are two fixed, always-visible buttons (never hidden
+// or relabeled to anything else): ABORTAR is unconditionally tappable,
+// idempotent per the FSM's own contract (ServiceDiagSession_Abort() is a
+// safe no-op outside a session).  EJECUTAR's action depends on the current
+// 0x31B state:
+//   IDLE/ABORTED : first tap arms a *deliberate* confirmation (button shows
+//                  "CONFIRMAR?" for SVCDIAG_CONFIRM_TIMEOUT_MS) — the same
+//                  double-tap idiom as MODULE_CONTROL/FACTORY_DEFAULTS —
+//                  backed by the permanent "VEHICULO SUSPENDIDO" banner;
+//                  the second tap sends START with SVCDIAG_CONFIRM_TOKEN.
+//   ARMED        : sends one NEXT step for the round-robin test cursor
+//                  (FL->FR->RL->RR->STEERING) with fixed conservative
+//                  parameters — Hito 1 is a dry run only (can_handler.c
+//                  svcdiag_handle_service_cmd does not drive any actuator
+//                  yet; Bloque B completes real actuation).
+//   STEPPING/ENTERING/DEADTIME : EJECUTAR is grayed out (no-op).
+//
+// The table (fed by 0x31C) shows the MOST RECENT result per channel — a
+// status table, not a scrolling log — read from vehicle::ServiceDiagResultData
+// (indexed by channel).  Status (state/reason/progress) comes from 0x31B via
+// vehicle::ServiceDiagSessionData.  No editors, no graphics/gauges, per the
+// explicit T5 scope.
+// =========================================================================
+namespace {
+constexpr int16_t SD_LX         = 8;    // status label x
+constexpr int16_t SD_VX         = 90;   // status value x
+constexpr int16_t SD_STAT_Y     = 60;   // ESTADO row y
+constexpr int16_t SD_REASON_Y   = 78;   // MOTIVO row y
+constexpr int16_t SD_PROG_Y     = 96;   // PROGRESO row y
+constexpr int16_t SD_WARN_Y     = 32;   // warning banner y
+constexpr int16_t SD_WARN_H     = 24;   // warning banner height
+constexpr int16_t SD_TBL_HDR_Y  = 122;  // table header y
+constexpr int16_t SD_TBL_ROW0_Y = 140;  // first table row y
+constexpr int16_t SD_TBL_RH     = 18;   // table row pitch
+constexpr int16_t SD_COL_CH_X   = 8;    // channel column x
+constexpr int16_t SD_COL_PWM_X  = 90;   // pwm% column x
+constexpr int16_t SD_COL_CUR_X  = 170;  // current(mA) column x
+constexpr int16_t SD_COL_PPS_X  = 280;  // pulses/s column x
+constexpr int16_t SD_COL_VRD_X  = 380;  // verdict column x
+constexpr int16_t SD_BTN_Y      = 280;  // aligned with the global BACK row
+constexpr int16_t SD_BTN_H      = 30;
+constexpr int16_t SD_EXEC_X     = 170;
+constexpr int16_t SD_ABORT_X    = 330;
+constexpr int16_t SD_BTN_W      = 140;
+
+const char* const SD_CHANNEL_LABELS[vehicle::ServiceDiagResultData::CHANNEL_COUNT] = {
+    "FL", "FR", "RL", "RR", "DIR"
+};
+
+// Page-toggle button (top-right, header band) — shared geometry between
+// drawServiceAutotest() (page 0) and drawWheelEquality() (page 1); the
+// touch handler duplicates these same values locally (see handleTouch()).
+constexpr int16_t WEQ_TOGGLE_X = 372;
+constexpr int16_t WEQ_TOGGLE_Y = 2;
+constexpr int16_t WEQ_TOGGLE_W = 104;
+constexpr int16_t WEQ_TOGGLE_H = 26;
+} // namespace
+
+void EngineeringScreen::drawServiceAutotest() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header band
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("SERVICE AUTOTEST", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    // Page-toggle button: switches to the Hito 2 wheel-equality results
+    // page (svcDiagPage_==1, drawWheelEquality()) — see handleTouch().
+    tft.fillRect(WEQ_TOGGLE_X, WEQ_TOGGLE_Y, WEQ_TOGGLE_W, WEQ_TOGGLE_H, ui::COL_BLUE);
+    tft.drawRect(WEQ_TOGGLE_X, WEQ_TOGGLE_Y, WEQ_TOGGLE_W, WEQ_TOGGLE_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BLUE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("RUEDAS >", WEQ_TOGGLE_X + WEQ_TOGGLE_W / 2, WEQ_TOGGLE_Y + WEQ_TOGGLE_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Permanent warning banner — always visible regardless of session
+    // state: the mandatory precondition for every channel of this test.
+    tft.fillRect(0, SD_WARN_Y, ui::SCREEN_W, SD_WARN_H, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("VEHICULO SUSPENDIDO - 4 RUEDAS EN EL AIRE",
+                   ui::SCREEN_W / 2, SD_WARN_Y + SD_WARN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Static status labels (values painted by refreshServiceAutotest()).
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("ESTADO:",   SD_LX, SD_STAT_Y);
+    tft.drawString("MOTIVO:",   SD_LX, SD_REASON_Y);
+    tft.drawString("PROGRESO:", SD_LX, SD_PROG_Y);
+
+    tft.drawFastHLine(0, SD_PROG_Y + 16, ui::SCREEN_W, ui::COL_DARK_GRAY);
+
+    // Static table header + channel labels (result columns painted by
+    // refreshServiceAutotest()).
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("CANAL",     SD_COL_CH_X,  SD_TBL_HDR_Y);
+    tft.drawString("PWM%",      SD_COL_PWM_X, SD_TBL_HDR_Y);
+    tft.drawString("MA",        SD_COL_CUR_X, SD_TBL_HDR_Y);
+    tft.drawString("P/S",       SD_COL_PPS_X, SD_TBL_HDR_Y);
+    tft.drawString("RESULTADO", SD_COL_VRD_X, SD_TBL_HDR_Y);
+    for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(SD_CHANNEL_LABELS[i], SD_COL_CH_X, SD_TBL_ROW0_Y + i * SD_TBL_RH);
+    }
+
+    // BACK button (existing global convention).
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // EJECUTAR / ABORTAR outlines — fixed position, ALWAYS drawn.  Fill
+    // colour + label are repainted every frame by refreshServiceAutotest().
+    tft.drawRect(SD_EXEC_X,  SD_BTN_Y, SD_BTN_W, SD_BTN_H, ui::COL_GRAY);
+    tft.drawRect(SD_ABORT_X, SD_BTN_Y, SD_BTN_W, SD_BTN_H, ui::COL_GRAY);
+
+    svcDiagForcePaint_ = true;
+}
+
+void EngineeringScreen::refreshServiceAutotest(bool force) {
+    namespace sdv = service_diag_view;
+    if (data_ == nullptr) {
+        return;
+    }
+
+    const vehicle::ServiceDiagSessionData& sess = data_->serviceDiagSession();
+    const vehicle::ServiceDiagResultData&  res  = data_->serviceDiagResult();
+    const uint32_t now   = (uint32_t)lastFrameTimeMs_;
+    const uint32_t stamp = (uint32_t)sess.timestampMs;
+    const sdv::Freshness fresh = sdv::freshness(sess.valid, now, stamp);
+    const bool have = sess.valid && fresh != sdv::Freshness::STALE;
+    const uint8_t state  = have ? sess.view.state  : can::SVCDIAG_STATE_IDLE;
+    const uint8_t reason = have ? sess.view.reason : can::SVCDIAG_REASON_NONE;
+
+    if (sess.valid != svcDiagPrevValid_) {
+        force = true;
+    }
+
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    char b[40];
+    auto putVal = [&](int16_t x, int16_t y, const char* s, uint16_t col) {
+        tft.setTextColor(col, ui::COL_BG);   // opaque bg overwrites in place
+        tft.drawString(s, x, y);
+    };
+
+    // ---- ESTADO ----
+    if (force || state != svcDiagPrevState_) {
+        uint16_t c = !have ? ui::COL_GRAY
+                   : sdv::isActive(state) ? ui::COL_GREEN
+                   : (state == can::SVCDIAG_STATE_ABORTED ? ui::COL_AMBER : ui::COL_WHITE);
+        snprintf(b, sizeof(b), "%-24s", !have ? "SIN DATOS" : sdv::stateText(state));
+        putVal(SD_VX, SD_STAT_Y, b, c);
+        svcDiagPrevState_ = state;
+    }
+
+    // ---- MOTIVO ----
+    if (force || reason != svcDiagPrevReason_) {
+        snprintf(b, sizeof(b), "%-30s", !have ? "---" : sdv::reasonText(reason));
+        putVal(SD_VX, SD_REASON_Y, b,
+               (have && reason != can::SVCDIAG_REASON_NONE) ? ui::COL_AMBER : ui::COL_WHITE);
+        svcDiagPrevReason_ = reason;
+    }
+
+    // ---- PROGRESO (progress% + active channel + PWM + elapsed) ----
+    const uint8_t progress = have ? sess.view.progressPct   : 0;
+    const uint8_t channel  = have ? sess.view.activeChannel : can::SVCDIAG_CH_NONE;
+    const uint8_t pwm      = have ? sess.view.activePwmPct  : 0;
+    const uint8_t elapsed  = have ? sess.view.elapsedSec    : 0;
+    if (force || progress != svcDiagPrevProgress_ || channel != svcDiagPrevChannel_ ||
+        pwm != svcDiagPrevPwm_ || elapsed != svcDiagPrevElapsed_) {
+        if (!have) {
+            snprintf(b, sizeof(b), "%-30s", "---");
+        } else {
+            snprintf(b, sizeof(b), "%3u%% %-4s PWM:%3u%% %3us",
+                     (unsigned)progress, sdv::channelText(channel),
+                     (unsigned)pwm, (unsigned)elapsed);
+        }
+        putVal(SD_VX, SD_PROG_Y, b, ui::COL_WHITE);
+        svcDiagPrevProgress_ = progress;
+        svcDiagPrevChannel_  = channel;
+        svcDiagPrevPwm_      = pwm;
+        svcDiagPrevElapsed_  = elapsed;
+    }
+    svcDiagPrevValid_ = sess.valid;
+
+    // ---- Per-channel table (fed by 0x31C) ----
+    for (uint8_t i = 0; i < vehicle::ServiceDiagResultData::CHANNEL_COUNT; ++i) {
+        const uint32_t sig = (res.valid[i]
+            ? (0x01UL
+               | ((uint32_t)res.view[i].pwmStepPct << 1)
+               | ((uint32_t)res.view[i].currentMa   << 9)
+               | ((uint32_t)res.view[i].verdict     << 25))
+            : 0x00UL) | (i == svcDiagCursorChannel_ ? 0x80000000UL : 0UL);
+        if (!force && sig == svcDiagPrevTableSig_[i]) {
+            continue;
+        }
+        svcDiagPrevTableSig_[i] = sig;
+
+        const int16_t y = SD_TBL_ROW0_Y + i * SD_TBL_RH;
+        // Cursor marker: the channel EJECUTAR will step next while ARMED
+        // (round robin, independent from the results already shown).
+        tft.setTextColor(i == svcDiagCursorChannel_ ? ui::COL_CYAN : ui::COL_BG, ui::COL_BG);
+        tft.drawString(i == svcDiagCursorChannel_ ? ">" : " ", 0, y);
+
+        if (!res.valid[i]) {
+            putVal(SD_COL_PWM_X, y, "  --", ui::COL_GRAY);
+            putVal(SD_COL_CUR_X, y, "   --", ui::COL_GRAY);
+            putVal(SD_COL_PPS_X, y, "  --", ui::COL_GRAY);
+            putVal(SD_COL_VRD_X, y, "--------------", ui::COL_GRAY);
+            continue;
+        }
+        const auto& v = res.view[i];
+        snprintf(b, sizeof(b), "%4u", (unsigned)v.pwmStepPct);
+        putVal(SD_COL_PWM_X, y, b, ui::COL_WHITE);
+        snprintf(b, sizeof(b), "%5u", (unsigned)v.currentMa);
+        putVal(SD_COL_CUR_X, y, b, ui::COL_WHITE);
+        if (i == can::SVCDIAG_CH_STEERING) {
+            snprintf(b, sizeof(b), "%4s", "--");
+        } else {
+            snprintf(b, sizeof(b), "%4u", (unsigned)v.pulsesPerSec);
+        }
+        putVal(SD_COL_PPS_X, y, b, ui::COL_WHITE);
+        uint16_t vc = (v.verdict == can::SVCDIAG_STEP_PASS) ? ui::COL_GREEN
+                    : (v.verdict == can::SVCDIAG_STEP_FAIL_OVERCURRENT) ? ui::COL_RED
+                    : (v.verdict == can::SVCDIAG_STEP_RUNNING) ? ui::COL_AMBER
+                                                               : ui::COL_GRAY;
+        snprintf(b, sizeof(b), "%-14s", sdv::verdictText(v.verdict));
+        putVal(SD_COL_VRD_X, y, b, vc);
+    }
+
+    // ---- EJECUTAR / ABORTAR fill + label (cheap: repainted every frame) ---
+    const bool idleOrAborted = (state == can::SVCDIAG_STATE_IDLE ||
+                               state == can::SVCDIAG_STATE_ABORTED);
+    const bool armed  = (state == can::SVCDIAG_STATE_ARMED);
+
+    const char* execLabel;
+    uint16_t execFill, execText;
+    if (!idleOrAborted && !armed) {
+        // STEPPING / ENTERING / DEADTIME: grayed out, non-functional.
+        execLabel = "EJECUTAR"; execFill = ui::COL_DARK_GRAY; execText = ui::COL_GRAY;
+    } else if (idleOrAborted && svcDiagStartPending_) {
+        execLabel = "CONFIRMAR?"; execFill = ui::COL_AMBER; execText = ui::COL_BLACK;
+    } else if (armed) {
+        execLabel = "EJECUTAR"; execFill = ui::COL_GREEN; execText = ui::COL_BLACK;
+    } else {
+        execLabel = "EJECUTAR"; execFill = ui::COL_BLUE; execText = ui::COL_WHITE;
+    }
+    tft.fillRect(SD_EXEC_X + 1, SD_BTN_Y + 1, SD_BTN_W - 2, SD_BTN_H - 2, execFill);
+    tft.setTextColor(execText, execFill);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(execLabel, SD_EXEC_X + SD_BTN_W / 2, SD_BTN_Y + SD_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // ABORTAR: always tappable/idempotent — a steady, unambiguous red.
+    tft.fillRect(SD_ABORT_X + 1, SD_BTN_Y + 1, SD_BTN_W - 2, SD_BTN_H - 2, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("ABORTAR", SD_ABORT_X + SD_BTN_W / 2, SD_BTN_Y + SD_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// SERVICE_CMD (0x110) byte0=SERVICE_ACTION_SELF_TEST (0xFC), byte1=op.  See
+// Core/Src/can_handler.c svcdiag_handle_service_cmd for the exact DLC each
+// op requires (START>=3, NEXT>=7, ABORT/QUERY>=2) — this helper always
+// sends the maximal, fully-populated DLC for the given op so it is never
+// short.  The STM32 validates, applies (or rejects with a reason) and
+// replies with CMD_ACK (0x103) plus the 0x31B/0x31C telemetry frames; this
+// only transmits, it never assumes success.
+void EngineeringScreen::sendServiceDiagOp(uint8_t op, uint8_t channel,
+                                          uint8_t direction, uint8_t pwmPct,
+                                          uint16_t plateauMs) {
+    CanFrame frame = {};
+    frame.identifier = can::SERVICE_CMD;
+    frame.extd       = 0;
+    frame.data[0]    = can::SERVICE_ACTION_SELF_TEST;
+    frame.data[1]    = op;
+    if (op == can::SVCDIAG_OP_START) {
+        frame.data_length_code = 3;
+        frame.data[2] = can::SVCDIAG_CONFIRM_TOKEN;
+    } else if (op == can::SVCDIAG_OP_NEXT) {
+        frame.data_length_code = 7;
+        frame.data[2] = channel;
+        frame.data[3] = direction;
+        frame.data[4] = pwmPct;
+        frame.data[5] = (uint8_t)(plateauMs & 0xFFu);
+        frame.data[6] = (uint8_t)((plateauMs >> 8) & 0xFFu);
+    } else {
+        frame.data_length_code = 2;   // ABORT / QUERY: no payload
+    }
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// SERVICE_CMD (0x110) byte0=SERVICE_ACTION_WHEEL_EQUALITY (0xFD), byte1=op.
+// See Core/Src/can_handler.c wheq_handle_service_cmd: ALL FOUR ops (BEGIN,
+// BEGIN_PHASE2, ABORT, QUERY) require only len>=2 — no confirm-token byte
+// at the wire level (unlike SVCDIAG_OP_START), so this is always DLC=2.
+// The STM32 validates, applies (or rejects with a reason only visible via
+// the generic CMD_ACK result code — WHEQ has no reason byte on the wire)
+// and, for BEGIN/BEGIN_PHASE2/QUERY, (re)sends the 0x31D results burst;
+// this only transmits, it never assumes success.
+void EngineeringScreen::sendWheelEqualityOp(uint8_t op) {
+    CanFrame frame = {};
+    frame.identifier       = can::SERVICE_CMD;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = can::SERVICE_ACTION_WHEEL_EQUALITY;
+    frame.data[1]          = op;
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// =========================================================================
+// WHEEL EQUALITY results (SERVICE_AUTOTEST page 1, Hito 2, PR #445)
+//
+// Decodes/stores via wheel_equality_view.h + vehicle::WheelEqualityData
+// (esp32/src/vehicle_data.h), fed by can_rx.cpp's decodeWheelEquality().
+// One CAN frame (0x31D) carries ONE field kind for ONE wheel; a full
+// results burst is 16 frames (4 wheels x 4 field kinds), pushed once when
+// Fase 1 completes and again if Fase 2 runs.  There is NO live WHEQ
+// session-status frame (unlike SVCDIAG's 0x31B) — QUERY (polled in
+// update()) is the only recovery path for a page (re)entered mid-run or
+// after a previous run.
+//
+// The table shows the MOST RECENT composite result per wheel, sorted by
+// deviationPct DESCENDING (worst channel first) per the mandatory spec;
+// a wheel that has not reported anything yet always sorts last regardless
+// of its (irrelevant) default deviationPct==0.  STALE (>3000 ms since the
+// wheel's last sub-frame) is marked by tinting that row's wheel-label
+// amber — the underlying last-known values stay on screen (more useful
+// than blanking) but are visually flagged as not from the current run.
+//
+// All verdict/cause fields are rendered as legible short text (T5-style
+// requirement — never a bare numeric code) via wheel_equality_view's
+// *ShortText() helpers.  No parameter editors, no graphs/gauges — that is
+// Hito 4 scope.  ABORTAR is always visible/tappable, matching SVCDIAG.
+// =========================================================================
+namespace {
+constexpr int16_t WEQ_WARN_Y      = 32;   // reuses the same banner geometry as SD_WARN_Y/H
+constexpr int16_t WEQ_WARN_H      = 24;
+constexpr int16_t WEQ_ACK_Y       = 60;   // last WHEQ_OP_* CMD_ACK feedback line
+constexpr int16_t WEQ_TBL_HDR_Y   = 80;
+constexpr int16_t WEQ_TBL_ROW0_Y  = 98;
+constexpr int16_t WEQ_TBL_RH      = 20;
+
+constexpr int16_t WEQ_COL_WHEEL_X = 4;    // "FL"/"FR"/"RL"/"RR"
+constexpr int16_t WEQ_COL_P25_X   = 24;   // pulsos/s @25%
+constexpr int16_t WEQ_COL_P50_X   = 56;   // pulsos/s @50%
+constexpr int16_t WEQ_COL_VN_X    = 88;   // velocidad normalizada
+constexpr int16_t WEQ_COL_DEV_X   = 122;  // desviacion % (sort key)
+constexpr int16_t WEQ_COL_CUR_X   = 148;  // corriente (mA @50%)
+constexpr int16_t WEQ_COL_SLOPE_X = 186;  // pendiente I/PWM
+constexpr int16_t WEQ_COL_ASYM_X  = 218;  // asimetria F/R
+constexpr int16_t WEQ_COL_DT_X    = 248;  // delta T
+constexpr int16_t WEQ_COL_WVRD_X  = 272;  // veredicto rueda
+constexpr int16_t WEQ_COL_DVRD_X  = 326;  // veredicto driver
+constexpr int16_t WEQ_COL_CAUSE_X = 378;  // causa probable
+
+constexpr int16_t WEQ_BTN_Y    = 280;
+constexpr int16_t WEQ_BTN_H    = 30;
+constexpr int16_t WEQ_START_X  = 98;
+constexpr int16_t WEQ_START_W  = 108;
+constexpr int16_t WEQ_PHASE2_X = 210;
+constexpr int16_t WEQ_PHASE2_W = 108;
+constexpr int16_t WEQ_ABORT_X  = 322;
+constexpr int16_t WEQ_ABORT_W  = 124;
+
+const char* const WEQ_WHEEL_LABELS[vehicle::NUM_WHEELS] = { "FL", "FR", "RL", "RR" };
+} // namespace
+
+void EngineeringScreen::drawWheelEquality() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header band
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("IGUALDAD RUEDAS", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    // Page-toggle button: back to the Hito 1 step-by-step page (page 0).
+    tft.fillRect(WEQ_TOGGLE_X, WEQ_TOGGLE_Y, WEQ_TOGGLE_W, WEQ_TOGGLE_H, ui::COL_BLUE);
+    tft.drawRect(WEQ_TOGGLE_X, WEQ_TOGGLE_Y, WEQ_TOGGLE_W, WEQ_TOGGLE_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BLUE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("< PASOS", WEQ_TOGGLE_X + WEQ_TOGGLE_W / 2, WEQ_TOGGLE_Y + WEQ_TOGGLE_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Permanent warning banner — identical precondition/geometry as page 0.
+    tft.fillRect(0, WEQ_WARN_Y, ui::SCREEN_W, WEQ_WARN_H, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("VEHICULO SUSPENDIDO - 4 RUEDAS EN EL AIRE",
+                   ui::SCREEN_W / 2, WEQ_WARN_Y + WEQ_WARN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Static table header row (data + ACK line painted by
+    // refreshWheelEquality()).
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("RD",    WEQ_COL_WHEEL_X, WEQ_TBL_HDR_Y);
+    tft.drawString("P25",   WEQ_COL_P25_X,   WEQ_TBL_HDR_Y);
+    tft.drawString("P50",   WEQ_COL_P50_X,   WEQ_TBL_HDR_Y);
+    tft.drawString("V.N",   WEQ_COL_VN_X,    WEQ_TBL_HDR_Y);
+    tft.drawString("DESV",  WEQ_COL_DEV_X,   WEQ_TBL_HDR_Y);
+    tft.drawString("I(mA)", WEQ_COL_CUR_X,   WEQ_TBL_HDR_Y);
+    tft.drawString("PEND",  WEQ_COL_SLOPE_X, WEQ_TBL_HDR_Y);
+    tft.drawString("ASIM",  WEQ_COL_ASYM_X,  WEQ_TBL_HDR_Y);
+    tft.drawString("dT",    WEQ_COL_DT_X,    WEQ_TBL_HDR_Y);
+    tft.drawString("VEREDIC", WEQ_COL_WVRD_X, WEQ_TBL_HDR_Y);
+    tft.drawString("DRIVER",  WEQ_COL_DVRD_X, WEQ_TBL_HDR_Y);
+    tft.drawString("CAUSA",   WEQ_COL_CAUSE_X, WEQ_TBL_HDR_Y);
+
+    // BACK button (existing global convention).
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // INICIAR / FASE2 / ABORTAR outlines — fixed position, ALWAYS drawn.
+    // Fill colour + label are repainted every frame by
+    // refreshWheelEquality().  ABORTAR is mandatorily always visible.
+    tft.drawRect(WEQ_START_X,  WEQ_BTN_Y, WEQ_START_W,  WEQ_BTN_H, ui::COL_GRAY);
+    tft.drawRect(WEQ_PHASE2_X, WEQ_BTN_Y, WEQ_PHASE2_W, WEQ_BTN_H, ui::COL_GRAY);
+    tft.drawRect(WEQ_ABORT_X,  WEQ_BTN_Y, WEQ_ABORT_W,  WEQ_BTN_H, ui::COL_GRAY);
+
+    wheqForcePaint_ = true;
+}
+
+void EngineeringScreen::refreshWheelEquality(bool force) {
+    namespace weq = wheel_equality_view;
+    if (data_ == nullptr) {
+        return;
+    }
+
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    char b[24];
+    char ackBuf[48];
+    auto putVal = [&](int16_t x, int16_t y, const char* s, uint16_t col) {
+        tft.setTextColor(col, ui::COL_BG);   // opaque bg overwrites in place
+        tft.drawString(s, x, y);
+    };
+
+    // ---- Last WHEQ_OP_* command feedback (generic CMD_ACK; WHEQ has no
+    // reason byte on the wire, unlike SVCDIAG's 0x31B) ----
+    static const char* const kAckText[] = {
+        "", "ULTIMA ORDEN: OK", "ULTIMA ORDEN: RECHAZADA",
+        "ULTIMA ORDEN: BLOQUEADA POR SEGURIDAD", "ULTIMA ORDEN: INVALIDA",
+        "ULTIMA ORDEN: SIN RESPUESTA (TIMEOUT)"
+    };
+    static const uint16_t kAckColor[] = {
+        ui::COL_BG, ui::COL_GREEN, ui::COL_AMBER, ui::COL_RED, ui::COL_RED, ui::COL_AMBER
+    };
+    const uint8_t ackIdx = static_cast<uint8_t>(wheqAck_);
+    snprintf(ackBuf, sizeof(ackBuf), "%-44s", kAckText[ackIdx]);
+    if (force || ackIdx != 0) {
+        putVal(4, WEQ_ACK_Y, ackBuf, kAckColor[ackIdx]);
+    }
+
+    // ---- Per-wheel table, sorted by deviationPct DESCENDING (worst
+    // channel first); a wheel with no data yet always sorts last. ----
+    const vehicle::WheelEqualityData& weqData = data_->wheelEquality();
+    uint8_t order[vehicle::NUM_WHEELS] = { 0, 1, 2, 3 };
+    for (uint8_t i = 1; i < vehicle::NUM_WHEELS; ++i) {
+        uint8_t key = order[i];
+        int8_t j = static_cast<int8_t>(i) - 1;
+        // keyBetter(key, existing): should `key` be inserted BEFORE
+        // `existing`?  Strict '>' on the tie-break keeps the sort STABLE
+        // (an already-placed equal-deviation wheel stays ahead of a later
+        // one), avoiding frame-to-frame row jitter on exact ties.
+        auto keyBetter = [&](uint8_t keyIdx, uint8_t existingIdx) {
+            const auto& wk = weqData.wheel[keyIdx];
+            const auto& we = weqData.wheel[existingIdx];
+            if (wk.valid != we.valid) return wk.valid;               // valid sorts before !valid
+            return wk.valid && wk.deviationPct > we.deviationPct;    // then deviation% desc
+        };
+        while (j >= 0 && keyBetter(key, order[j])) {
+            order[j + 1] = order[j];
+            --j;
+        }
+        order[j + 1] = key;
+    }
+
+    const uint32_t now = static_cast<uint32_t>(lastFrameTimeMs_);
+    for (uint8_t row = 0; row < vehicle::NUM_WHEELS; ++row) {
+        const uint8_t wheelIdx = order[row];
+        const vehicle::WheelEqualityWheelData& w = weqData.wheel[wheelIdx];
+        const weq::Freshness fresh =
+            weq::freshness(w.valid, now, static_cast<uint32_t>(w.timestampMs));
+        const bool stale = (fresh == weq::Freshness::STALE);
+
+        // Lightweight combining hash (NOT an exact bit-pack — collisions
+        // are harmless here, worst case a stale pixel until the next
+        // differing frame) so a re-sort OR any displayed field change
+        // forces this row to repaint; wheelIdx is included so moving a
+        // wheel to a different row always repaints both rows involved.
+        uint32_t sig = 2166136261u;
+        auto mix = [&](uint32_t v) { sig = (sig ^ v) * 16777619u; };
+        mix(wheelIdx);
+        mix(w.valid ? 1u : 0u);
+        mix(stale ? 1u : 0u);
+        mix(w.pulsesPerSec25);
+        mix(w.pulsesPerSec50);
+        mix(w.normalizedSpeedX1000);
+        mix(w.deviationPct);
+        mix(w.currentMa50);
+        mix(w.slopeMaPerPctX10);
+        mix(w.asymmetryPctX10);
+        mix(w.deltaTempCX10);
+        mix(w.tempPresent ? 1u : 0u);
+        mix(w.wheelVerdict);
+        mix(w.driverVerdict);
+        mix(w.probableCause);
+
+        if (!force && sig == wheqPrevRowSig_[row]) {
+            continue;
+        }
+        wheqPrevRowSig_[row] = sig;
+
+        const int16_t y = WEQ_TBL_ROW0_Y + row * WEQ_TBL_RH;
+        const uint16_t wheelCol = !w.valid ? ui::COL_GRAY
+                                : stale     ? ui::COL_AMBER
+                                            : ui::COL_WHITE;
+        putVal(WEQ_COL_WHEEL_X, y, WEQ_WHEEL_LABELS[wheelIdx], wheelCol);
+
+        // Every field below uses a FIXED total width (matched between the
+        // "!valid" placeholder and the real value) so a shorter string never
+        // leaves stale digits from a previous, longer render in place —
+        // same convention as SD_COL_*/refreshServiceAutotest() above.
+        if (!w.valid) {
+            putVal(WEQ_COL_P25_X,   y, "   --", ui::COL_GRAY);
+            putVal(WEQ_COL_P50_X,   y, "   --", ui::COL_GRAY);
+            putVal(WEQ_COL_VN_X,    y, "   --", ui::COL_GRAY);
+            putVal(WEQ_COL_DEV_X,   y, " --",   ui::COL_GRAY);
+            putVal(WEQ_COL_CUR_X,   y, "   --", ui::COL_GRAY);
+            putVal(WEQ_COL_SLOPE_X, y, "   --", ui::COL_GRAY);
+            putVal(WEQ_COL_ASYM_X,  y, "  --",  ui::COL_GRAY);
+            putVal(WEQ_COL_DT_X,    y, "  --",  ui::COL_GRAY);
+            snprintf(b, sizeof(b), "%-9s", "PEND");
+            putVal(WEQ_COL_WVRD_X,  y, b, ui::COL_GRAY);
+            snprintf(b, sizeof(b), "%-8s", "PEND");
+            putVal(WEQ_COL_DVRD_X,  y, b, ui::COL_GRAY);
+            snprintf(b, sizeof(b), "%-11s", "-");
+            putVal(WEQ_COL_CAUSE_X, y, b, ui::COL_GRAY);
+            continue;
+        }
+
+        const uint16_t valCol = stale ? ui::COL_AMBER : ui::COL_WHITE;
+        snprintf(b, sizeof(b), "%5u", (unsigned)w.pulsesPerSec25);
+        putVal(WEQ_COL_P25_X, y, b, valCol);
+        snprintf(b, sizeof(b), "%5u", (unsigned)w.pulsesPerSec50);
+        putVal(WEQ_COL_P50_X, y, b, valCol);
+        snprintf(b, sizeof(b), "%2u.%02u", (unsigned)(w.normalizedSpeedX1000 / 1000U),
+                 (unsigned)(w.normalizedSpeedX1000 % 1000U) / 10U);
+        putVal(WEQ_COL_VN_X, y, b, valCol);
+        snprintf(b, sizeof(b), "%3u", (unsigned)w.deviationPct);
+        putVal(WEQ_COL_DEV_X, y, b,
+               stale ? ui::COL_AMBER : (w.deviationPct > 0 ? ui::COL_YELLOW : ui::COL_WHITE));
+        snprintf(b, sizeof(b), "%5u", (unsigned)w.currentMa50);
+        putVal(WEQ_COL_CUR_X, y, b, valCol);
+        snprintf(b, sizeof(b), "%3u.%u", (unsigned)(w.slopeMaPerPctX10 / 10U),
+                 (unsigned)(w.slopeMaPerPctX10 % 10U));
+        putVal(WEQ_COL_SLOPE_X, y, b, valCol);
+        snprintf(b, sizeof(b), "%2u.%u", (unsigned)(w.asymmetryPctX10 / 10U),
+                 (unsigned)(w.asymmetryPctX10 % 10U));
+        putVal(WEQ_COL_ASYM_X, y, b, valCol);
+        if (w.tempPresent) {
+            snprintf(b, sizeof(b), "%2u.%u", (unsigned)(w.deltaTempCX10 / 10U),
+                     (unsigned)(w.deltaTempCX10 % 10U));
+        } else {
+            snprintf(b, sizeof(b), "%4s", "-");
+        }
+        putVal(WEQ_COL_DT_X, y, b, valCol);
+
+        const uint16_t wvCol = stale ? ui::COL_AMBER
+                             : weq::isWheelVerdictFault(w.wheelVerdict) ?
+                               (w.wheelVerdict == can::WHEQ_WHEEL_VERDICT_WARN ? ui::COL_YELLOW : ui::COL_RED)
+                             : (w.wheelVerdict == can::WHEQ_WHEEL_VERDICT_PASS ? ui::COL_GREEN : ui::COL_GRAY);
+        snprintf(b, sizeof(b), "%-9s", weq::wheelVerdictShortText(w.wheelVerdict));
+        putVal(WEQ_COL_WVRD_X, y, b, wvCol);
+
+        const uint16_t dvCol = stale ? ui::COL_AMBER
+                             : (w.driverVerdict == can::WHEQ_DRIVER_SANO)        ? ui::COL_GREEN
+                             : (w.driverVerdict == can::WHEQ_DRIVER_SOSPECHOSO)  ? ui::COL_YELLOW
+                             : (w.driverVerdict == can::WHEQ_DRIVER_DEGRADADO)   ? ui::COL_RED
+                                                                                 : ui::COL_GRAY;
+        snprintf(b, sizeof(b), "%-8s", weq::driverVerdictShortText(w.driverVerdict));
+        putVal(WEQ_COL_DVRD_X, y, b, dvCol);
+
+        snprintf(b, sizeof(b), "%-11s", weq::causeShortText(w.probableCause));
+        putVal(WEQ_COL_CAUSE_X, y, b,
+               stale ? ui::COL_AMBER
+                     : (w.probableCause == can::WHEQ_CAUSE_NONE ? ui::COL_GRAY : ui::COL_AMBER));
+    }
+
+    // ---- INICIAR / FASE2 / ABORTAR fill + label (cheap: repainted every
+    // frame, mirrors refreshServiceAutotest()'s EJECUTAR/ABORTAR) ----
+    const char* startLabel;
+    uint16_t startFill, startText;
+    if (wheqStartPending_) {
+        startLabel = "CONFIRMAR?"; startFill = ui::COL_AMBER; startText = ui::COL_BLACK;
+    } else {
+        startLabel = "INICIAR F1"; startFill = ui::COL_GREEN; startText = ui::COL_BLACK;
+    }
+    tft.fillRect(WEQ_START_X + 1, WEQ_BTN_Y + 1, WEQ_START_W - 2, WEQ_BTN_H - 2, startFill);
+    tft.setTextColor(startText, startFill);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(startLabel, WEQ_START_X + WEQ_START_W / 2, WEQ_BTN_Y + WEQ_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // FASE2: always tappable — the STM32 hard-gates BEGIN_PHASE2 on a
+    // clean Fase 1 and reports ACK_REJECTED otherwise (no client-side
+    // enable/disable state needed; there is no session-status frame to
+    // know the FSM phase from anyway).
+    tft.fillRect(WEQ_PHASE2_X + 1, WEQ_BTN_Y + 1, WEQ_PHASE2_W - 2, WEQ_BTN_H - 2, ui::COL_BLUE);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BLUE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("FASE 2", WEQ_PHASE2_X + WEQ_PHASE2_W / 2, WEQ_BTN_Y + WEQ_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // ABORTAR: always tappable/idempotent — mandatory "always visible and
+    // accessible", a steady, unambiguous red (matches SVCDIAG's ABORTAR).
+    tft.fillRect(WEQ_ABORT_X + 1, WEQ_BTN_Y + 1, WEQ_ABORT_W - 2, WEQ_BTN_H - 2, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("ABORTAR", WEQ_ABORT_X + WEQ_ABORT_W / 2, WEQ_BTN_Y + WEQ_BTN_H / 2);
+    tft.setTextDatum(TL_DATUM);
 }
 
 // =========================================================================

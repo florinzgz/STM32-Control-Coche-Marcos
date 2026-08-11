@@ -33,8 +33,14 @@ _Min_Stack_Size = 0x400;     /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 472K
-  /* Pages 118-127 reserved for NVM data — not part of FLASH region.
+  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 448K
+  /* Pages 112-127 reserved for NVM data — not part of FLASH region.
+   * Page 112 (0x08070000): tcs_tuning_store.c      TCS tuning (service diag C1)
+   * Page 113 (0x08071000): geometry_store.c        Ackermann geometry (service diag C2)
+   * Page 114 (0x08072000): shunt_store.c           INA226 shunt mOhm (service diag C3)
+   * Page 115 (0x08073000): steering_service_store.c homing/current tuning (service diag C4)
+   * Page 116 (0x08074000): wheel_sensor_store.c    wheel encoder tuning (service diag C5)
+   * Page 117 (0x08075000): service_diag_report.c   last self-test report (service diag B6)
    * Page 118 (0x08076000): gear_limits_store.c redundant journal page
    * Page 119 (0x08077000): pedal_cal_store.c redundant journal page
    * Page 120 (0x08078000): battery_limits_store.c battery V thresholds
@@ -46,11 +52,13 @@ MEMORY
    * Page 126 (0x0807E000): steering_cal_store.c  steering calibration
    * Page 127 (0x0807F000): eps_params.c          EPS tuning parameters
    *
-   * FLASH region was reduced 500K → 496K → 492K → 488K → 480K to free
-   * pages 124/123 for the pedal calibration NVM slot and the DS18B20 sensor
-   * map, page 122 for the gear power-limit NVM slot, and pages 121/120 for
-   * the drive-tuning and battery-limit NVM slots.  .text / .rodata / .data
-   * init image are guaranteed to end below 0x08078000.                 */
+   * FLASH region was reduced 500K → 496K → 492K → 488K → 480K → 472K → 448K
+   * to free pages 124/123 for the pedal calibration NVM slot and the DS18B20
+   * sensor map, page 122 for the gear power-limit NVM slot, pages 121/120 for
+   * the drive-tuning and battery-limit NVM slots, and pages 117-112 for the
+   * six service-autodiagnosis NVM slots (five runtime-tunable parameter
+   * stores plus the persisted self-test report).  .text / .rodata / .data
+   * init image are guaranteed to end below 0x08070000.                 */
   EPS_PARAMS (r)  : ORIGIN = 0x0807F000,   LENGTH = 4K
 }
 
@@ -190,11 +198,11 @@ SECTIONS
 /* ----------------------------------------------------------------------
  * Defense-in-depth: guarantee that the FLASH-resident image (code +
  * rodata + .data init image) never overflows into the NVM region that
- * starts at page 122 (0x0807A000).  The MEMORY region `LENGTH = 488K`
+ * starts at page 112 (0x08070000).  The MEMORY region `LENGTH = 448K`
  * above already enforces this, but the explicit ASSERT below produces
- * a clearer diagnostic ("Code overlaps NVM page 122") if some future
+ * a clearer diagnostic ("Code overlaps NVM page 112") if some future
  * tweak silently widens the FLASH region.  Standard GNU ld syntax,
  * no impact on the existing toolchain.
  * --------------------------------------------------------------------*/
-ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x08076000,
-       "Code overlaps NVM page 118. Reduce code size or revisit FLASH=472K reservation.")
+ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x08070000,
+       "Code overlaps NVM page 112. Reduce code size or revisit FLASH=448K reservation.")

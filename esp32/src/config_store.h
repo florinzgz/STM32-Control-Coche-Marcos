@@ -38,7 +38,7 @@ struct FaultLogEntry {
     uint32_t uptimeMs;       // millis() when event occurred
     uint8_t  errorCode;      // SafetyError code (can_ids.h)
     uint8_t  faultFlags;     // Heartbeat fault bitmask at the time
-    uint8_t  subsystem;      // DiagSubsystem code (0=Global,1=Motor,2=Sensor,3=CAN)
+    uint8_t  subsystem;      // DiagSubsystem code (0=Global,1=Motor,2=Sensor,3=CAN,4=ServiceDiag)
     uint8_t  systemState;    // SystemState at the time of the event
 };
 

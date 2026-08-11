@@ -490,6 +490,56 @@ void Traction_Update(void)
         return;
     }
 
+    /* ---- Hito 2 (PR #445): SERVICE_DIAG wheel-equality RAW actuation ----
+     *
+     * When the wheel-equality self-test (wheel_equality_test.c, fed in via
+     * can_handler.c's CAN_WheelEqualityTick() -> Traction_SetWheelEqActuation(),
+     * consumed here through the wheeleq_* statics shared by #include above)
+     * is actively commanding one or more wheels, apply the SAME raw PWM
+     * value identically (byte-for-byte, no per-wheel scaling) to every
+     * masked wheel, coast every other wheel, and RETURN IMMEDIATELY —
+     * BEFORE Traction_Update_Base(), BEFORE the shadow-register dance, and
+     * BEFORE TractionOutput_Resolve4x4()/TractionOutput_Resolve4x2Rear()
+     * below (traction_output_policy.h:142,210) ever run.
+     *
+     * This is deliberate and mandatory: those two functions equalize all
+     * four wheels to the SLOWEST one whenever the steering angle is inside
+     * the Ackermann deadband and no per-wheel safety scaling is active —
+     * exactly the condition this self-test requires (steering centred).
+     * If this check ran AFTER Traction_Update_Base() like every other
+     * path, the equalization would silently erase the very wheel-to-wheel
+     * differences this test exists to reveal.  This is the ONLY
+     * intentional bypass of those two functions in production code.
+     *
+     * Still honours the power-ready precondition (hardware, not policy)
+     * and Motor_SetMode()'s dead-time-safe EN/PWM sequencing.  Everything
+     * else below (gear P/N, pedal, ABS/TCS, Ackermann, ramps, 4x4/4x2
+     * split) is intentionally skipped.  The safety envelope while this
+     * path is active is inherited from Hito 1's ServiceDiagSession
+     * (must stay ARMED — see wheq_build_conds()/CAN_WheelEqualityTick()
+     * in can_handler.c, which release wheeleq_active on any abort). */
+    if (wheeleq_active) {
+        if (!Safety_IsPowerReady()) {
+            coast_all();
+            zero_output_telemetry();
+            return;
+        }
+
+        Motor_t *const motors[4] = { &motor_fl, &motor_fr, &motor_rl, &motor_rr };
+        uint16_t raw_pwm = (uint16_t)((float)wheeleq_pwm_pct * (float)PWM_PERIOD / 100.0f);
+        int8_t dir = wheeleq_forward ? 1 : -1;
+
+        for (uint8_t i = 0U; i < 4U; ++i) {
+            bool driven = (wheeleq_wheel_mask & (1U << i)) != 0U;
+            apply_motor(motors[i], i,
+                        driven ? MOTOR_MODE_DRIVE : MOTOR_MODE_COAST,
+                        driven ? raw_pwm : 0U,
+                        driven ? dir : 0);
+        }
+        Traction_UpdateMotionInhibit(0.0f, 0U);  /* instrumentation only */
+        return;
+    }
+
     if (auto_release_tank()) return;
 
     init_shadow();

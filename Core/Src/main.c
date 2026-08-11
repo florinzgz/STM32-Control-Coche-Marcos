@@ -32,6 +32,11 @@
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
 #include "battery_limits_store.h"
+#include "tcs_tuning_store.h"
+#include "geometry_store.h"
+#include "shunt_store.h"
+#include "steering_service_store.h"
+#include "wheel_sensor_store.h"
 #include "error_log.h"
 #include "loop_diag.h"
 #include <math.h>
@@ -396,6 +401,34 @@ int main(void)
         (void)Safety_SetBatteryLimits(&bl);
     }
 
+    /* ---- Service-diagnostic runtime-tunable parameter stores (Block C) ----
+     * Each Init() loads its flash slot into a RAM "staged" value that is
+     * ALREADY the effective value consumed by production code (tcs_tuned.c,
+     * motor_control.c's Ackermann geometry, sensor_manager.c's shunt/wheel-
+     * geometry/debounce reads).  On flash blank / CRC-invalid / out-of-range
+     * each store silently falls back to its compile-time defaults — boot is
+     * NEVER blocked.  These do NOT clear startup_inhibit, authorise ACTIVE,
+     * or bypass any safety gate; they only supply the numeric parameters an
+     * already-gated path consumes.                                          */
+    TcsTuningStore_Init();
+    GeometryStore_Init();
+    ShuntStore_Init();
+    SteeringServiceStore_Init();
+    WheelSensorStore_Init();
+
+    /* SERVICE_DIAG self-test session (Bloque A, PR #445 Hito 1) — resets the
+     * FSM to IDLE and its "last observed" transition-tracking statics. Does
+     * NOT touch any actuator; CAN_ServiceDiagTick() (50 ms task below) is
+     * what actually drives the FSM once a session is started over CAN.     */
+    CAN_ServiceDiagInit();
+
+    /* Wheel-equality / BTS7960 health self-test (PR #445 Hito 2) — resets
+     * the WheelEqTest FSM to IDLE.  Depends on the ServiceDiagSession above
+     * already being initialised (Begin() requires it ARMED); does NOT touch
+     * any actuator by itself — CAN_WheelEqualityTick() (50 ms task below)
+     * is what actually drives real PWM once a test is started over CAN.   */
+    CAN_WheelEqualityInit();
+
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
     boot_phase = 4;  /* Post-init complete, about to enter main loop */
@@ -573,6 +606,21 @@ int main(void)
 
             Pedal_Update();
             CAN_PedalCalCaptureTick();   /* R-1: cooperative pedalcal FSM */
+            CAN_ServiceDiagTick();       /* Bloque A: cooperative SERVICE_DIAG
+                                           * self-test FSM tick; <=100 ms cadence
+                                           * required by its watchdog, this 50 ms
+                                           * block gives a 2x margin. No-op while
+                                           * IDLE/ABORTED (lazy-init on first call). */
+            CAN_WheelEqualityTick();     /* Hito 2: cooperative wheel-equality/
+                                           * BTS7960 health self-test FSM tick;
+                                           * <=100 ms cadence required by its own
+                                           * watchdog, this 50 ms block gives a 2x
+                                           * margin.  Placed right after the
+                                           * Bloque A tick above (same relative
+                                           * position each cycle) so both self-
+                                           * tests read the same one-cycle-old
+                                           * Current_ReadAll() snapshot below —
+                                           * lazy-init on first call. */
             Current_ReadAll();
             switch (temp_sm_state) {
                 case TEMP_SM_START_CONVERSION:

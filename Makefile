@@ -30,6 +30,7 @@ C_SOURCES = \
   $(CORE_SRC)/safety_system_patched.c \
   $(CORE_SRC)/service_mode.c \
   $(CORE_SRC)/ackermann.c \
+  $(CORE_SRC)/ackermann_diff.c \
   $(CORE_SRC)/steering_centering_patched.c \
   $(CORE_SRC)/steering_centering_diag.c \
   $(CORE_SRC)/steering_eps.c \
@@ -48,6 +49,13 @@ C_SOURCES = \
   $(CORE_SRC)/gear_limits_store.c \
   $(CORE_SRC)/drive_tuning_store.c \
   $(CORE_SRC)/battery_limits_store.c \
+  $(CORE_SRC)/tcs_tuning_store.c \
+  $(CORE_SRC)/geometry_store.c \
+  $(CORE_SRC)/shunt_store.c \
+  $(CORE_SRC)/steering_service_store.c \
+  $(CORE_SRC)/wheel_sensor_store.c \
+  $(CORE_SRC)/service_diag_session.c \
+  $(CORE_SRC)/wheel_equality_test.c \
   $(CORE_SRC)/loop_diag.c \
   $(CORE_SRC)/math_safety.c \
   $(CORE_SRC)/standby_mode_sync_policy.c \

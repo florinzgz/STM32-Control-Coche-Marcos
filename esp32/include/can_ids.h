@@ -188,10 +188,12 @@ enum class AckResult : uint8_t {
 // Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.14)
 // -------------------------------------------------------------------------
 enum class DiagSubsystem : uint8_t {
-    GLOBAL  = 0,
-    MOTOR   = 1,
-    SENSOR  = 2,
-    CAN_BUS = 3
+    GLOBAL      = 0,
+    MOTOR       = 1,
+    SENSOR      = 2,
+    CAN_BUS     = 3,
+    SERVICE_DIAG = 4  // SERVICE_DIAG self-test session ENTER/EXIT pseudo-events
+                       // (SVCDIAG_DTC_CODE_ENTER/_EXIT, see error_log.h on STM32)
 };
 
 // -------------------------------------------------------------------------
@@ -641,6 +643,149 @@ inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 m
 // firmware reason word and are surfaced ONLY via flag bits 6/7.
 inline constexpr uint32_t DIAG_PEDAL_CAL_SESSION = 0x319;
 inline constexpr uint32_t DIAG_TRACTION_LIMITS   = 0x31A;   // STM32→ESP32, DLC 4, 1000 ms — obstacle/cap/brake-release/FSM diagnostic
+
+// -------------------------------------------------------------------------
+// 0x31B DIAG_SERVICE_SESSION / 0x31C DIAG_TEST_RESULT — SERVICE_DIAG
+// self-test session (Bloque A, PR #445 Hito 1: docs/CAN_CONTRACT_FINAL.md).
+// ESP32 -> STM32 command is SERVICE_CMD (0x110) byte0 =
+// SERVICE_ACTION_SELF_TEST (0xFC), byte1 = sub-opcode (SVCDIAG_OP_*).
+// See Core/Inc/service_diag_frame.h / service_diag_session.h for the full
+// contract; esp32/src/service_diag_view.h decodes the two telemetry frames.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_SERVICE_SESSION = 0x31B;  // STM32→ESP32, DLC 8, 10 Hz while active, silent otherwise
+inline constexpr uint32_t DIAG_TEST_RESULT     = 0x31C;  // STM32→ESP32, DLC 8, once per step close
+
+inline constexpr uint8_t SERVICE_ACTION_SELF_TEST = 0xFC;  // byte1 = sub-opcode (SVCDIAG_OP_*) → 0x31B/0x31C
+
+// Sub-opcodes (byte 1) — MUST mirror Core/Inc/can_handler.h SVCDIAG_OP_*.
+inline constexpr uint8_t SVCDIAG_OP_START = 0x01;  // byte2 = confirm token (SVCDIAG_CONFIRM_TOKEN)
+inline constexpr uint8_t SVCDIAG_OP_NEXT  = 0x02;  // byte2=channel, byte3=direction, byte4=pwm%, byte5-6=plateau_ms LE
+inline constexpr uint8_t SVCDIAG_OP_ABORT = 0x03;  // no payload
+inline constexpr uint8_t SVCDIAG_OP_QUERY = 0x04;  // no payload; single immediate 0x31B reply
+
+// Operator-confirmation token — MUST equal Core/Inc/service_diag_session.h
+// SVCDIAG_CONFIRM_TOKEN.  Sent as byte2 of a START command ONLY after an
+// explicit, deliberate double-tap confirm on the EJECUTAR button (same
+// idiom as MODULE_CONTROL/FACTORY_DEFAULTS: first tap arms and relabels the
+// button "CONFIRMAR?", second tap within the timeout confirms) — never on
+// an ordinary single tap. The permanent "VEHICULO SUSPENDIDO" banner is
+// always visible on the SERVICE AUTOTEST screen regardless of confirm state.
+inline constexpr uint8_t SVCDIAG_CONFIRM_TOKEN = 0xA5;
+
+// Session FSM state (0x31B byte0) — mirror of ServiceDiagState_t.
+inline constexpr uint8_t SVCDIAG_STATE_IDLE     = 0;
+inline constexpr uint8_t SVCDIAG_STATE_ENTERING = 1;
+inline constexpr uint8_t SVCDIAG_STATE_ARMED    = 2;
+inline constexpr uint8_t SVCDIAG_STATE_STEPPING = 3;
+inline constexpr uint8_t SVCDIAG_STATE_DEADTIME = 4;
+inline constexpr uint8_t SVCDIAG_STATE_ABORTED  = 5;
+
+// Test channel (0x31B byte2 / 0x31C byte0) — mirror of ServiceDiagChannel_t.
+inline constexpr uint8_t SVCDIAG_CH_FL       = 0;
+inline constexpr uint8_t SVCDIAG_CH_FR       = 1;
+inline constexpr uint8_t SVCDIAG_CH_RL       = 2;
+inline constexpr uint8_t SVCDIAG_CH_RR       = 3;
+inline constexpr uint8_t SVCDIAG_CH_STEERING = 4;
+inline constexpr uint8_t SVCDIAG_CH_NONE     = 5;
+
+// Direction (SVCDIAG_OP_NEXT byte3) — mirror of ServiceDiagDirection_t.
+inline constexpr uint8_t SVCDIAG_DIR_FORWARD = 0;
+inline constexpr uint8_t SVCDIAG_DIR_REVERSE = 1;
+
+// Per-step verdict (0x31C byte6) — mirror of ServiceDiagStepVerdict_t.
+inline constexpr uint8_t SVCDIAG_STEP_NONE            = 0;
+inline constexpr uint8_t SVCDIAG_STEP_RUNNING          = 1;
+inline constexpr uint8_t SVCDIAG_STEP_PASS             = 2;
+inline constexpr uint8_t SVCDIAG_STEP_FAIL_OVERCURRENT = 3;
+
+// Abort/reject reason (0x31B byte4) — mirror of ServiceDiagReason_t.  0-15
+// (16 values); a single highest-priority cause per Update()/Begin() call.
+inline constexpr uint8_t SVCDIAG_REASON_NONE            = 0;
+inline constexpr uint8_t SVCDIAG_REASON_OPERATOR        = 1;
+inline constexpr uint8_t SVCDIAG_REASON_BOOT_STATE      = 2;
+inline constexpr uint8_t SVCDIAG_REASON_GEAR            = 3;
+inline constexpr uint8_t SVCDIAG_REASON_WHEELS_MOVING   = 4;
+inline constexpr uint8_t SVCDIAG_REASON_NOT_CONFIRMED   = 5;
+inline constexpr uint8_t SVCDIAG_REASON_BATTERY_LOW     = 6;
+inline constexpr uint8_t SVCDIAG_REASON_BATTERY_WARN    = 7;
+inline constexpr uint8_t SVCDIAG_REASON_ALREADY_ACTIVE  = 8;
+inline constexpr uint8_t SVCDIAG_REASON_STATE_CHANGED   = 9;
+inline constexpr uint8_t SVCDIAG_REASON_CAN_LOSS        = 10;
+inline constexpr uint8_t SVCDIAG_REASON_GROUNDED_WHEEL  = 11;
+inline constexpr uint8_t SVCDIAG_REASON_OVERCURRENT     = 12;
+inline constexpr uint8_t SVCDIAG_REASON_SESSION_TIMEOUT = 13;
+inline constexpr uint8_t SVCDIAG_REASON_STEP_TIMEOUT    = 14;
+inline constexpr uint8_t SVCDIAG_REASON_WATCHDOG        = 15;
+
+// -------------------------------------------------------------------------
+// 0x31D DIAG_WHEEL_EQUALITY — wheel-equality / BTS7960 health self-test
+// results (Hito 2, PR #445: docs/CAN_CONTRACT_FINAL.md).  Nested inside the
+// Hito 1 SERVICE_DIAG session: BEGIN is only accepted once that session is
+// already ARMED (its own entry gates are not duplicated here).  ESP32 ->
+// STM32 command is SERVICE_CMD (0x110) byte0 = SERVICE_ACTION_WHEEL_EQUALITY
+// (0xFD), byte1 = sub-opcode (WHEQ_OP_*).  See Core/Inc/wheel_equality_frame.h
+// for the full byte layout (WheelEqualityFrame_t / *_Pack/_Unpack) and
+// Core/Inc/wheel_equality_test.h for the enums mirrored below;
+// esp32/src/wheel_equality_view.h decodes the wire frame.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_WHEEL_EQUALITY = 0x31D;  // STM32→ESP32, DLC 8, on-demand 16-frame burst (Fase1/Fase2 done), silent otherwise
+
+inline constexpr uint8_t SERVICE_ACTION_WHEEL_EQUALITY = 0xFD;  // byte1 = sub-opcode (WHEQ_OP_*) → 0x31D
+
+// Sub-opcodes (byte 1) — MUST mirror Core/Inc/can_handler.h WHEQ_OP_*.
+inline constexpr uint8_t WHEQ_OP_BEGIN         = 0x01;  // Start Fase 1 (requires Hito1 session ARMED)
+inline constexpr uint8_t WHEQ_OP_BEGIN_PHASE2  = 0x02;  // Start Fase 2 (requires PHASE1_DONE, zero FAIL)
+inline constexpr uint8_t WHEQ_OP_ABORT         = 0x03;  // no payload; idempotent
+inline constexpr uint8_t WHEQ_OP_QUERY         = 0x04;  // no payload; resend last results burst
+
+// field_id (0x31D byte0 bits2-3) — mirror WHEQ_FIELD_* in
+// Core/Inc/wheel_equality_frame.h.  One CAN frame per field per wheel; a
+// full results burst is 4 wheels x 4 fields = 16 frames.
+inline constexpr uint8_t WHEQ_FIELD_SPEED   = 0;
+inline constexpr uint8_t WHEQ_FIELD_CURRENT = 1;
+inline constexpr uint8_t WHEQ_FIELD_HEALTH  = 2;
+inline constexpr uint8_t WHEQ_FIELD_VERDICT = 3;
+
+// Wheel index (0x31D byte0 bits0-1) — mirror WheelEqWheel_t.
+inline constexpr uint8_t WHEQ_WHEEL_FL = 0;
+inline constexpr uint8_t WHEQ_WHEEL_FR = 1;
+inline constexpr uint8_t WHEQ_WHEEL_RL = 2;
+inline constexpr uint8_t WHEQ_WHEEL_RR = 3;
+
+// Per-wheel equality verdict (FIELD_VERDICT byte1) — mirror WheelEqWheelVerdict_t.
+inline constexpr uint8_t WHEQ_WHEEL_VERDICT_PENDING               = 0;
+inline constexpr uint8_t WHEQ_WHEEL_VERDICT_PASS                  = 1;
+inline constexpr uint8_t WHEQ_WHEEL_VERDICT_WARN                  = 2;
+inline constexpr uint8_t WHEQ_WHEEL_VERDICT_FAIL                  = 3;
+inline constexpr uint8_t WHEQ_WHEEL_VERDICT_FAIL_ACKERMANN_OFFSET = 4;
+
+// Probable-cause text driver, derived from speed deviation x current
+// (FIELD_CURRENT byte7) — mirror WheelEqCause_t.
+inline constexpr uint8_t WHEQ_CAUSE_NONE          = 0;
+inline constexpr uint8_t WHEQ_CAUSE_MECHANICAL    = 1;
+inline constexpr uint8_t WHEQ_CAUSE_ELECTRICAL    = 2;
+inline constexpr uint8_t WHEQ_CAUSE_SENSOR        = 3;
+inline constexpr uint8_t WHEQ_CAUSE_OTHERS_BRAKED = 4;
+
+// Half-bridge (forward vs reverse) asymmetry verdict (FIELD_HEALTH byte5) —
+// mirror WheelEqHalfBridgeVerdict_t.
+inline constexpr uint8_t WHEQ_HALFBRIDGE_PASS = 0;
+inline constexpr uint8_t WHEQ_HALFBRIDGE_WARN = 1;
+inline constexpr uint8_t WHEQ_HALFBRIDGE_FAIL = 2;
+
+// Driver (BTS7960) health verdict (FIELD_VERDICT byte2) — mirror
+// WheelEqDriverVerdict_t.
+inline constexpr uint8_t WHEQ_DRIVER_PENDING    = 0;
+inline constexpr uint8_t WHEQ_DRIVER_SANO       = 1;
+inline constexpr uint8_t WHEQ_DRIVER_SOSPECHOSO = 2;
+inline constexpr uint8_t WHEQ_DRIVER_DEGRADADO  = 3;
+
+// Driver-verdict "concrete criterion" bitmask (FIELD_VERDICT byte4) — mirror
+// WHEQ_DRIVER_REASON_* in Core/Inc/wheel_equality_test.h.
+inline constexpr uint8_t WHEQ_DRIVER_REASON_HALFBRIDGE = 1 << 0;  // F/R asymmetry WARN/FAIL
+inline constexpr uint8_t WHEQ_DRIVER_REASON_SLOPE      = 1 << 1;  // I/PWM slope vs median
+inline constexpr uint8_t WHEQ_DRIVER_REASON_ELECTRICAL = 1 << 2;  // electrical-cause wheel
+inline constexpr uint8_t WHEQ_DRIVER_REASON_THERMAL    = 1 << 3;  // deltaT vs median
 
 // 0x319 byte-1 flag bits.
 inline constexpr uint8_t PEDCAL_SESS_FLAG_ACTIVE        = 0x01u;
