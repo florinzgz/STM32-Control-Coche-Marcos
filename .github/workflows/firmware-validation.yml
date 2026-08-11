@@ -525,6 +525,12 @@ jobs:
               -o /tmp/test_service_diag_view
             /tmp/test_service_diag_view
 
+            echo "-- test_wheel_equality_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -ICore/Inc -Iesp32/src -Iesp32/include \
+              esp32/src/test_wheel_equality_view.cpp -lm \
+              -o /tmp/test_wheel_equality_view
+            /tmp/test_wheel_equality_view
+
             echo "-- test_display_recovery.cpp"
             g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
               esp32/src/test_display_recovery.cpp \
