@@ -1,4 +1,82 @@
-# STM32G474RE Control Car - Marcos
+<div align="center">
+
+# STM32G474RE Control Car — Marcos
+
+**Safety-critical embedded firmware for a child-scale electric vehicle.**
+Dual-MCU architecture over CAN: 4-wheel independent traction, closed-loop steering,
+ABS/TCS, a 7-state safety machine and a full-colour touchscreen HMI.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![MCU](https://img.shields.io/badge/MCU-STM32G474RE-03234B)](https://www.st.com/en/microcontrollers-microprocessors/stm32g474re.html)
+[![HMI](https://img.shields.io/badge/HMI-ESP32--S3-E7352C)](https://www.espressif.com/en/products/socs/esp32-s3)
+[![Bus](https://img.shields.io/badge/CAN-500%20kbps-blue)](docs/CAN_CONTRACT_FINAL.md)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa)](https://github.com/sponsors/florinzgz)
+
+<img src="docs/images/01-hmi-dashboard.jpg" width="85%" alt="Main HMI dashboard: per-wheel traction, steering angle, gear selector and throttle">
+
+</div>
+
+---
+
+## What this is
+
+An electric ride-on car for my son, engineered like real automotive hardware
+instead of a toy. Two microcontrollers share a 500 kbps CAN bus:
+
+| Node | MCU | Role |
+|------|-----|------|
+| Safety authority | STM32G474RE | Motor control, safety enforcement, sensor acquisition, relay sequencing |
+| HMI | ESP32-S3-N16R8 | Touchscreen, audio, obstacle LiDAR, user input |
+
+**The authority model is the core of the design.** The ESP32 is an intent sender
+only — every command it emits is validated, clamped, rate-limited and then accepted
+or rejected by the STM32. The ESP32 never drives an actuator directly.
+
+---
+
+## It runs
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/02-hmi-full-throttle.jpg" alt="Dashboard under full throttle"><br><sub><b>Live traction telemetry</b> — per-wheel load share, motor temperatures, gear, speed and RPM at 100 % throttle.</sub></td>
+<td width="50%"><img src="docs/images/04-steering-calibration.jpg" alt="Steering calibration screen"><br><sub><b>Closed-loop steering</b> — 1200 PPR encoder, reconstructed wheel angle, Z-index drift detection and inductive centre sensor.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/05-ina226-live-diag.jpg" alt="INA226 current sensing diagnostics"><br><sub><b>Current sensing</b> — six INA226 monitors behind a TCA9548A mux, Kelvin-sensed external shunts, live I²C topology check.</sub></td>
+<td width="50%"><img src="docs/images/06-wheel-can-diag.jpg" alt="Wheel speed and CAN diagnostics"><br><sub><b>Wheel speed &amp; CAN</b> — DWT-timed pulse debounce, rejected-pulse counters and live TWAI bus statistics.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/08-dtc-fault-log.jpg" alt="DTC fault log"><br><sub><b>Post-mortem DTC log</b> — flash-backed ring buffer with CRC32, surviving power loss for field diagnosis.</sub></td>
+<td width="50%"><img src="docs/images/10-motion-inhibit-diag.jpg" alt="Motion inhibit diagnostics"><br><sub><b>Motion inhibit reasoning</b> — the vehicle always explains <i>why</i> it will not move, rather than failing silently.</sub></td>
+</tr>
+</table>
+
+---
+
+## Why it might interest you
+
+- **Diagnostics as a first-class feature.** Every subsystem exposes a live screen. Nothing fails silently.
+- **Documented field debugging.** Real problems traced to root cause and written up: EMI from 20 kHz PWM coupling into sensor lines, a CAN transceiver powered at the wrong rail, wheel sensors undercounting from magnet gap.
+- **Real safety architecture.** Seven states, boot-time plausibility gates, coast-first PWM ordering, watchdog, relay sequencing.
+- **Tested.** Host-side suites for STM32 C, EPS integration and ESP32 C++, plus CI that structurally analyses the compiled steering wrapper on every commit.
+
+---
+
+## Support this work
+
+This is unpaid work on hardware I buy myself. Sponsorship goes to parts, not time:
+
+| What | Why |
+|------|-----|
+| Wheel-speed sensor hardware | A rear sensor undercounts ~35 % — magnet and gap redesign |
+| Shielded cable + input filtering | Mitigate 20 kHz PWM coupling into sensor wiring |
+| Precision shunts | Accurate current sensing across the traction chain |
+| Test bench and stands | Run the car suspended for self-diagnostics instead of on the floor |
+
+**[❤ Sponsor this project](https://github.com/sponsors/florinzgz)** — every fix is documented in the open, and the CAN contract, safety architecture and field write-ups are yours to reuse under MIT.
+
+---
+
 
 ## Table of Contents
 
