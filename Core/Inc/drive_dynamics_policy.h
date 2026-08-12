@@ -11,8 +11,17 @@
 #define DRIVE_TCS_RECOVERY_RATE_PER_S     0.25f
 #define DRIVE_TCS_MAX_REDUCTION           0.80f
 
-#define DRIVE_DYNBRAKE_BASE_FACTOR        0.50f
-#define DRIVE_DYNBRAKE_TARGET_FACTOR      0.20f
+/* BLOQUE 1 (dynbrake_store): motor_control.c's dynamic-brake factor is no
+ * longer a fixed compile-time constant — it is the runtime-tunable
+ * dynbrake_store.h::factor_pct (default 0.20, the same value this ratio
+ * used to manufacture post-hoc from the historic 0.50 constant).  BASE and
+ * TARGET are therefore equal so the ratio is neutral (1.0): the store is
+ * now the single source of truth for the factor, and this file no longer
+ * applies a second, hidden scale-down on top of it.  DRIVE_DYNBRAKE_MAX_PCT
+ * remains the absolute field-safety backstop, applied downstream regardless
+ * of the store's own (wider, 0-60) validated range — defense in depth. */
+#define DRIVE_DYNBRAKE_BASE_FACTOR        1.00f
+#define DRIVE_DYNBRAKE_TARGET_FACTOR      1.00f
 #define DRIVE_DYNBRAKE_FACTOR_RATIO       \
     (DRIVE_DYNBRAKE_TARGET_FACTOR / DRIVE_DYNBRAKE_BASE_FACTOR)
 #define DRIVE_DYNBRAKE_MAX_PCT           30.0f

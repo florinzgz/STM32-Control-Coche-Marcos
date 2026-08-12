@@ -25,6 +25,7 @@
 #include "pedal_cal_session.h"
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
+#include "dynbrake_store.h"
 #include "battery_limits_store.h"
 #include "steering_cal_store.h"
 #include "steering_z.h"

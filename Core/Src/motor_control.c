@@ -182,7 +182,7 @@ static inline float sanitize_float(float val, float safe_default)
 #define AXIS_ROT_SLIP_MED        1.15f
 #define AXIS_ROT_WHEEL_COUNT     4U
 
-/* ---- Dynamic braking configuration ----
+/* ---- Dynamic braking configuration (BLOQUE 1 — runtime-tunable) ----
  *
  * When the driver releases the throttle rapidly, the vehicle decelerates
  * smoothly via H-bridge active braking (short-brake mode) instead of
@@ -190,18 +190,28 @@ static inline float sanitize_float(float val, float safe_default)
  * battery (the H-bridge dissipates it as heat in the motor windings).
  *
  * The brake effort is proportional to the throttle decrease rate:
- *   brake_pct = |throttle_rate| * DYNBRAKE_FACTOR
- * clamped to DYNBRAKE_MAX_PCT.
+ *   brake_pct = |throttle_rate| * dynbrake_tuning.factor_pct
+ * clamped to dynbrake_tuning.max_pct.
  *
  * The brake is disabled:
- *   - Below DYNBRAKE_MIN_SPEED_KMH (wheels nearly stationary)
+ *   - Below dynbrake_tuning.min_speed_dkmh (wheels nearly stationary)
  *   - In SYS_STATE_SAFE, SYS_STATE_ERROR, emergency stop, CAN timeout
  *   - When ABS is active (any wheel_scale < 1.0)
- * The brake is reduced in DEGRADED mode (scaled by power limit factor).  */
-#define DYNBRAKE_FACTOR          0.5f    /* Brake %  per  throttle-%/s     */
-#define DYNBRAKE_MAX_PCT         60.0f   /* Maximum dynamic brake (%)      */
-#define DYNBRAKE_MIN_SPEED_KMH   3.0f    /* Disable below this speed       */
-#define DYNBRAKE_RAMP_DOWN_PCT_S 80.0f   /* Max brake release rate (%/s)   */
+ *   - Whenever dynbrake_tuning.enable == 0 or factor_pct == 0 (the
+ *     configured-OFF / "coast" option — the vehicle rolls free on release)
+ * The brake is reduced in DEGRADED mode (scaled by power limit factor).
+ *
+ * Root-cause fix (anti-jerk): dynbrake_pct is now rate-limited toward its
+ * target in BOTH directions — rise via dynbrake_tuning.ramp_up, fall via
+ * dynbrake_tuning.ramp_down — instead of the historic asymmetric logic
+ * (rise ramped, but the moment the computed target stopped exceeding the
+ * current brake effort it hard-snapped straight to the new target with NO
+ * rate limit at all).  That asymmetric hard-snap is what produced the
+ * "frenazo brusco" (abrupt braking) when the throttle-fall rate dropped
+ * abruptly (e.g. pedal reaching rest, or momentarily steadying).  All five
+ * parameters (factor, max %, min speed, ramp down, ramp up) plus the
+ * enable flag are now runtime-tunable via dynbrake_store.h / the ESP32
+ * Engineering menu — see the dynbrake_tuning static below.               */
 
 /* ---- BTS7960 passive brake (design decision) ----
  *
@@ -447,6 +457,13 @@ static uint16_t        prev_output_pwm[4] = {0};  /* Previous PWM per motor
 static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive */
 static float           creep_smooth_pct  = 0.0f;  /* Extra EMA for creep zone*/
 static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
+static float           creep_floor_ramped = 0.0f;  /* Ramped creep-floor value
+                                                     * (BLOQUE 2a) — the dead-
+                                                     * zone floor itself now
+                                                     * slews toward its target
+                                                     * (creep_power or 0) using
+                                                     * drive_tuning.accel_ramp
+                                                     * instead of stepping    */
 static float           axis_rot_scale[AXIS_ROT_WHEEL_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f};
 static uint8_t         axis_rot_update_ctr = 0;
 
@@ -532,6 +549,27 @@ static DriveTuning_t drive_tuning = {
  * applied immediately on the first positive sample, exactly as today.    */
 static uint32_t creep_demand_start_tick = 0;
 static bool     creep_demand_active     = false;
+
+/* ---- Runtime-configurable dynamic braking (BLOQUE 1) ----
+ * Seeded with SOFTER-than-historic defaults (see dynbrake_store.h header
+ * for the full rationale) so a unit with no valid flash slot brakes LESS
+ * aggressively than the pre-existing compile-time constants, never more:
+ *   factor_pct     = 20   (was DYNBRAKE_FACTOR        = 0.50 -> 50)
+ *   max_pct        = 25   (was DYNBRAKE_MAX_PCT       = 60)
+ *   min_speed_dkmh = 30   (== DYNBRAKE_MIN_SPEED_KMH  = 3.0 km/h, unchanged)
+ *   ramp_down      = 80   (== DYNBRAKE_RAMP_DOWN_PCT_S = 80 %/s, unchanged)
+ *   ramp_up        = 60   (NEW — limits the brake APPLICATION rate; closes
+ *                          the jerk the historic asymmetric hard-snap could
+ *                          produce)
+ *   enable         = 1    (dynamic braking stays on by default, as today)  */
+static DynBrakeTuning_t dynbrake_tuning = {
+    .factor_pct     = DYNBRAKE_FACTOR_PCT_DEFAULT,
+    .max_pct        = DYNBRAKE_MAX_PCT_DEFAULT,
+    .min_speed_dkmh = DYNBRAKE_MIN_SPEED_DKMH_DEFAULT,
+    .ramp_down      = DYNBRAKE_RAMP_DOWN_DEFAULT,
+    .ramp_up        = DYNBRAKE_RAMP_UP_DEFAULT,
+    .enable         = DYNBRAKE_ENABLE_DEFAULT,
+};
 
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
@@ -887,6 +925,7 @@ void Traction_Init(void)
     creep_smooth_init = 0;
     creep_demand_active     = false;
     creep_demand_start_tick = 0;
+    creep_floor_ramped      = 0.0f;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
     neutral_ramp_dir   = 1;
@@ -1217,6 +1256,33 @@ void Traction_GetDriveTuning(DriveTuning_t *out)
     if (out) *out = drive_tuning;
 }
 
+/* ---- Runtime-configurable dynamic braking (BLOQUE 1) -------------- */
+
+bool Traction_ValidateDynBrakeTuning(const DynBrakeTuning_t *t)
+{
+    /* Delegate to the single source of truth in dynbrake_store so the
+     * CAN handler, the flash loader and the motor controller all agree.   */
+    return DynBrakeStore_Validate(t);
+}
+
+bool Traction_SetDynBrakeTuning(const DynBrakeTuning_t *t)
+{
+    /* Reject out-of-range sets and KEEP the previous values (FASE 4). */
+    if (!Traction_ValidateDynBrakeTuning(t))
+        return false;
+    /* Small POD; the next Traction_Update() cycle picks up the new values.
+     * dynbrake_pct itself is untouched here — it keeps ramping from its
+     * current value toward whatever new target the updated tuning yields,
+     * so a live SET can never itself cause a step in the applied brake.   */
+    dynbrake_tuning = *t;
+    return true;
+}
+
+void Traction_GetDynBrakeTuning(DynBrakeTuning_t *out)
+{
+    if (out) *out = dynbrake_tuning;
+}
+
 /* ==================================================================
  *  Ackermann Differential Torque Correction
  *
@@ -1504,6 +1570,8 @@ void Traction_Update(void)
         trac_phase        = TRAC_PHASE_BRAKE;
         brake_release_pct = 0.0f;
         creep_smooth_init = 0;
+        creep_demand_active = false;
+        creep_floor_ramped  = 0.0f;
         for (uint8_t j = 0; j < 4; j++) prev_output_pwm[j] = 0;
 
         /* Update sensor readings */
@@ -1527,9 +1595,12 @@ void Traction_Update(void)
     /* --- Gear F/D1/D2/R: Normal traction with dynamic braking ---       */
     float demand = traction_state.demandPct;
 
-    /* ---- Dynamic braking computation ----
+    /* ---- Dynamic braking computation (BLOQUE 1 — runtime-tunable) ----
      * Detect throttle decrease rate and generate proportional braking.
-     * The brake effort ramps progressively and respects existing limits. */
+     * dynbrake_pct is ALWAYS rate-limited toward its target — rising via
+     * dynbrake_tuning.ramp_up, falling via dynbrake_tuning.ramp_down —
+     * eliminating the historic asymmetric hard-snap (see the file-header
+     * comment above for the full root-cause explanation).                */
     uint32_t now_db = HAL_GetTick();
     float dt_db = (float)(now_db - dynbrake_last_tick) / 1000.0f;
     if (dt_db < 0.001f) dt_db = 0.001f;
@@ -1538,70 +1609,82 @@ void Traction_Update(void)
     float demand_rate = (demand - prev_demand_pct) / dt_db;  /* %/s */
     prev_demand_pct = demand;
 
-    /* Determine if dynamic braking should be active */
-    bool dynbrake_allowed = true;
+    float target_brake = 0.0f;
     SystemState_t sys_st = Safety_GetState();
 
-    /* Disable in non-driveable states */
-    if (sys_st == SYS_STATE_SAFE  || sys_st == SYS_STATE_ERROR ||
-        sys_st == SYS_STATE_BOOT  || sys_st == SYS_STATE_STANDBY) {
-        dynbrake_allowed = false;
-    }
+    /* dynbrake_enable=0 or factor_pct=0 fully disables dynamic braking:
+     * the vehicle coasts freely on release (coast option).  dynbrake_pct
+     * is unconditionally forced to 0 every cycle — no other branch below
+     * can reintroduce braking while disabled.                            */
+    if (dynbrake_tuning.enable != 0U && dynbrake_tuning.factor_pct != 0U) {
+        /* Determine if dynamic braking should be active */
+        bool dynbrake_allowed = true;
 
-    /* In LIMP_HOME: limited regen braking (reduced effort) */
-    bool limp_home_braking = (sys_st == SYS_STATE_LIMP_HOME);
-
-    /* Disable if ABS is active on any wheel (wheel_scale < 1.0) */
-    if (dynbrake_allowed) {
-        for (uint8_t i = 0; i < 4; i++) {
-            if (safety_status.wheel_scale[i] < 1.0f) {
-                dynbrake_allowed = false;
-                break;
-            }
-        }
-    }
-
-    /* Disable below minimum speed */
-    if (dynbrake_allowed) {
-        float avg_speed = sanitize_float(
-                            (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                             Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
-        if (avg_speed < DYNBRAKE_MIN_SPEED_KMH) {
+        /* Disable in non-driveable states */
+        if (sys_st == SYS_STATE_SAFE  || sys_st == SYS_STATE_ERROR ||
+            sys_st == SYS_STATE_BOOT  || sys_st == SYS_STATE_STANDBY) {
             dynbrake_allowed = false;
         }
-    }
 
-    if (dynbrake_allowed && demand_rate < 0.0f) {
-        /* Throttle decreasing — apply proportional brake */
-        float target_brake = fabsf(demand_rate) * DYNBRAKE_FACTOR;
-        if (target_brake > DYNBRAKE_MAX_PCT) target_brake = DYNBRAKE_MAX_PCT;
+        /* In LIMP_HOME: limited regen braking (reduced effort) */
+        bool limp_home_braking = (sys_st == SYS_STATE_LIMP_HOME);
 
-        /* Limit in DEGRADED mode — uses per-level power limit (Phase 12) */
-        if (sys_st == SYS_STATE_DEGRADED) {
-            target_brake *= Safety_GetPowerLimitFactor();
+        /* Disable if ABS is active on any wheel (wheel_scale < 1.0) */
+        if (dynbrake_allowed) {
+            for (uint8_t i = 0; i < 4; i++) {
+                if (safety_status.wheel_scale[i] < 1.0f) {
+                    dynbrake_allowed = false;
+                    break;
+                }
+            }
         }
 
-        /* Limited regen braking in LIMP_HOME — cap at LIMP_HOME limit */
-        if (limp_home_braking) {
-            target_brake *= LIMP_HOME_TORQUE_LIMIT_FACTOR;
+        /* Disable below minimum speed (min_speed_dkmh is x10 -> km/h) */
+        if (dynbrake_allowed) {
+            float avg_speed = sanitize_float(
+                                (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                 Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
+            if (avg_speed < (float)dynbrake_tuning.min_speed_dkmh * 0.1f) {
+                dynbrake_allowed = false;
+            }
         }
 
-        /* Progressive ramp toward target (never jump instantly) */
+        if (dynbrake_allowed && demand_rate < 0.0f) {
+            /* Throttle decreasing — compute the proportional brake target.
+             * factor_pct is x100 -> 0.00-1.00 brake % per throttle-%/s.   */
+            target_brake = fabsf(demand_rate) * ((float)dynbrake_tuning.factor_pct * 0.01f);
+            float max_pct = (float)dynbrake_tuning.max_pct;
+            if (target_brake > max_pct) target_brake = max_pct;
+
+            /* Limit in DEGRADED mode — uses per-level power limit (Phase 12) */
+            if (sys_st == SYS_STATE_DEGRADED) {
+                target_brake *= Safety_GetPowerLimitFactor();
+            }
+
+            /* Limited regen braking in LIMP_HOME — cap at LIMP_HOME limit */
+            if (limp_home_braking) {
+                target_brake *= LIMP_HOME_TORQUE_LIMIT_FACTOR;
+            }
+        }
+        /* else target_brake stays 0 — braking not allowed, or the
+         * throttle is steady/rising; dynbrake_pct ramps back down toward
+         * 0 via ramp_down below, exactly like any other lower target.    */
+
+        /* Single unified slew limiter — always rate-limited toward the
+         * target, in BOTH directions (the anti-jerk fix: BLOQUE 1).      */
         if (target_brake > dynbrake_pct) {
-            float brake_ramp = PEDAL_RAMP_DOWN_PCT_S * dt_db;
+            float rise = (float)dynbrake_tuning.ramp_up * dt_db;
             float diff_b = target_brake - dynbrake_pct;
-            if (diff_b > brake_ramp) diff_b = brake_ramp;
+            if (diff_b > rise) diff_b = rise;
             dynbrake_pct += diff_b;
-        } else {
-            dynbrake_pct = target_brake;
+        } else if (target_brake < dynbrake_pct) {
+            float fall = (float)dynbrake_tuning.ramp_down * dt_db;
+            float diff_b = dynbrake_pct - target_brake;
+            if (diff_b > fall) diff_b = fall;
+            dynbrake_pct -= diff_b;
         }
     } else {
-        /* No braking needed — ramp down smoothly */
-        if (dynbrake_pct > 0.0f) {
-            float release = DYNBRAKE_RAMP_DOWN_PCT_S * dt_db;
-            dynbrake_pct -= release;
-            if (dynbrake_pct < 0.0f) dynbrake_pct = 0.0f;
-        }
+        dynbrake_pct = 0.0f;
     }
 
     /* When dynamic braking is active and throttle demand is near zero,
@@ -1742,7 +1825,7 @@ void Traction_Update(void)
     /* ---- B) Motor dead-zone compensation (creep) ----
      * When positive traction demand is above the drive-enter threshold,
      * remap it so the motor jumps over its physical dead zone.
-     * Linear mapping: [0, 100] -> [creep_floor, 100].
+     * Linear mapping: [0, 100] -> [creep_floor_ramped, 100].
      * Dynamic braking (negative demand) is not remapped.
      *
      * Runtime-configurable (FASE 2):
@@ -1750,8 +1833,16 @@ void Traction_Update(void)
      *   - creep_power is the floor PWM% (default 8 == MOTOR_DEADZONE_PCT).
      *   - creep_delay (ms) suppresses the floor until the demand has been
      *     continuously positive for that long; the timer below tracks it.
-     * Defaults (enable=1, power=8, delay=0) reproduce the historic
-     * MOTOR_DEADZONE_PCT behaviour exactly (floor applied immediately).    */
+     *
+     * BLOQUE 2a — ramped entry (no step): the floor no longer jumps straight
+     * to its target the instant traction activates / the delay elapses.
+     * creep_floor_ramped slews toward creep_floor_target at the SAME rate
+     * as the configured acceleration ramp (drive_tuning.accel_ramp), reusing
+     * dt_db (same 100 Hz cycle interval computed for dynamic braking above)
+     * so no separate tick-tracking state is needed.  Defaults (enable=1,
+     * power=8, delay=0, accel_ramp=50 %/s) reach the historic
+     * MOTOR_DEADZONE_PCT floor in ~160 ms instead of a single 10 ms step —
+     * imperceptible in normal driving, but never an instant jump.          */
     if (effective_demand > 0.0f) {
         uint32_t now_creep = HAL_GetTick();
         if (!creep_demand_active) {
@@ -1761,17 +1852,35 @@ void Traction_Update(void)
         bool delay_elapsed =
             ((uint32_t)(now_creep - creep_demand_start_tick) >=
              (uint32_t)drive_tuning.creep_delay);
-        float creep_floor = 0.0f;
+        float creep_floor_target = 0.0f;
         if (drive_tuning.creep_enable && delay_elapsed) {
-            creep_floor = (float)drive_tuning.creep_power;
+            creep_floor_target = (float)drive_tuning.creep_power;
         }
-        float mapped = creep_floor
-                     + effective_demand * (100.0f - creep_floor) / 100.0f;
+        float floor_step = drive_tuning.accel_ramp * dt_db;
+        float floor_diff = creep_floor_target - creep_floor_ramped;
+        if (floor_diff > floor_step) {
+            floor_diff = floor_step;
+        } else if (floor_diff < -floor_step) {
+            floor_diff = -floor_step;
+        }
+        creep_floor_ramped += floor_diff;
+
+        float mapped = creep_floor_ramped
+                     + effective_demand * (100.0f - creep_floor_ramped) / 100.0f;
         base_pwm = (uint16_t)(mapped * PWM_PERIOD / 100.0f);
     } else {
         creep_demand_active = false;
+        /* Ramp the floor back toward 0 too (symmetrical, never a step),
+         * so the NEXT positive-demand entry never starts from a stale
+         * partially-ramped value that could itself look like a jump.      */
+        if (creep_floor_ramped > 0.0f) {
+            float floor_step = drive_tuning.accel_ramp * dt_db;
+            creep_floor_ramped -= floor_step;
+            if (creep_floor_ramped < 0.0f) creep_floor_ramped = 0.0f;
+        }
         base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
     }
+
 
     /* ---- F) Low-speed stability: extra smoothing in creep zone ----
      * When demand is low, ADC quantisation and ramp stepping cause
@@ -2190,6 +2299,7 @@ void Traction_EmergencyStop(void)
     creep_smooth_init = 0;
     creep_demand_active     = false;
     creep_demand_start_tick = 0;
+    creep_floor_ramped      = 0.0f;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
     neutral_ramp_dir   = 1;

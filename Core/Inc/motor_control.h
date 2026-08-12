@@ -8,6 +8,7 @@ extern "C" {
 #include "main.h"
 #include "eps_params.h"
 #include "drive_tuning_store.h"
+#include "dynbrake_store.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -106,6 +107,19 @@ void Traction_GetGearResponse(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct);
 bool Traction_ValidateDriveTuning(const DriveTuning_t *t);
 bool Traction_SetDriveTuning(const DriveTuning_t *t);
 void Traction_GetDriveTuning(DriveTuning_t *out);
+
+/* ---- Runtime-configurable dynamic braking (BLOQUE 1) ----
+ * Engine-braking (opposing torque proportional to the fall rate of the
+ * demand) becomes fully runtime-tunable, seeded with SOFTER-than-historic
+ * defaults: Factor=0.20, MaxPct=25 %, MinSpeed=3.0 km/h, RampDown=80 %/s,
+ * RampUp=60 %/s (NEW — limits the brake APPLICATION rate, closing the jerk
+ * that the historic asymmetric hard-snap-down logic could produce), and
+ * Enable=1.  Factor==0 or Enable==0 fully disables dynamic braking (the
+ * vehicle coasts freely on release).  Ranges/defaults live in
+ * dynbrake_store.h (single source of truth).                             */
+bool Traction_ValidateDynBrakeTuning(const DynBrakeTuning_t *t);
+bool Traction_SetDynBrakeTuning(const DynBrakeTuning_t *t);
+void Traction_GetDynBrakeTuning(DynBrakeTuning_t *out);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
 

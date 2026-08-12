@@ -58,9 +58,13 @@ int main(void)
         DRIVE_TCS_RECOVERY_RATE_PER_S, DRIVE_TCS_MAX_REDUCTION);
     assert(nearf(reduction, 0.41f, 0.0001f));
 
-    /* Dynamic braking is equivalent to factor 0.2 and capped at 30 %. */
-    assert(nearf(DriveDynamics_DynbrakeLimitedPct(50.0f), 20.0f, 0.0001f));
-    assert(nearf(DriveDynamics_DynbrakeLimitedPct(60.0f), 24.0f, 0.0001f));
+    /* BLOQUE 1 (dynbrake_store): motor_control.c's own runtime-tunable
+     * factor_pct is now the single source of truth for the brake-effort
+     * factor, so this ratio is neutral (1.0) — only the 30 % absolute
+     * field-safety backstop still applies here. */
+    assert(nearf(DriveDynamics_DynbrakeLimitedPct(20.0f), 20.0f, 0.0001f));
+    assert(nearf(DriveDynamics_DynbrakeLimitedPct(30.0f), 30.0f, 0.0001f));
+    assert(nearf(DriveDynamics_DynbrakeLimitedPct(60.0f), 30.0f, 0.0001f));
     assert(nearf(DriveDynamics_DynbrakeLimitedPct(100.0f), 30.0f, 0.0001f));
     assert(nearf(DriveDynamics_DynbrakeLimitedPct(NAN), 0.0f, 0.0001f));
 

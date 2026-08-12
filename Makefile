@@ -48,6 +48,7 @@ C_SOURCES = \
   $(CORE_SRC)/pedal_cal_session.c \
   $(CORE_SRC)/gear_limits_store.c \
   $(CORE_SRC)/drive_tuning_store.c \
+  $(CORE_SRC)/dynbrake_store.c \
   $(CORE_SRC)/battery_limits_store.c \
   $(CORE_SRC)/tcs_tuning_store.c \
   $(CORE_SRC)/geometry_store.c \

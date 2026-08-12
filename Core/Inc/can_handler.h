@@ -185,6 +185,10 @@ extern "C" {
                                          //   results (Hito 2, PR #445).  See wheel_equality_frame.h
                                          //   for the full byte layout (WheelEqualityFrame_t /
                                          //   *_Pack/_Unpack).
+#define CAN_ID_DIAG_DYNBRAKE        0x31E // STM32 → ESP32 (on-demand, after QUERY) dynamic-braking
+                                         //   (engine-braking on pedal release) tuning field-stream
+                                         //   telemetry.  See the 0x31E frame layout comment in
+                                         //   can_handler.c (mirrors 0x310 drive-tuning exactly).
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -193,6 +197,7 @@ extern "C" {
 #define SERVICE_ACTION_DISABLE             0x00
 #define SERVICE_ACTION_ENABLE              0x01
 #define SERVICE_ACTION_RELAY_OVERRIDE      0xE0  /* Engineering relay override (byte1=mask) */
+#define SERVICE_ACTION_DYNBRAKE            0xE1  /* Dynamic-braking (engine-brake) tuning (byte1 = sub-opcode) → 0x31E */
 #define SERVICE_ACTION_RESET_STEERING_PID  0xF0
 #define SERVICE_ACTION_RESET_WHEEL_SENSORS 0xF1
 #define SERVICE_ACTION_RESET_INA226_SHUNTS 0xF2
@@ -373,6 +378,40 @@ extern "C" {
 #define BATT_LIM_FIELD_RECOVERY   0x04U
 #define BATT_LIM_FIELD_FILTER     0x05U
 #define BATT_LIM_FIELD_COUNT      5U
+
+/* ---- Dynamic-braking (engine-brake) sub-opcodes (byte1 when byte0 == 0xE1) --
+ * Values are plain uint16 little-endian in byte2 (LSB) + byte3 (MSB), carried
+ * in the store's native units (see dynbrake_store.h).  SET_* stages a
+ * RAM-only "pending" set; nothing is applied or persisted until SAVE.  All
+ * SET/SAVE/RESET require STANDBY; QUERY is read-only and exempt.
+ *   0x01 SET_FACTOR      Stage pending brake factor   (x100, 0-100)
+ *   0x02 SET_MAX_PCT     Stage pending max brake %    (0-60)
+ *   0x03 SET_MIN_SPEED   Stage pending min speed      (x10 km/h, 0-100)
+ *   0x04 SET_RAMP_DOWN   Stage pending release ramp   (%/s, 20-200)
+ *   0x05 SET_RAMP_UP     Stage pending application ramp (%/s, 20-200)
+ *   0x06 SET_ENABLE      Stage pending enable         (0/1)
+ *   0x07 SAVE            Validate pending set + persist to flash + apply
+ *   0x08 RESET_DEFAULTS  Restore + persist compile-time defaults
+ *   0x09 QUERY           Request a 1 s burst of 0x31E telemetry at 10 Hz     */
+#define DYNB_OP_SET_FACTOR       0x01U
+#define DYNB_OP_SET_MAX_PCT      0x02U
+#define DYNB_OP_SET_MIN_SPEED    0x03U
+#define DYNB_OP_SET_RAMP_DOWN    0x04U
+#define DYNB_OP_SET_RAMP_UP      0x05U
+#define DYNB_OP_SET_ENABLE       0x06U
+#define DYNB_OP_SAVE             0x07U
+#define DYNB_OP_RESET_DEFAULTS   0x08U
+#define DYNB_OP_QUERY            0x09U
+
+/* Dynamic-braking telemetry (0x31E) field ids — one frame per field, see
+ * the 0x31E frame layout comment in can_handler.c (mirrors 0x310).        */
+#define DYNB_FIELD_FACTOR        0x01U
+#define DYNB_FIELD_MAX_PCT       0x02U
+#define DYNB_FIELD_MIN_SPEED     0x03U
+#define DYNB_FIELD_RAMP_DOWN     0x04U
+#define DYNB_FIELD_RAMP_UP       0x05U
+#define DYNB_FIELD_ENABLE        0x06U
+#define DYNB_FIELD_COUNT         6U
 
 /* ---- SERVICE_DIAG self-test sub-opcodes (byte1 when byte0 == 0xFC) ----
  * Drives the single ServiceDiagSession FSM (service_diag_session.c, Bloque A).
@@ -603,6 +642,11 @@ void CAN_DriveTuningBurstUpdate(void);
  * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
  * impact on backward-compatible nodes that ignore 0x311.                */
 void CAN_BatteryLimitsBurstUpdate(void);
+
+/* Drives the on-demand 0x31E dynamic-braking (engine-brake) tuning telemetry
+ * burst.  Call once per 100 ms tick.  No-op while no burst is in progress;
+ * has zero impact on backward-compatible nodes that ignore 0x31E.        */
+void CAN_DynBrakeBurstUpdate(void);
 
 /* One-time init for the ServiceDiagSession FSM wiring (Bloque A) — resets
  * the session to IDLE and its transition-tracking statics.  Call once from
