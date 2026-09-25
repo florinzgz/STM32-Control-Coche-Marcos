@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       provider:
-        description: 'TTS provider (elevenlabs, openai, espeak, gtts)'
+        description: 'Proveedor TTS'
         required: false
         default: 'elevenlabs'
+        type: choice
+        options:
+          - elevenlabs
 
 permissions:
   contents: read
@@ -40,7 +43,7 @@ jobs:
           TTS_PROVIDER: ${{ github.event.inputs.provider }}
         working-directory: tools/audio_pack
         run: |
-          python3 generar_pack_oem.py --provider ${{ github.event.inputs.provider }}
+          python3 generar_pack_oem.py --provider "${{ github.event.inputs.provider }}"
 
       - name: Upload audio pack as artifact
         uses: actions/upload-artifact@v6
