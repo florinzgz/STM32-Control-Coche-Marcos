@@ -2,14 +2,6 @@ name: Generate OEM Audio Pack (ElevenLabs)
 
 on:
   workflow_dispatch:
-    inputs:
-      provider:
-        description: 'Proveedor TTS'
-        required: false
-        default: 'elevenlabs'
-        type: choice
-        options:
-          - elevenlabs
 
 permissions:
   contents: read
@@ -40,15 +32,15 @@ jobs:
       - name: Generate audio pack
         env:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          TTS_PROVIDER: ${{ github.event.inputs.provider }}
+          TTS_PROVIDER: elevenlabs
         working-directory: tools/audio_pack
         run: |
-          python3 generar_pack_oem.py --provider "${{ github.event.inputs.provider }}"
+          python3 generar_pack_oem.py --provider elevenlabs --only 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 --no-cache
 
       - name: Upload audio pack as artifact
         uses: actions/upload-artifact@v6
         with:
-          name: oem-audio-pack-${{ github.event.inputs.provider }}
+          name: audios-0069-0090-elevenlabs
           path: tools/audio_pack/output_sd/
           retention-days: 30
 
@@ -56,7 +48,7 @@ jobs:
         run: |
           echo "## 🎵 Audio Pack Generated" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Provider: **${{ github.event.inputs.provider }}**" >> $GITHUB_STEP_SUMMARY
+          echo "Provider: **elevenlabs**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Files generated:" >> $GITHUB_STEP_SUMMARY
           ls -la tools/audio_pack/output_sd/ | tail -n +2 >> $GITHUB_STEP_SUMMARY
