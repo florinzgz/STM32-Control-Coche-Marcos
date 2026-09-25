@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       provider:
-        description: 'TTS provider: elevenlabs, openai, espeak o gtts (solo una palabra)'
+        description: 'Proveedor TTS'
         required: false
         default: 'elevenlabs'
+        type: choice
+        options:
+          - elevenlabs
 
 permissions:
   contents: read
