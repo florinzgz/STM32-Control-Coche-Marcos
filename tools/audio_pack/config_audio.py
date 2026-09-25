@@ -112,7 +112,7 @@ CACHE_DIR: str = ".cache_tts"   # TTS crudo antes de procesar (re-uso entre runs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. CATÁLOGO DE PISTAS (1..68)
+# 7. CATÁLOGO DE PISTAS (1..90)
 # ─────────────────────────────────────────────────────────────────────────────
 # Debe coincidir 1:1 con esp32/src/audio_manager.h enum Sound.
 #
@@ -239,6 +239,28 @@ TRACKS: Dict[int, Dict[str, str]] = {
 
     # Beep confirmación (68)
     68: {"kind": "beep",  "name": "BEEP",                 "text": ""},
+    69: {"kind": "tts", "name": "RC_CONNECTED", "text": "¡Mando conectado! Preparados para la aventura."},
+    70: {"kind": "tts", "name": "RC_DISCONNECTED", "text": "Mando desconectado. Volvemos a conducir normalmente."},
+    71: {"kind": "tts", "name": "TAKEOVER_ON", "text": "¡Control remoto activado! Yo te echo una mano."},
+    72: {"kind": "tts", "name": "TAKEOVER_OFF", "text": "Control devuelto al conductor. ¡Todo tuyo!"},
+    73: {"kind": "tts", "name": "RC_SIGNAL_LOST", "text": "Atención. He perdido la señal del mando."},
+    74: {"kind": "tts", "name": "AUTOTRACK_RECORD", "text": "¡Vamos de exploración! Estoy aprendiendo el camino."},
+    75: {"kind": "tts", "name": "AUTOTRACK_RECORDING", "text": "Sigo aprendiendo la ruta. ¡Vamos muy bien!"},
+    76: {"kind": "tts", "name": "AUTOTRACK_SAVED", "text": "¡Ruta aprendida! Me acordaré de este camino."},
+    77: {"kind": "tts", "name": "AUTOTRACK_PLAYBACK", "text": "¡Allá vamos! Siguiendo la ruta aprendida."},
+    78: {"kind": "tts", "name": "CURVE_AHEAD", "text": "¡Curva a la vista! Bajamos un poquito la velocidad."},
+    79: {"kind": "tts", "name": "CURVE_EXIT", "text": "Curva superada. ¡Seguimos nuestra aventura!"},
+    80: {"kind": "tts", "name": "ROUTE_COMPLETE", "text": "¡Misión cumplida! Hemos llegado al final de la ruta."},
+    81: {"kind": "tts", "name": "AUTOTRACK_CANCELLED", "text": "Ruta automática cancelada. Tú vuelves a mandar."},
+    82: {"kind": "tts", "name": "OBSTACLE", "text": "¡Ojo! Hay algo delante. Vamos con cuidado."},
+    83: {"kind": "tts", "name": "OBSTACLE_CLEAR", "text": "Camino despejado. ¡Podemos continuar!"},
+    84: {"kind": "tts", "name": "SYSTEM_READY", "text": "Todo preparado. ¡Que empiece la aventura!"},
+    85: {"kind": "tts", "name": "VEHICLE_PARKED", "text": "Vehículo aparcado. ¡Buen trabajo, piloto!"},
+    86: {"kind": "tts", "name": "BATTERY_CHARGED", "text": "Batería cargada. ¡Tenemos energía para la aventura!"},
+    87: {"kind": "tts", "name": "CAN_RECOVERED", "text": "Comunicación recuperada. Todo vuelve a estar en orden."},
+    88: {"kind": "tts", "name": "SENSOR_RECOVERED", "text": "Sensor recuperado. ¡Ya puedo verlo otra vez!"},
+    89: {"kind": "tts", "name": "SAFETY_STOP", "text": "Atención. Vehículo detenido por seguridad."},
+    90: {"kind": "tts", "name": "STATUS_OK", "text": "Comprobación terminada. Todo correcto, piloto."},
 }
 
 
@@ -263,5 +285,5 @@ MOTIVATIONAL_PHRASES = (
 
 
 def expected_track_count() -> int:
-    """Devuelve el número total de pistas esperadas en la SD (68)."""
+    """Devuelve el número total de pistas esperadas en la SD (90)."""
     return len(TRACKS)
